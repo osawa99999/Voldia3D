@@ -1,0 +1,4119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voldia 配置モード（開発中） v0021</title>
+<style>
+  body { margin: 0; overflow: hidden; background-color: #3a4045; color: #fff; font-family: 'Segoe UI', sans-serif; }
+
+  /* Voldia版: 左側UIパネル（PLAN, 戻るボタン, 使い方） */
+  #left-panel {
+    position: absolute; top: 15px; left: 15px; z-index: 10;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+
+  /* 戻るボタン: Voldia本体側の#btn-calc-back(◀ 戻る)と配色・体裁を統一。
+     本体では赤(#c0392b系)は「キャンセル/削除」用の色として使われているため、
+     単なる画面遷移である「戻る」に赤を使うと本体の配色規約と衝突する。
+     本体に合わせてグレー基調(#444/#666/#ccc)に変更。 */
+  #voldia-back-btn {
+    background: #444; color: #ccc; border: 1px solid #666; border-radius: 4px;
+    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
+    width: 100%; box-sizing: border-box; text-align: center;
+  }
+  #voldia-back-btn:hover { background: #555; }
+  #voldia-save-btn {
+    background: #2e7d32; color: #fff; border: 1px solid #4caf50; border-radius: 4px;
+    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
+    box-sizing: border-box; white-space: nowrap;
+  }
+  #voldia-save-btn:hover { background: #388e3c; }
+  #voldia-save-btn:disabled { opacity: 0.6; cursor: default; }
+  #voldia-print-btn {
+    background: #37474f; color: #cfd8dc; border: 1px solid #607d8b; border-radius: 4px;
+    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
+    margin-top: 6px;
+  }
+  #voldia-print-btn:hover { background: #455a64; }
+  #voldia-print-btn:disabled { opacity: 0.6; cursor: default; }
+
+  /* 「使い方」ボタン周り */
+  /* r062: マウスオーバー表示→クリックで開閉するボタン式に変更。
+     表示中は#help-block-overlayが画面全体(地形3Dビュー含む)を覆い、
+     作図・カメラ操作を停止する。ツールチップ自体はオーバーレイより
+     高いz-indexに置き、中の「地形(GLB)を手動読込」ボタンは操作可能なままにする。
+     画面の他の場所(オーバーレイ部分)をクリックすると閉じる。 */
+  #help-btn-wrap { position: relative; }
+  #help-btn {
+    background: rgba(20, 30, 40, 0.9); color: #a5d6a7; border: 1px solid #4caf50; border-radius: 6px;
+    padding: 7px 14px; font-size: 0.85em; font-weight: bold; cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  }
+  #help-tooltip {
+    display: none; margin-top: 6px; width: 330px; position: relative; z-index: 251;
+    background: rgba(20, 30, 40, 0.95); padding: 15px; border-left: 5px solid #4caf50; border-radius: 6px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-size: 0.85em; color: #ccc; line-height: 1.6;
+  }
+  #help-tooltip.show { display: block; }
+  #help-block-overlay {
+    display: none; position: fixed; inset: 0; z-index: 250;
+    background: rgba(0,0,0,.45); cursor: not-allowed;
+  }
+  #help-block-overlay.show { display: block; }
+
+  /* Voldia版: 保存不可の常設バナー */
+  .load-btn {
+    display: inline-block; margin-top: 10px; background: #2e7d32; color: #fff; pointer-events: auto;
+    border: 1px solid #4caf50; border-radius: 4px; padding: 6px 12px;
+    font-size: 0.85em; cursor: pointer; font-weight: bold; transition: background 0.2s;
+  }
+  .load-btn:hover { background: #388e3c; }
+
+  #ui-container {
+    position: absolute; top: 15px; right: 15px; z-index: 10;
+    width: 260px; display: flex; flex-direction: column; gap: 10px;
+    max-height: 95vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  }
+  
+  #radar-wrapper {
+    background: rgba(10, 20, 30, 0.9); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  }
+  #radar-title { font-size: 0.8em; color: #81c784; margin-bottom: 5px; text-align: center; font-weight: bold; letter-spacing: 1px;}
+  #radar-canvas {
+    width: 216px; height: 216px; background: #0b1116; border: 1px solid #333; cursor: crosshair;
+    background-image: linear-gradient(#1a2a1a 1px, transparent 1px), linear-gradient(90deg, #1a2a1a 1px, transparent 1px);
+    background-size: 21.6px 21.6px;
+    margin: 0 auto; display: block;
+  }
+
+  #palette {
+    background: rgba(20, 30, 40, 0.9); border: 1px solid #444; border-radius: 8px;
+    padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  }
+  .pal-title { font-size: 0.75em; color: #aaa; margin-bottom: 6px; margin-top: 6px; border-bottom: 1px solid #444; padding-bottom: 3px; }
+  .pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .pal-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #cde; border-radius: 4px;
+    padding: 6px; font-size: 0.75em; cursor: pointer; transition: all 0.2s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pal-btn:hover { background: #3a5a7a; }
+  .pal-btn.active { background: #4caf50; border-color: #81c784; color: #fff; font-weight: bold; }
+
+  /* スクロールバー装飾 */
+  #ui-container::-webkit-scrollbar { width: 6px; }
+  #ui-container::-webkit-scrollbar-thumb { background: #4caf50; border-radius: 3px; }
+
+  #controls {
+    position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7); padding: 8px 15px; border-radius: 20px; font-size: 0.8em; color: #ccc;
+    pointer-events: none; border: 1px solid #555;
+  }
+  #controls span { color: #4caf50; font-weight: bold; }
+
+  #loading {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.8); z-index: 9999;
+    display: none; align-items: center; justify-content: center; font-size: 1.5em; color: #4caf50; font-weight: bold;
+  }
+
+  #toast {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    background: rgba(231, 76, 60, 0.9); border: 2px solid #c0392b; border-radius: 8px;
+    padding: 10px 20px; color: #fff; font-weight: bold; font-size: 1em;
+    pointer-events: none; z-index: 1000; opacity: 0; transition: opacity 0.3s;
+  }
+
+  /* 配置モード案内メッセージ */
+  #placement-mode-msg {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(46, 125, 50, 0.9); border: 2px solid #4caf50; border-radius: 30px;
+    padding: 12px 30px; color: #fff; font-weight: bold; font-size: 1.1em;
+    pointer-events: auto; z-index: 1000; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    text-align: center; line-height: 1.4;
+  }
+  #placement-mode-msg span {
+    font-size: 0.8em; color: #c8e6c9; font-weight: normal; pointer-events: none;
+  }
+
+  /* カラーピッカー (線用) */
+  #line-color-picker {
+    display: none; justify-content: center; gap: 10px; margin-top: 10px;
+  }
+  .color-btn {
+    width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; transition: transform 0.2s;
+  }
+  .color-btn:hover { transform: scale(1.2); }
+  .color-btn.active { outline: 3px solid #4caf50; outline-offset: 2px; }
+  
+  /* 線引き終了ボタン */
+  #finish-line-btn {
+    display: none; margin-top: 15px; background: #c0392b; border: 2px solid #e74c3c;
+    color: white; padding: 6px 20px; border-radius: 20px; cursor: pointer;
+    font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    transition: all 0.2s;
+  }
+  #finish-line-btn:hover { background: #e74c3c; transform: scale(1.05); }
+
+  /* テンキーUI */
+  #numpad-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 220px;
+  }
+  #numpad-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 5px; text-align: center; font-weight: bold; }
+  #numpad-warning { font-size: 0.7em; color: #ffab91; margin-bottom: 10px; text-align: center; line-height: 1.3; }
+  #numpad-display {
+    background: #0b1116; color: #4caf50; font-size: 1.8em; text-align: right; padding: 10px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #333;
+  }
+  .numpad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .numpad-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.2em; padding: 12px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
+  }
+  .numpad-btn:hover { background: #3a5a7a; }
+  .numpad-ok { background: #2e7d32; border-color: #4caf50; font-weight: bold; }
+  .numpad-ok:hover { background: #388e3c; }
+  #numpad-cancel {
+    width: 100%; background: #c0392b; border: 1px solid #e74c3c; color: #fff; margin-top: 10px; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold;
+  }
+  #numpad-cancel:hover { background: #e74c3c; }
+
+  /* カスタムボックス入力UI */
+  #box-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 260px;
+  }
+  #box-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  .box-inputs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
+  .box-input-group {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.9em; transition: 0.2s;
+  }
+  .box-input-group.active { border-color: #4caf50; color: #4caf50; font-weight: bold; }
+  .box-val { font-size: 1.2em; color: #fff; width: 60px; text-align: right; }
+  
+  .box-colors { display: flex; justify-content: space-between; margin-bottom: 15px; }
+  .b-color-btn {
+    width: 24px; height: 24px; border-radius: 4px; border: 2px solid #333; cursor: pointer; transition: transform 0.2s;
+  }
+  .b-color-btn:hover { transform: scale(1.1); }
+  .b-color-btn.active { border-color: #fff; outline: 2px solid #4caf50; outline-offset: 1px; }
+  
+  .box-numpad-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.1em; padding: 8px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
+  }
+  .box-numpad-btn:hover { background: #3a5a7a; }
+
+  /* テキスト入力UI */
+  #text-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 300px;
+  }
+  #text-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 10px; text-align: center; font-weight: bold; }
+  #text-input-area {
+    width: 100%; height: 100px; background: #0b1116; color: #fff; border: 1px solid #333; border-radius: 4px;
+    padding: 8px; font-size: 1em; resize: none; outline: none; font-family: 'Segoe UI', sans-serif; box-sizing: border-box;
+  }
+  .text-ui-btns { display: flex; gap: 10px; margin-top: 15px; }
+  .text-ui-btn { flex: 1; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; border: none; color: #fff; }
+  #text-btn-ok { background: #2e7d32; } #text-btn-ok:hover { background: #388e3c; }
+  #text-btn-cancel { background: #c0392b; } #text-btn-cancel:hover { background: #e74c3c; }
+
+  /* カスタム確認ダイアログ */
+  /* r062: 元は#custom-confirm-box(IDセレクタ)だったが、構台削除確認ダイアログ側は
+     class="custom-confirm-box"で参照していたためCSSが一切当たっておらず、
+     見た目が「線を削除しますか？」ダイアログと異なって見えていた(根本原因)。
+     クラスセレクタに統一し、両方の確認ダイアログが同じ見た目になるようにした。 */
+  #custom-confirm-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.6); z-index: 2000; display: none;
+    align-items: center; justify-content: center;
+  }
+  .custom-confirm-box {
+    background: #2a3a4a; border: 2px solid #e74c3c; border-radius: 8px;
+    padding: 20px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    text-align: center; min-width: 250px;
+  }
+  #custom-confirm-msg {
+    font-size: 1.1em; color: #fff; margin-bottom: 20px; font-weight: bold;
+  }
+  .custom-confirm-btns {
+    display: flex; justify-content: center; gap: 15px;
+  }
+  .custom-confirm-btn {
+    padding: 8px 20px; font-size: 1em; border-radius: 4px; cursor: pointer; font-weight: bold; border: none;
+  }
+  #custom-confirm-yes { background: #e74c3c; color: #fff; }
+  #custom-confirm-yes:hover { background: #c0392b; }
+  #custom-confirm-no { background: #555; color: #fff; }
+  #custom-confirm-no:hover { background: #333; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+<!-- 新6(2026-08-24 引継ぎ19回目マスター指示): 配置モードにもノースアロー(2D)を
+     設置。本体側と同じ「測点が1つ以上ある時だけ表示」条件で、カメラの水平回転
+     (方位)に合わせてアイコンを回転させる。実際の回転更新はanimate()内、
+     表示/非表示切替はupdateCompassVisibility()参照。 -->
+<div id="placement-compass-wrap" style="position:fixed;left:16px;bottom:16px;z-index:500;display:none;
+     width:56px;height:56px;border-radius:50%;background:rgba(20,20,20,.72);
+     border:2px solid #64b5f6;box-shadow:0 2px 8px rgba(0,0,0,.5);pointer-events:none;">
+  <div id="placement-compass-rotor" style="width:100%;height:100%;transform-origin:50% 50%;transform:rotate(0deg);">
+    <svg viewBox="0 0 56 56" width="56" height="56">
+      <polygon points="28,8 22,30 28,25 34,30" fill="#e8391f"/>
+      <polygon points="28,48 22,30 28,33 34,30" fill="#cfd8dc"/>
+      <text x="28" y="19" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">N</text>
+    </svg>
+  </div>
+</div>
+
+<div id="left-panel">
+  <button id="voldia-back-btn" style="width:100%;box-sizing:border-box;">◀ Voldiaに戻る</button>
+  <button id="voldia-save-btn" style="width:100%;box-sizing:border-box;">📤 Vold出力</button>
+  <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷(A3 PDF)</button>
+  <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
+
+  <!-- r064: PLANビュー(レーダー)は表示から除外。内部の描画/クリック処理には
+       他の箇所からまだ参照があるため、要素自体は残しdisplay:noneのみで隠す
+       (丸ごと削除すると radarCtx 参照エラーで壊れる箇所が多数あるため安全策)。 -->
+  <div id="radar-wrapper" style="display:none;">
+    <div id="radar-title">PLAN</div>
+    <canvas id="radar-canvas" width="216" height="216"></canvas>
+  </div>
+
+  <div id="help-btn-wrap">
+    <div id="help-block-overlay"></div>
+    <div id="help-btn">❔ 使い方</div>
+    <div id="help-tooltip">
+      <h1 style="margin:0 0 8px;font-size:1.05em;color:#a5d6a7;">🏗️ Voldia 配置モード</h1>
+      <p>    1. パレット選択で <b>配置モードON</b> (右クリックで解除)<br>
+       2. 配置モード中: 3D地形を <b>左クリック</b> で配置<br>
+       3. 通常モード時: <b>左/右ドラッグ</b> で移動・回転<br>
+       4. 通常モード時: 重機類を <b>左クリック</b> で回転(15度)<br>
+       5. 通常モード時: コメントと矢印は <b>ダブルクリック</b> で拡大(1〜3倍)<br>
+       6. 通常モード時: クレーンを <b style="color:#ef5350;">右クリック</b> で作業半径記入<br>
+       7. 通常モード時: 線を <b>ダブルクリック</b> で削除<br>
+       8. クレーン上体や矢印は <b style="color:#4fc3f7;">青い点</b> を<b>ドラッグ</b>で水平旋回<br>
+       <span style="color:#f1c40f;">※ 各ツールは1回使用すると自動終了します。連続配置時は都度選択してください。</span><br>
+       <span style="color:#888;font-size:0.9em;">※ オブジェクトのサイズ・形状は正確ではありません。<br>
+       　重機等の形状を簡略化しているのは、低性能のPCでも動くように配慮したためです。</span></p>
+      <button id="load-glb-btn" class="load-btn" onclick="document.getElementById('glb-input').click()" style="margin-top:10px;">📂 地形(GLB)を手動読込</button>
+      <input type="file" id="glb-input" accept=".glb,.gltf" style="display:none">
+    </div>
+  </div>
+</div>
+
+<div id="placement-mode-msg">
+  <span id="placement-msg-text" style="font-size:1em; color:#fff; font-weight:bold;">✨ 選択したオブジェクトを配置してください</span><br>
+  <span id="placement-msg-sub">（右クリックでキャンセル）</span>
+  
+  <div id="line-color-picker">
+    <div class="color-btn" style="background: #e74c3c;" data-color="0xe74c3c"></div>
+    <div class="color-btn active" style="background: #f1c40f;" data-color="0xf1c40f"></div>
+    <div class="color-btn" style="background: #3498db;" data-color="0x3498db"></div>
+    <div class="color-btn" style="background: #111111;" data-color="0x111111"></div>
+  </div>
+  
+  <br><button id="finish-line-btn">線引き終了</button>
+</div>
+
+<!-- r025(マスター指示・追1): 測点フラグのホバーツールチップ -->
+<div id="flag-hover-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.78);color:#fff;padding:3px 9px;border-radius:4px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;"></div>
+<div id="line-close-tip" style="display:none;position:fixed;z-index:9000;background:rgba(231,76,60,.92);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">🔒 閉じる（終了）</div>
+
+<div id="ui-container">
+  <div id="palette">
+    <div class="pal-title">📏 計画ツール</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="line">線を引く (Line)</button>
+      <button class="pal-btn" data-type="text_balloon">💬 コメント</button>
+      <button class="pal-btn" data-type="custom_box_input">📦 ボックス</button>
+      <button class="pal-btn" data-type="arrow">➡ 矢印</button>
+    </div>
+
+    <div class="pal-title">🚜 掘削機 (Backhoe)</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="bh_mini">ミニBH</button>
+      <button class="pal-btn" data-type="bh_025">0.25m³ BH</button>
+      <button class="pal-btn" data-type="bh_045">0.45m³ BH</button>
+      <button class="pal-btn" data-type="bh_07">0.7m³ BH</button>
+      <button class="pal-btn" data-type="bh_12">1.2m³ BH</button>
+      <button class="pal-btn" data-type="bd_08t">8t級 ブル</button>
+      <button class="pal-btn" data-type="bd_13t">13t級 ブル</button>
+      <button class="pal-btn" data-type="bd_20t">20t級 ブル</button>
+    </div>
+    
+    <div class="pal-title">🏗️ クレーン類</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="rt_16t">16t ラフター</button>
+      <button class="pal-btn" data-type="rt_25t">25t ラフター</button>
+      <button class="pal-btn" data-type="rt_60t">60t ラフター</button>
+      <button class="pal-btn" data-type="cr_80t">80t クローラー</button>
+    </div>
+
+    <div class="pal-title">🚚 ダンプ (Dump Truck)</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="dump_4t">4tダンプ</button>
+      <button class="pal-btn" data-type="dump_10t">10tダンプ</button>
+      <button class="pal-btn" data-type="mx_10t">生コン車</button>
+      <button class="pal-btn" data-type="cp_10t">ポンプ車</button>
+    </div>
+    <div class="pal-title">👷 人員 (Workers)</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="worker">作業員</button>
+      <button class="pal-btn" data-type="guard">警備員</button>
+    </div>
+    <div class="pal-title">🚧 保安用品 (Safety)</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="conebar" style="grid-column: 1 / -1;">カラーコーン＆バー</button>
+    </div>
+
+    <div class="pal-title">🏗️ 仮設構造物</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="kotai" style="grid-column: 1 / -1;">🏗️ 構台</button>
+      <button class="pal-btn" data-type="h_pile" style="grid-column: 1 / -1;">🔩 鋼材柱 (H鋼杭)</button>
+    </div>
+  </div>
+</div>
+
+<div id="controls">
+  🖱 <span>左/右ドラッグ</span>:オービット(3D回転) ｜ 🖱 <span>中ドラッグ</span>:パン(画面移動) ｜ ⚙️ <span>ホイール</span>:ズーム
+</div>
+
+<div id="loading">GLB 解析・再構築中...</div>
+<div id="toast">⚠️ オブジェクトが奈落へ落ちました</div>
+
+<!-- テンキーUI -->
+<div id="numpad-ui">
+  <div id="numpad-title">作業半径を入力 (m)</div>
+  <div id="numpad-warning">※この作業半径は“おおまかな円”です。<br>正確ではありませんので注意してください。</div>
+  <div id="numpad-display">0</div>
+  <div class="numpad-grid">
+    <button class="numpad-btn">7</button><button class="numpad-btn">8</button><button class="numpad-btn">9</button>
+    <button class="numpad-btn">4</button><button class="numpad-btn">5</button><button class="numpad-btn">6</button>
+    <button class="numpad-btn">1</button><button class="numpad-btn">2</button><button class="numpad-btn">3</button>
+    <button class="numpad-btn">0</button><button class="numpad-btn">.</button><button class="numpad-btn">C</button>
+    <button class="numpad-btn numpad-ok" style="grid-column: 1 / -1;">決 定 (OK)</button>
+  </div>
+  <button id="numpad-cancel">キャンセル</button>
+</div>
+
+<!-- カスタムボックス入力UI -->
+<div id="box-input-ui">
+  <div id="box-input-title">📦 ボックス設定 (m)</div>
+  <div class="box-inputs">
+    <div class="box-input-group" data-target="boxW">
+      <span>幅 (X)</span> <span id="box-val-boxW" class="box-val">1.0</span>
+    </div>
+    <div class="box-input-group" data-target="boxD">
+      <span>奥行 (Z)</span> <span id="box-val-boxD" class="box-val">1.0</span>
+    </div>
+    <div class="box-input-group" data-target="boxH">
+      <span>高さ (Y)</span> <span id="box-val-boxH" class="box-val">1.0</span>
+    </div>
+  </div>
+  
+  <div class="box-colors">
+    <div class="b-color-btn active" style="background:#e74c3c" data-color="0xe74c3c"></div>
+    <div class="b-color-btn" style="background:#3498db" data-color="0x3498db"></div>
+    <div class="b-color-btn" style="background:#f1c40f" data-color="0xf1c40f"></div>
+    <div class="b-color-btn" style="background:#2ecc71" data-color="0x2ecc71"></div>
+    <div class="b-color-btn" style="background:#9b59b6" data-color="0x9b59b6"></div>
+    <div class="b-color-btn" style="background:#95a5a6" data-color="0x95a5a6"></div>
+  </div>
+  
+  <div class="numpad-grid">
+    <button class="box-numpad-btn">7</button><button class="box-numpad-btn">8</button><button class="box-numpad-btn">9</button>
+    <button class="box-numpad-btn">4</button><button class="box-numpad-btn">5</button><button class="box-numpad-btn">6</button>
+    <button class="box-numpad-btn">1</button><button class="box-numpad-btn">2</button><button class="box-numpad-btn">3</button>
+    <button class="box-numpad-btn">0</button><button class="box-numpad-btn">.</button><button class="box-numpad-btn">C</button>
+  </div>
+  <div class="text-ui-btns">
+    <button id="box-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="box-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+
+<!-- テキスト入力UI -->
+<div id="text-input-ui">
+  <div id="text-input-title">コメントを入力</div>
+  <textarea id="text-input-area" placeholder="Enterで改行できます"></textarea>
+  <div class="text-ui-btns">
+    <button id="text-btn-cancel" class="text-ui-btn">キャンセル</button>
+    <button id="text-btn-ok" class="text-ui-btn">決 定</button>
+  </div>
+</div>
+
+<!-- カスタム確認ダイアログ -->
+<div id="custom-confirm-overlay">
+  <div id="custom-confirm-box" class="custom-confirm-box">
+    <div id="custom-confirm-msg">線を削除しますか？</div>
+    <div class="custom-confirm-btns">
+      <button id="custom-confirm-yes" class="custom-confirm-btn">はい</button>
+      <button id="custom-confirm-no" class="custom-confirm-btn">いいえ</button>
+    </div>
+  </div>
+</div>
+
+<!-- r063: 構台作図終了確認ダイアログ -->
+<div id="kotai-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;">
+  <div class="custom-confirm-box">
+    <div id="kotai-confirm-msg">構台作図を終了しますか？</div>
+    <div class="custom-confirm-btns">
+      <button id="kotai-confirm-yes" class="custom-confirm-btn">はい</button>
+      <button id="kotai-confirm-no" class="custom-confirm-btn">いいえ</button>
+    </div>
+  </div>
+</div>
+
+<script>
+console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み完了', 'color:#0f0;font-weight:bold;');
+  window.addEventListener('contextmenu', e => e.preventDefault());
+
+  let tTimer;
+  function showToast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.style.opacity = '1';
+    clearTimeout(tTimer);
+    tTimer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
+  }
+
+  // ==========================================
+  // 1. Three.js 基本セットアップ
+  // ==========================================
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x3a4045);
+
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 30, 40);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+  // r053: 山留マーカーパネル(地形面から数cm浮かせただけ)がdepthTest:trueで
+  // 地形に埋もれて完全に不可視になる不具合の根本原因が、near=0.1/far=1000という
+  // near:far比1万倍の設定による通常デプスバッファの精度不足(カメラから
+  // 数十m離れた位置では数cm単位の前後関係を判定しきれない)と判明したため、
+  // 対数デプスバッファを有効化。PUSH_OUT等のオフセット量を増やす対処療法では
+  // 根本解決しないため、この方式で統一する。
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.autoUpdate = false; 
+  
+  renderer.toneMapping = THREE.LinearToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  document.body.appendChild(renderer.domElement);
+
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
+  controls.maxPolarAngle = Math.PI / 2 - 0.01; 
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+  controls.update();
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  dirLight.position.set(30, 50, -20);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 1024; 
+  dirLight.shadow.mapSize.height = 1024;
+  dirLight.shadow.camera.left = -50; dirLight.shadow.camera.right = 50;
+  dirLight.shadow.camera.top = 50; dirLight.shadow.camera.bottom = -50;
+  dirLight.shadow.bias = -0.001; 
+  scene.add(dirLight);
+
+  const dirtColor = 0x79553d;
+
+  let defaultGround = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ color: dirtColor }));
+  defaultGround.rotation.x = -Math.PI / 2;
+  defaultGround.receiveShadow = true;
+  scene.add(defaultGround);
+
+  let gridHelper = new THREE.GridHelper(100, 50, 0x555555, 0x333333);
+  scene.add(gridHelper);
+
+  const markerGeo = new THREE.RingGeometry(1.2, 1.5, 32);
+  markerGeo.rotateX(-Math.PI / 2);
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0x4caf50, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
+  const placementMarker = new THREE.Mesh(markerGeo, markerMat);
+  placementMarker.raycast = function() {}; 
+  placementMarker.visible = false;
+  scene.add(placementMarker);
+
+  let terrainMeshes = [defaultGround];
+  // r019: 地形の入れ替えバグ修正用。terrainMeshesはterrain(gltf.scene)の
+  // 「子」を保持しているだけで、実際にsceneへaddされているのはterrain
+  // グループ自体。以前はscene.remove(m)をterrainMeshesの各要素に対して
+  // 呼んでいたが、mの親はscene直下ではなくterrainなので何も削除されず、
+  // 地形を読み直すたびに古い地形がシーンに残り続けていた（配置モードを
+  // 開き直してもiframeがリロードされなくなったことで、この既存バグが
+  // 初めて表面化した）。ルートグループ自体を追跡して削除するよう修正。
+  let _terrainRoot = null;
+  let terrainEdges2D = [];
+
+  function computeEdgesGeometrySafe(geometry, angleThresholdDeg) {
+    const angleThreshold = angleThresholdDeg * Math.PI / 180;
+    const posAttr = geometry.attributes.position;
+    const idxAttr = geometry.index;
+    const pos = posAttr.array;
+    const idx = idxAttr ? idxAttr.array : null;
+    const triCount = idx ? (idx.length / 3) : (pos.length / 9);
+
+    const faceNormals = new Float64Array(triCount * 3);
+    for (let t = 0; t < triCount; t++) {
+      const i0 = idx ? idx[t*3]   : t*3;
+      const i1 = idx ? idx[t*3+1] : t*3+1;
+      const i2 = idx ? idx[t*3+2] : t*3+2;
+      const ax = pos[i0*3], ay = pos[i0*3+1], az = pos[i0*3+2];
+      const bx = pos[i1*3], by = pos[i1*3+1], bz = pos[i1*3+2];
+      const cx = pos[i2*3], cy = pos[i2*3+1], cz = pos[i2*3+2];
+      const abx = ax - bx, aby = ay - by, abz = az - bz;
+      const cbx = cx - bx, cby = cy - by, cbz = cz - bz;
+      let nx = cby*abz - cbz*aby;
+      let ny = cbz*abx - cbx*abz;
+      let nz = cbx*aby - cby*abx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      faceNormals[t*3] = nx/len; faceNormals[t*3+1] = ny/len; faceNormals[t*3+2] = nz/len;
+    }
+
+    // r025(マスター指示・追加2): index参照が頂点位置ではなく「頂点番号」ベースだと、
+    // 同一位置でも別インデックスに重複した頂点(ExtrudeGeometryの面ごとの複製等)が
+    // あった場合に隣接三角形として認識できず、本来同一平面で消えるはずの分割線が
+    // 残ってしまう(ミイラの包帯状に見える原因)。頂点の「量子化した座標」をキーに
+    // することで、インデックスが別でも同じ位置なら同一頂点として扱い、正しく
+    // 平面度判定できるようにする。
+    const Q = 1e4; // 0.1mm相当の量子化
+    const qkey = (x,y,z) => Math.round(x*Q)+'_'+Math.round(y*Q)+'_'+Math.round(z*Q);
+
+    const edgeMap = new Map();
+    for (let t = 0; t < triCount; t++) {
+      const tri = [idx ? idx[t*3] : t*3, idx ? idx[t*3+1] : t*3+1, idx ? idx[t*3+2] : t*3+2];
+      for (let e = 0; e < 3; e++) {
+        const a = tri[e], b = tri[(e+1)%3];
+        const pa = qkey(pos[a*3],pos[a*3+1],pos[a*3+2]);
+        const pb = qkey(pos[b*3],pos[b*3+1],pos[b*3+2]);
+        const key = pa < pb ? (pa + '|' + pb) : (pb + '|' + pa);
+        const rec = edgeMap.get(key);
+        if (!rec) { edgeMap.set(key, { a, b, n1: t, n2: -1 }); }
+        else { rec.n2 = t; }
+      }
+    }
+
+    const positions = [];
+    edgeMap.forEach(function(rec) {
+      let isEdge = true;
+      if (rec.n2 !== -1) {
+        const dot = faceNormals[rec.n1*3]*faceNormals[rec.n2*3] + faceNormals[rec.n1*3+1]*faceNormals[rec.n2*3+1] + faceNormals[rec.n1*3+2]*faceNormals[rec.n2*3+2];
+        const clamped = Math.min(1, Math.max(-1, dot));
+        isEdge = Math.acos(clamped) > angleThreshold;
+      }
+      if (isEdge) {
+        positions.push(pos[rec.a*3], pos[rec.a*3+1], pos[rec.a*3+2], pos[rec.b*3], pos[rec.b*3+1], pos[rec.b*3+2]);
+      }
+    });
+
+    const edgesGeo = new THREE.BufferGeometry();
+    edgesGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    return edgesGeo;
+  }
+
+  function buildFatEdgeLines(geometry, angleThresholdDeg, color, opacity, radius) {
+    const idxAttr0 = geometry.index;
+    const triCount0 = idxAttr0 ? (idxAttr0.count / 3) : (geometry.attributes.position.count / 3);
+    const EDGE_TRI_LIMIT = 8000;
+    let edgesGeo;
+    if (triCount0 > EDGE_TRI_LIMIT) {
+      edgesGeo = new THREE.BufferGeometry();
+      edgesGeo.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+    } else {
+      try {
+        edgesGeo = computeEdgesGeometrySafe(geometry, angleThresholdDeg);
+      } catch (err) {
+        edgesGeo = new THREE.BufferGeometry();
+        edgesGeo.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+      }
+    }
+    const posAttr = edgesGeo.attributes.position;
+    const segCount = posAttr.count / 2;
+    if (segCount === 0) {
+      const empty = new THREE.Group();
+      empty.raycast = function(){};
+      return empty;
+    }
+    const cylGeo = new THREE.CylinderGeometry(radius, radius, 1, 5, 1, false);
+    cylGeo.translate(0, 0.5, 0); 
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
+    const mesh = new THREE.InstancedMesh(cylGeo, mat, segCount);
+    mesh.raycast = function(){}; 
+    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), dir = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion();
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < segCount; i++) {
+      p0.fromBufferAttribute(posAttr, i * 2);
+      p1.fromBufferAttribute(posAttr, i * 2 + 1);
+      dir.subVectors(p1, p0);
+      const len = dir.length();
+      if (len < 1e-6) { m.compose(p0, quat.identity(), new THREE.Vector3(0, 0, 0)); mesh.setMatrixAt(i, m); continue; }
+      dir.normalize();
+      quat.setFromUnitVectors(up, dir);
+      m.compose(p0, quat, new THREE.Vector3(1, len, 1));
+      mesh.setMatrixAt(i, m);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    return mesh;
+  }
+
+  // ==========================================
+  // 1.5. 「使い方」パネル 開閉トグル(r062: ホバー式→クリック式に変更)
+  // ==========================================
+  (function () {
+    const btn = document.getElementById('help-btn');
+    const tooltip = document.getElementById('help-tooltip');
+    const overlay = document.getElementById('help-block-overlay');
+    function openHelp() {
+      tooltip.classList.add('show');
+      overlay.classList.add('show');
+    }
+    function closeHelp() {
+      tooltip.classList.remove('show');
+      overlay.classList.remove('show');
+    }
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation(); // ボタン自身のクリックがoverlayへ伝播して即座に閉じるのを防ぐ
+      if (tooltip.classList.contains('show')) closeHelp(); else openHelp();
+    });
+    overlay.addEventListener('click', closeHelp); // 画面の他の場所(overlay部分)クリックで閉じる
+  })();
+
+  // ==========================================
+  // 2. GLB読み込み
+  // ==========================================
+  const gltfLoader = new THREE.GLTFLoader();
+
+  document.getElementById('glb-input').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    document.getElementById('loading').style.display = 'flex';
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      loadTerrainFromArrayBuffer(event.target.result);
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  });
+
+  function loadTerrainFromArrayBuffer(arrayBuffer, isVoldia) {
+    // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+    document.getElementById('loading').style.display = 'flex';
+    gltfLoader.parse(arrayBuffer, '', function(gltf) {
+        // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+        
+        if (defaultGround) scene.remove(defaultGround);
+        if (gridHelper) scene.remove(gridHelper);
+        // r020: customGround(周辺${range}m拡張床)や内側の穴埋め床は、terrain
+        // (gltf.scene)の子ではなくscene直下に個別追加されているため、
+        // _terrainRootを消すだけでは残ってしまい、地形を読み直すたびに
+        // 蓄積して「新旧の床が混ざる」症状の真因になっていた。ここで
+        // terrainMeshesの中身も改めて確実に削除・破棄する。
+        terrainMeshes.forEach(m=>{
+          scene.remove(m); // terrain配下の子に対しては無害な空振り、scene直下のcustomGround等には有効
+          if(m.geometry) m.geometry.dispose();
+          if(m.material){
+            if(Array.isArray(m.material)) m.material.forEach(mm=>mm.dispose());
+            else m.material.dispose();
+          }
+        });
+        if (_terrainRoot){
+          scene.remove(_terrainRoot); // r019: 実際にsceneに追加されているルートを削除
+          _terrainRoot.traverse(c=>{
+            if(c.geometry) c.geometry.dispose();
+            if(c.material){
+              if(Array.isArray(c.material)) c.material.forEach(m=>m.dispose());
+              else c.material.dispose();
+            }
+          });
+        }
+        terrainMeshes = [];
+        terrainEdges2D = [];
+
+        const terrain = gltf.scene;
+        _terrainRoot = terrain;
+        
+        const edgeCounts = new Map();
+        const edgeCoords = new Map();
+
+        const terrainTargets = [];
+        // r051(v0084対応): 通常計算→配置モードでは「GL平面(Voldia_GLPlane)」と
+        // 「押し出しオブジェクト本体(Voldia_FixedObjects)」の2ノード構成でGLBが送られてくる。
+        // FixedObjectsは複数の独立した立体を含み得るため、GL面境界ループ検出(customGround生成)
+        // に混ぜると誤動作する。別枠(fixedObjTargets)に分離し、境界検出の対象からは外す。
+        const fixedObjTargets = [];
+        terrain.traverse(child => {
+          if (child.isMesh && child.geometry.index && !child.userData.isEdgeDecoration) {
+            if (child.name === 'Voldia_FixedObjects') {
+              fixedObjTargets.push(child);
+            } else {
+              terrainTargets.push(child);
+            }
+          }
+        });
+        terrainTargets.forEach(child => {
+            const pos = child.geometry.attributes.position.array;
+            const idx = child.geometry.index.array;
+            const newIdx = [];
+            const EPS = 0.01; 
+
+            for (let i = 0; i < idx.length; i += 3) {
+              const i0 = idx[i], i1 = idx[i+1], i2 = idx[i+2];
+              const p0 = { x: pos[i0*3], y: pos[i0*3+1], z: pos[i0*3+2] };
+              const p1 = { x: pos[i1*3], y: pos[i1*3+1], z: pos[i1*3+2] };
+              const p2 = { x: pos[i2*3], y: pos[i2*3+1], z: pos[i2*3+2] };
+              
+              // r073マスター指摘対応(配置モードのドーナツ穴埋め根本原因): 以前はここで
+              // y≈0(GL面)の三角形を無条件に間引き、下のcustomGround/innerGround側で
+              // 平らな板として代替表示していた。ドーナツの穴(内側の島)の天端がGL面に
+              // ちょうど乗る形状の場合、本来はVoldia本体側で修正済みの正しい(平らとは
+              // 限らない)キャップ形状があるのに、それを間引いて平らな板で置き換えて
+              // しまうため「本体は直ったのに配置モードだけ穴が塞がって見える」原因に
+              // なっていた。GL面の三角形も間引かずそのまま残すことで、本体と同じ
+              // 正しい形状をそのまま表示する(下のinnerGround生成処理も合わせて削除)。
+              
+              newIdx.push(i0, i2, i1); 
+
+              const addEdge = (u, v) => {
+                if (Math.abs(u.y) >= EPS || Math.abs(v.y) >= EPS) return;
+                const kU = `${Math.round(u.x*1000)}_${Math.round(u.z*1000)}`;
+                const kV = `${Math.round(v.x*1000)}_${Math.round(v.z*1000)}`;
+                if (kU === kV) return;
+                const key = kU < kV ? `${kU}|${kV}` : `${kV}|${kU}`;
+                edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+                edgeCoords.set(key, [u, v]);
+              };
+              addEdge(p0, p1); addEdge(p1, p2); addEdge(p2, p0);
+            }
+            
+            child.geometry.setIndex(newIdx);
+            child.geometry.computeVertexNormals();
+
+            child.receiveShadow = true;
+            child.castShadow = true;
+            child.material = new THREE.MeshLambertMaterial({
+              // r073マスター指摘対応(仮説③): FrontSideだと法線の向き次第で見えなくなる
+              // 面が出てしまう可能性があったため、地形本体と同様DoubleSideに変更
+              color: dirtColor, side: THREE.DoubleSide 
+            });
+
+            const line = buildFatEdgeLines(child.geometry, 25, 0x0a1a3a, 0.75, 0.035);
+            line.userData.isEdgeDecoration = true; 
+            child.add(line);
+
+            child.userData.isRealTerrainPit = true;
+            terrainMeshes.push(child);
+        });
+
+        // r051(v0084対応): 通常計算の押し出しオブジェクト(柱・擁壁等)は、GL面境界ループ検出は行わず
+        // そのままの形状で固定表示する。terrainMeshesに加えることで、地形と同様にレイキャスト対象
+        // (=クレーン等の設置面、_getFloorMeshes()経由)になる=「上面のみの当たり判定」を実現する。
+        // placedObjects配列には加えないため、ドラッグ移動やオブジェクト衝突回避システムの対象にはならない。
+        fixedObjTargets.forEach(child => {
+            child.geometry.computeVertexNormals();
+            child.receiveShadow = true;
+            child.castShadow = true;
+            child.material = new THREE.MeshLambertMaterial({ color: 0x8a8f98, side: THREE.DoubleSide });
+            child.userData.isFixedCalcObject = true;
+            // r051マスター指摘対応: 通常計算オブジェクト(柱・擁壁等)にも地形と同じ輪郭線を追加
+            const fixedLine = buildFatEdgeLines(child.geometry, 25, 0x0a1a3a, 0.75, 0.035);
+            fixedLine.userData.isEdgeDecoration = true;
+            child.add(fixedLine);
+            terrainMeshes.push(child);
+        });
+
+        scene.add(terrain);
+
+        const segments = [];
+        for (const [key, count] of edgeCounts.entries()) {
+          if (count === 1) segments.push(edgeCoords.get(key));
+        }
+
+        const adj = new Map();
+        const ptsMap = new Map();
+        for (const [u, v] of segments) {
+          const kU = `${Math.round(u.x*1000)}_${Math.round(u.z*1000)}`;
+          const kV = `${Math.round(v.x*1000)}_${Math.round(v.z*1000)}`;
+          if(!adj.has(kU)) adj.set(kU, []);
+          if(!adj.has(kV)) adj.set(kV, []);
+          adj.get(kU).push(kV);
+          adj.get(kV).push(kU);
+          ptsMap.set(kU, u);
+          ptsMap.set(kV, v);
+        }
+
+        const loops = [];
+        const visited = new Set();
+        for (const kStart of adj.keys()) {
+          if (visited.has(kStart)) continue;
+          const loop = [];
+          let curr = kStart;
+          let prev = null;
+          while (true) {
+            loop.push(ptsMap.get(curr));
+            visited.add(curr);
+            const nexts = adj.get(curr);
+            let next = null;
+            for (const n of nexts) {
+              if (n !== prev && !visited.has(n)) {
+                next = n; break;
+              }
+            }
+            if (!next) break; 
+            prev = curr; curr = next;
+          }
+          loops.push(loop);
+        }
+        // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+
+        const box = new THREE.Box3().setFromObject(terrain);
+        const minX = box.min.x, maxX = box.max.x;
+        const minZ = box.min.z, maxZ = box.max.z;
+        terrainMinY = box.min.y; // r062: 鋼材柱の下端(地形全体の絶対最低点)に使用
+
+        const cx = (minX + maxX) / 2;
+        const cz = (minZ + maxZ) / 2;
+        const range = 30; 
+
+        const loopData = [];
+        for (const loop of loops) {
+          if (loop.length < 3) continue;
+          let area = 0;
+          for (let i = 0; i < loop.length; i++) {
+            const p1 = loop[i];
+            const p2 = loop[(i + 1) % loop.length];
+            area += p1.x * p2.z - p2.x * p1.z;
+          }
+          area /= 2;
+          if (area > 0) loop.reverse();
+          loopData.push({ loop: loop, area: Math.abs(area) });
+        }
+        loopData.sort((a, b) => b.area - a.area);
+
+        const mat = new THREE.MeshLambertMaterial({ color: dirtColor, side: THREE.DoubleSide });
+
+        if (loopData.length > 0) {
+          const outerLoop = loopData[0].loop;
+          const innerLoops = loopData.slice(1).map(d => d.loop);
+
+          const shape = new THREE.Shape();
+          shape.moveTo(minX - range, minZ - range);
+          shape.lineTo(minX - range, maxZ + range);
+          shape.lineTo(maxX + range, maxZ + range);
+          shape.lineTo(maxX + range, minZ - range);
+          shape.lineTo(minX - range, minZ - range);
+
+          const hole = new THREE.Path();
+          hole.moveTo(outerLoop[0].x, outerLoop[0].z);
+          for (let i = 1; i < outerLoop.length; i++) {
+            hole.lineTo(outerLoop[i].x, outerLoop[i].z);
+          }
+          hole.lineTo(outerLoop[0].x, outerLoop[0].z);
+          shape.holes.push(hole);
+
+          for (let i = 0; i < outerLoop.length; i++) {
+            const p1 = outerLoop[i];
+            const p2 = outerLoop[(i + 1) % outerLoop.length];
+            terrainEdges2D.push({ x1: p1.x, z1: p1.z, x2: p2.x, z2: p2.z });
+          }
+
+          // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+
+          const geo = new THREE.ShapeGeometry(shape);
+          geo.rotateX(Math.PI / 2);
+
+          const shapeIdx = geo.getIndex();
+          if (shapeIdx) {
+            const idxArray = shapeIdx.array;
+            for (let i = 0; i < idxArray.length; i += 3) {
+              const tmp = idxArray[i];
+              idxArray[i] = idxArray[i + 2];
+              idxArray[i + 2] = tmp;
+            }
+          }
+          geo.computeVertexNormals();
+
+          const customGround = new THREE.Mesh(geo, mat);
+          customGround.userData.isCustomGroundCollar = true;
+          customGround.receiveShadow = true;
+          customGround.position.y = -0.01;
+
+          const gLine = buildFatEdgeLines(geo, 25, 0x0a1a3a, 0.5, 0.03);
+          customGround.add(gLine);
+
+          scene.add(customGround);
+          terrainMeshes.push(customGround);
+
+          // r073マスター指摘対応: 以前はここで内側のループ(ドーナツの穴など)ごとに
+          // 平らな板(innerGround)を生成してGL面に敷いていたが、これが「本体では直った
+          // ドーナツ穴埋めが配置モードだけ塞がって見える」原因だった(上の三角形間引き
+          // 廃止と対で、地形自身の正しい形状に任せるよう変更)。ミニマップ用の輪郭線
+          // (terrainEdges2D)だけは表示価値があるので引き続き登録する。
+          for (const inner of innerLoops) {
+            for (let i = 0; i < inner.length; i++) {
+              const p1 = inner[i];
+              const p2 = inner[(i + 1) % inner.length];
+              terrainEdges2D.push({ x1: p1.x, z1: p1.z, x2: p2.x, z2: p2.z });
+            }
+          }
+        }
+
+        const sizeX = (maxX - minX) / 2;
+        const sizeZ = (maxZ - minZ) / 2;
+        mapRange = Math.max(50, sizeX, sizeZ) + range + 5; 
+        mapCenter = { x: cx, z: cz };
+        // r051マスター指摘対応: 構台作図開始時の全体表示はcustomGround拡張分を含めず、
+        // 元のオブジェクト(地形)自体の範囲だけにフィットさせたいので専用に保持しておく。
+        kotaiFitRange = Math.max(sizeX, sizeZ, 5);
+
+        dirLight.position.set(cx + mapRange * 0.5, 100, cz - mapRange * 0.5);
+        dirLight.target.position.set(cx, 0, cz);
+        scene.add(dirLight.target);
+
+        dirLight.shadow.camera.left = -mapRange;
+        dirLight.shadow.camera.right = mapRange;
+        dirLight.shadow.camera.top = mapRange;
+        dirLight.shadow.camera.bottom = -mapRange;
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 500;
+        dirLight.shadow.camera.updateProjectionMatrix();
+
+        controls.target.set(cx, 0, cz);
+        camera.position.set(cx, 30, cz + 60);
+        controls.update();
+
+        // r030: postMessageの到着順序は「地形GLB→測点座標」の想定だが、地形側は
+        // gltfLoader.parseが非同期のため、測点座標が先に処理されて古い(または
+        // まだ存在しない)地形に対してレイキャストしてしまうケースがあった。
+        // ここ(地形読込完了の直後)で直近の測点座標を使って必ず再配置し直すことで、
+        // 到着順序に関わらず常に最新の地形と一致させる。
+        if (_lastSurveyPoints.length > 0) placeSurveyFlags(_lastSurveyPoints);
+        if (_lastYamadomeLine.length > 0) placeYamadomeMarker(_lastYamadomeLine, _lastYamadomeRealYTop, _lastYamadomeRealYBot, _lastYamadomeBatterDeg);
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('load-glb-btn').style.display = 'none';
+
+        renderer.shadowMap.needsUpdate = true; 
+    });
+  }
+
+  let _voldiaTerrainReceived = false;
+  const _voldiaParent = (window.parent !== window) ? window.parent : window.opener;
+
+  // r013: 配置モードのオブジェクト状態の保存・復元。
+  // 位置(x,z)はspawnObject()にそのまま渡して既存の地形レイキャスト＋落下
+  // アニメーションに任せる（同じ地形なら同じ高さに自然に着地するはず）。
+  // Y座標を保存値で強制上書きしないのは、fallingObjects側の物理演算が
+  // 毎フレームtargetYへ動かし続けるため、直後に固定しても数フレーム後に
+  // 上書きされてしまうから。回転(yaw)は物理演算の斜面追従で一時的に変わる
+  // ことがあるため、着地が落ち着く頃合いを見て少し遅れて再適用する。
+  function serializePlacedObjects(){
+    return placedObjects.map(obj => {
+      const u = obj.userData || {};
+      const d = {
+        type: u.type,
+        x: obj.position.x, z: obj.position.z,
+        rotY: obj.rotation.y,
+        yaw: u.yaw || 0,
+        scaleMultiplier: u.scaleMultiplier || 1,
+        radiusValue: u.radiusValue || 0,
+        color: u.color
+      };
+      if(u.type === 'text_balloon') d.text = u.text || '';
+      if(u.type === 'custom_box'){
+        d.boxW = u.boxW; d.boxD = u.boxD; d.boxH = u.boxH; d.boxColor = u.boxColor;
+      }
+      if(u.type === 'kotai') d.kotaiPoints = u.kotaiPoints || [];
+      if(u.type === 'h_pile') d.heightM = u.heightM || 0;
+      return d;
+    });
+  }
+
+  function _applyArrowScale(mesh, m){
+    let upper = null;
+    mesh.traverse(c => { if (c.userData.isUpper) upper = c; });
+    if(upper){
+      upper.scale.set(m, m, m);
+      const ARROW_HEAD_RADIUS = 0.7; // createArrowMesh()のheadRadiusと同じ値
+      upper.position.y = 1.0 + (m - 1) * ARROW_HEAD_RADIUS;
+    }
+  }
+
+  function restorePlacedObjects(dataArr){
+    if(!Array.isArray(dataArr) || !dataArr.length) return;
+    // r065(AIS修正案): 復元時のレイキャスト対象がterrainMeshes固定だったため、
+    // 構台の上に乗っていたtext_balloon等が構台をすり抜けて地面まで落下する
+    // バグがあった。手動配置時と同じ_getFloorMeshes()(地形+構台(可視時))に変更する。
+    // あわせて、構台(kotai)を他タイプより先に復元し、_getFloorMeshes()が
+    // ちゃんと構台を含んだ状態でtext_balloon等の着地判定を行えるようにする
+    // (保存順序に依存しないための安定ソート)。
+    const sortedDataArr = dataArr.slice().sort((a, b) => {
+      const aK = (a && a.type === 'kotai') ? 0 : 1;
+      const bK = (b && b.type === 'kotai') ? 0 : 1;
+      return aK - bK;
+    });
+    sortedDataArr.forEach(d => {
+      if(!d || !d.type) return;
+      let mesh;
+      if(d.type === 'text_balloon'){
+        mesh = createTextBalloonMesh(d.text || '');
+        mesh.userData = { isRoot:true, type:'text_balloon', yaw:0, isFallen:false, radiusValue:0, isPlaced:true, text:d.text||'' };
+        mesh.position.set(d.x, 50, d.z);
+        scene.add(mesh);
+        placedObjects.push(mesh);
+        const fr = new THREE.Raycaster();
+        fr.set(new THREE.Vector3(d.x, 100, d.z), new THREE.Vector3(0, -1, 0));
+        const hit = fr.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+        fallingObjects.push({ mesh, targetY: hit.length ? hit[0].point.y : 0, normal: new THREE.Vector3(0,1,0), speed:0, isBouncing:false, vx:0, vz:0 });
+      } else if(d.type === 'kotai'){
+        const pts = (d.kotaiPoints || []).map(p => new THREE.Vector3(p.x, 0, p.z));
+        if(pts.length >= 3){ _buildKotaiMesh(pts); mesh = placedObjects[placedObjects.length - 1]; }
+        else return;
+      } else if(d.type === 'h_pile'){
+        const heightM = d.heightM || (HPILE_TOP_Y - terrainMinY);
+        mesh = createHPileMesh(heightM);
+        mesh.position.set(d.x, HPILE_TOP_Y, d.z);
+        mesh.userData = { isRoot: true, type: 'h_pile', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true, heightM, color: '#8d6e63' };
+        addEdgeLines(mesh);
+        scene.add(mesh);
+        placedObjects.push(mesh);
+      } else {
+        const prevType = currentType, prevBoxParams = boxParams, prevBoxColor = boxColor;
+        if(d.type === 'custom_box'){
+          boxParams = { boxW:d.boxW, boxD:d.boxD, boxH:d.boxH };
+          boxColor = d.boxColor;
+        }
+        currentType = d.type;
+        spawnObject(d.x, d.z);
+        currentType = prevType; boxParams = prevBoxParams; boxColor = prevBoxColor;
+        mesh = placedObjects[placedObjects.length - 1];
+      }
+      mesh.rotation.y = d.rotY || 0;
+      mesh.userData.yaw = d.yaw || 0;
+      mesh.userData.radiusValue = d.radiusValue || 0;
+      mesh.userData.isPlaced = true;
+      if(d.scaleMultiplier && d.scaleMultiplier !== 1){
+        mesh.userData.scaleMultiplier = d.scaleMultiplier;
+        if(d.type === 'arrow') _applyArrowScale(mesh, d.scaleMultiplier);
+      }
+      // 落下・斜面追従アニメーションが収まった頃に回転を再適用（物理演算に
+      // 上書きされるのを防ぐ、簡易的な後追い補正）
+      setTimeout(()=>{ mesh.rotation.y = d.rotY || 0; renderer.shadowMap.needsUpdate = true; }, 1200);
+    });
+    renderer.shadowMap.needsUpdate = true;
+  }
+
+  window.addEventListener('message', function(ev) {
+    const d = ev.data;
+    if (!d || !d.type) return;
+    if (d.type === 'voldia-request-ready') {
+      if (!_voldiaTerrainReceived && _voldiaParent) {
+        _voldiaParent.postMessage({ type: 'voldia-placement-ready' }, '*');
+      }
+    } else if (d.type === 'voldia-terrain-glb' && d.buffer) {
+      _voldiaTerrainReceived = true;
+      loadTerrainFromArrayBuffer(d.buffer, true);
+    } else if (d.type === 'voldia-request-placement-state') {
+      if (_voldiaParent) {
+        _voldiaParent.postMessage({ type: 'voldia-placement-state', objects: serializePlacedObjects() }, '*');
+      }
+    } else if (d.type === 'voldia-restore-placement-state' && Array.isArray(d.objects)) {
+      restorePlacedObjects(d.objects);
+    } else if (d.type === 'voldia-survey-points' && Array.isArray(d.points)) {
+      // r025(マスター指示・追1): Voldia本体で設置した測点の実座標を受け取り、
+      // 配置モードのテレイン上に旗を自動配置する
+      // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+      _lastSurveyPoints = d.points; // r030: 地形読込完了後の再配置用に保持
+      // 新6(2026-08-24 引継ぎ19回目マスター指示): 測点が1つ以上ある時だけ
+      // ノースアロー(2Dコンパス)を表示する、本体側と同じ条件。
+      if(typeof d.northAngleDeg === 'number' && !isNaN(d.northAngleDeg)) _northAngleDeg = d.northAngleDeg;
+      placeSurveyFlags(d.points);
+      updateCompassVisibility();
+    } else if (d.type === 'voldia-yamadome-line' && Array.isArray(d.points)) {
+      // r044: Voldia本体で描いた山留ラインの実座標を受け取り、目印として
+      // 地形上に色付きの線オブジェクトを描画する(山留③の壁面本体とは別の、
+      // 位置確認用の軽量マーカー)
+      // 追加2(2026-08-24 引継ぎ18回目): 実寸値(realYTop/realYBot/batterDeg)も
+      // 一緒に受け取る(地形読込完了時の再配置でも使うため保持しておく)
+      _lastYamadomeLine = d.points;
+      _lastYamadomeRealYTop = d.realYTop;
+      _lastYamadomeRealYBot = d.realYBot;
+      _lastYamadomeBatterDeg = d.batterDeg;
+      placeYamadomeMarker(d.points, d.realYTop, d.realYBot, d.batterDeg);
+    } else if (d.type === 'voldia-save-done') {
+      const btn = document.getElementById('voldia-save-btn');
+      btn.textContent = d.ok ? '✓ 出力完了' : '⚠ 出力失敗';
+      setTimeout(() => { btn.disabled = false; btn.textContent = '📤 Vold出力'; }, 1800);
+    }
+  });
+  if (_voldiaParent) {
+    _voldiaParent.postMessage({ type: 'voldia-placement-ready' }, '*');
+  }
+
+  document.getElementById('voldia-back-btn').addEventListener('click', () => {
+    // 追2(2026-08-24 引継ぎ15回目): 「Voldiaに戻る」時に使用中のツールが
+    // キャンセルされず、再度配置モードに戻った時にツールボタンが押しっぱなし
+    // 表示のままになる不具合を修正。exitPlacementMode()は既存の一元管理関数
+    // （.pal-btnのactive解除・各ツールの後片付けを含む）なので、それをここで
+    // 呼んでからclose通知を送るだけでよい。iframe自体は生かしたまま保持する
+    // 設計（r016）には影響しない＝配置済みオブジェクトは消えない。
+    exitPlacementMode();
+    if (_voldiaParent) {
+      _voldiaParent.postMessage({ type: 'voldia-placement-close' }, '*');
+    }
+  });
+
+  // r018: 配置モードから直接、本体側のVold保存を呼び出せるようにする
+  // （毎回「Voldiaに戻る」を押してから保存、という手間が分かりにくいため）。
+  // 実際のファイル生成・ダウンロードは本体側(exportCSV)が行う。配置モードの
+  // オブジェクト状態自体、本体がexportCSV内でこのiframeに問い合わせて
+  // 取得する仕組みが既にあるので、ここでは「保存して」と頼むだけでよい。
+  const saveBtn = document.getElementById('voldia-save-btn');
+  saveBtn.addEventListener('click', () => {
+    if (!_voldiaParent) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '出力中...';
+    _voldiaParent.postMessage({ type: 'voldia-request-save' }, '*');
+  });
+
+  // r022(追3): 印刷機能。3D表示(WebGLキャンバス)をJPEGとして直接キャプチャし、
+  // 外部ライブラリを増やさずに自前でA3横PDF(1ページ・画像のみ)を組み立てて
+  // ダウンロードする。「表示画面のスクショでOK」との指示なので、UIパネル等は
+  // 含めず3Dビューのみを対象にした（renderer.domElementを直接キャプチャする
+  // 方が、DOM全体をラスタライズするより確実で軽い）。
+  function _buildSingleImagePDF(jpegDataURL, pageWpt, pageHpt){
+    // dataURL → バイナリ
+    const base64 = jpegDataURL.split(',')[1];
+    const bin = atob(base64);
+    const jpegBytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) jpegBytes[i] = bin.charCodeAt(i);
+
+    // JPEGヘッダからピクセル幅・高さを読み取る(SOFマーカーを探す)
+    let imgW=0, imgH=0;
+    for(let i=2;i<jpegBytes.length-9;){
+      if(jpegBytes[i]!==0xFF) { i++; continue; }
+      const marker = jpegBytes[i+1];
+      if(marker===0xD8||marker===0x01||(marker>=0xD0&&marker<=0xD7)){ i+=2; continue; }
+      if(marker===0xD9) break; // EOI
+      const segLen = (jpegBytes[i+2]<<8) | jpegBytes[i+3];
+      if((marker>=0xC0&&marker<=0xC3)||(marker>=0xC5&&marker<=0xC7)||(marker>=0xC9&&marker<=0xCB)||(marker>=0xCD&&marker<=0xCF)){
+        imgH = (jpegBytes[i+5]<<8) | jpegBytes[i+6];
+        imgW = (jpegBytes[i+7]<<8) | jpegBytes[i+8];
+        break;
+      }
+      i += 2 + segLen;
+    }
+    if(!imgW||!imgH){ imgW=pageWpt; imgH=pageHpt; } // 万一読めなければページいっぱいで代用
+
+    // ページ内にアスペクト比を保って収める（上下左右中央寄せ）
+    const margin = 20; // pt
+    const availW = pageWpt - margin*2, availH = pageHpt - margin*2;
+    const scale = Math.min(availW/imgW, availH/imgH);
+    const drawW = imgW*scale, drawH = imgH*scale;
+    const x = (pageWpt - drawW)/2, y = (pageHpt - drawH)/2;
+
+    const enc = new TextEncoder();
+    const parts = []; // {bytes: Uint8Array}[]
+    let offset = 0;
+    const offsets = [0]; // 1-indexed object offsets（offsets[1]がobj1の位置）
+    function push(strOrBytes){
+      const b = (typeof strOrBytes === 'string') ? enc.encode(strOrBytes) : strOrBytes;
+      parts.push(b); offset += b.length;
+    }
+    function beginObj(n){ offsets[n] = offset; push(`${n} 0 obj\n`); }
+
+    push('%PDF-1.4\n');
+
+    beginObj(1); push('<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+    beginObj(2); push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+    beginObj(3); push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWpt} ${pageHpt}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n`);
+    beginObj(4);
+    push(`<< /Type /XObject /Subtype /Image /Width ${imgW} /Height ${imgH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>\nstream\n`);
+    push(jpegBytes);
+    push('\nendstream\nendobj\n');
+    const content = `q\n${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm\n/Im0 Do\nQ\n`;
+    beginObj(5); push(`<< /Length ${enc.encode(content).length} >>\nstream\n${content}endstream\nendobj\n`);
+
+    const xrefStart = offset;
+    let xref = 'xref\n0 6\n0000000000 65535 f \n';
+    for(let n=1;n<=5;n++){ xref += String(offsets[n]).padStart(10,'0') + ' 00000 n \n'; }
+    push(xref);
+    push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`);
+
+    const total = new Uint8Array(offset);
+    let p=0; for(const part of parts){ total.set(part, p); p += part.length; }
+    return total;
+  }
+
+  document.getElementById('voldia-print-btn').addEventListener('click', () => {
+    const btn = document.getElementById('voldia-print-btn');
+    try{
+      renderer.render(scene, camera); // toDataURL直前に強制再描画（preserveDrawingBuffer未設定のため）
+      const jpegDataURL = renderer.domElement.toDataURL('image/jpeg', 0.92);
+      // A3横 = 420mm×297mm → pt換算(1mm=72/25.4pt)
+      const MM2PT = 72/25.4;
+      const pageW = 420*MM2PT, pageH = 297*MM2PT;
+      const pdfBytes = _buildSingleImagePDF(jpegDataURL, pageW, pageH);
+      const blob = new Blob([pdfBytes], {type:'application/pdf'});
+      const url = URL.createObjectURL(blob);
+      const d = new Date();
+      const pad = n => String(n).padStart(2,'0');
+      const stamp = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}`;
+      const a = Object.assign(document.createElement('a'), {href:url, download:`Vold3DScreen_${stamp}.pdf`});
+      a.click(); URL.revokeObjectURL(url);
+      btn.textContent = '✓ 印刷完了';
+      setTimeout(()=>{ btn.textContent = '🖨 印刷(A3 PDF)'; }, 1800);
+    }catch(e){
+      console.error(e);
+      btn.textContent = '⚠ 失敗';
+      setTimeout(()=>{ btn.textContent = '🖨 印刷(A3 PDF)'; }, 1800);
+    }
+  });
+
+  // ==========================================
+  // 3. プロシージャル・モデリング
+  // ==========================================
+  const matYellow = new THREE.MeshLambertMaterial({ color: 0xf39c12 });
+  const matDark   = new THREE.MeshLambertMaterial({ color: 0x222222 });
+  const matGlass  = new THREE.MeshLambertMaterial({ color: 0x2980b9, transparent: true, opacity: 0.6 });
+  const matSilver = new THREE.MeshLambertMaterial({ color: 0xbdc3c7 });
+  const matSkyBlue = new THREE.MeshLambertMaterial({ color: 0x4fc3f7 }); // r022(追7): 生コン車の車体色
+  const matRedGlow= new THREE.MeshBasicMaterial({ color: 0xff3333 }); 
+
+  const matCraneBody = new THREE.MeshLambertMaterial({ color: 0x1f5c87 }); 
+  const matBoomColor = new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }); 
+  
+  const matWorker = new THREE.MeshLambertMaterial({ color: 0x2e7d32 }); 
+  const matGuard  = new THREE.MeshLambertMaterial({ color: 0x1565c0 }); 
+
+  function createTrussTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 128, 256);
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 16;
+    ctx.strokeRect(0, 0, 128, 256);
+    ctx.beginPath();
+    ctx.moveTo(0, 0); ctx.lineTo(128, 128); ctx.stroke();
+    ctx.moveTo(128, 0); ctx.lineTo(0, 128); ctx.stroke();
+    ctx.moveTo(0, 128); ctx.lineTo(128, 256); ctx.stroke();
+    ctx.moveTo(128, 128); ctx.lineTo(0, 256); ctx.stroke();
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(1, 8);
+    return tex;
+  }
+  const matTruss = new THREE.MeshLambertMaterial({
+    map: createTrussTexture(), transparent: true, alphaTest: 0.5, side: THREE.DoubleSide
+  });
+
+  function createDragMarker(radius = 0.3) {
+    const geo = new THREE.SphereGeometry(radius, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x00aaff, depthTest: false, depthWrite: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 999;
+    mesh.userData.isDragMarker = true; 
+    return mesh;
+  }
+
+  const setShadows = (m) => { m.castShadow = true; m.receiveShadow = true; };
+
+  function addEdgeLines(obj) {
+    const meshes = [];
+    obj.traverse(child => {
+      if (child.isMesh && !child.userData.isRadiusMesh && !child.userData.isBillboard && !child.userData.isEdgeDecoration && !child.userData.isDragMarker && !child.userData.isDragHitbox) {
+        meshes.push(child);
+      }
+    });
+    meshes.forEach(mesh => {
+      const edges = computeEdgesGeometrySafe(mesh.geometry, 30);
+      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x111111 }));
+      line.raycast = function(){};
+      mesh.add(line);
+    });
+  }
+
+  // ★ 矢印（地面追従、厚み付き3Dモデル、水平旋回）の生成
+  function createArrowMesh() {
+    const group = new THREE.Group();
+
+    // ベース部分（黒い土台とポール）
+    const baseGroup = new THREE.Group();
+    const matBlack = new THREE.MeshLambertMaterial({ color: 0x111111 });
+    
+    const dotGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
+    const dotMesh = new THREE.Mesh(dotGeo, matBlack);
+    dotMesh.position.y = 0.05;
+    setShadows(dotMesh);
+    baseGroup.add(dotMesh);
+
+    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.0, 8);
+    const poleObj = new THREE.Mesh(poleGeo, matBlack);
+    poleObj.position.y = 0.5;
+    setShadows(poleObj);
+    baseGroup.add(poleObj);
+
+    group.add(baseGroup);
+
+    // アッパー部分（矢印本体と旋回グリップ）
+    const upperGroup = new THREE.Group();
+    upperGroup.position.set(0, 1.0, 0); 
+    upperGroup.userData.isUpper = true; 
+
+    const matRed = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+
+    const shaftRadius = 0.25;
+    const shaftLength = 2.0;
+    const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 16);
+    shaftGeo.rotateX(Math.PI / 2); 
+    shaftGeo.translate(0, 0, shaftLength / 2 - 0.5); 
+
+    const shaftMesh = new THREE.Mesh(shaftGeo, matRed);
+    setShadows(shaftMesh);
+    shaftMesh.userData.isArrowBody = true;
+    upperGroup.add(shaftMesh);
+
+    const headRadius = 0.7;
+    const headLength = 1.2;
+    const headGeo = new THREE.CylinderGeometry(0, headRadius, headLength, 16);
+    headGeo.rotateX(Math.PI / 2);
+    headGeo.translate(0, 0, shaftLength - 0.5 + headLength / 2); 
+
+    const headMesh = new THREE.Mesh(headGeo, matRed);
+    setShadows(headMesh);
+    headMesh.userData.isArrowBody = true;
+    upperGroup.add(headMesh);
+
+    const marker = createDragMarker(0.25); 
+    marker.position.set(0, 0, shaftLength + headLength + 0.1); 
+    upperGroup.add(marker);
+
+    group.add(upperGroup);
+    return group;
+  }
+
+  function createBackhoe(scale = 1) {
+    const group = new THREE.Group();
+    const trackGeo = new THREE.BoxGeometry(0.7, 0.8, 3.5);
+    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(1.1, 0.4, 0); setShadows(tL);
+    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(-1.1, 0.4, 0); setShadows(tR);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.4, 2.0), matDark); base.position.set(0, 0.6, 0); setShadows(base);
+
+    const upperGroup = new THREE.Group();
+    upperGroup.position.set(0, 0.8, 0);
+    upperGroup.userData.isUpper = true;
+
+    const engine = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 2.4), matYellow); engine.position.set(0, 0.6, -0.2); setShadows(engine);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.5, 1.2), matGlass); cabin.position.set(0.7, 0.75, 0.4); setShadows(cabin);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 1.3), matDark); roof.position.set(0.7, 1.55, 0.4); setShadows(roof);
+    upperGroup.add(engine, cabin, roof);
+
+    const boom = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.5, 0.4), matYellow); boom.position.set(-0.4, 2.0, 1.5); boom.rotation.x = Math.PI / 4; setShadows(boom);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 0.3), matYellow); arm.position.set(-0.4, 2.3, 2.8); arm.rotation.x = -Math.PI / 4; setShadows(arm);
+    const bucket = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.6), matDark); bucket.position.set(-0.4, 1.2, 3.5); bucket.rotation.x = Math.PI / 4; setShadows(bucket);
+    boom.userData.isBoom = true; arm.userData.isBoom = true; bucket.userData.isBoom = true;
+
+    const marker = createDragMarker(0.25);
+    marker.position.set(0, -0.2, 0.4);
+    bucket.add(marker);
+
+    upperGroup.add(boom, arm, bucket);
+    group.add(tL, tR, base, upperGroup);
+    group.scale.set(scale, scale, scale);
+    return group;
+  }
+
+  function createBulldozer(scale = 1) {
+    const group = new THREE.Group();
+    const trackGeo = new THREE.BoxGeometry(0.6, 0.8, 3.0);
+    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(0.9, 0.4, 0); setShadows(tL);
+    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(-0.9, 0.4, 0); setShadows(tR);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 2.5), matYellow); base.position.set(0, 0.7, 0); setShadows(base);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.5, 1.4), matGlass); cab.position.set(0, 1.95, -0.2); setShadows(cab);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 1.5), matYellow); roof.position.set(0, 2.7, -0.2); setShadows(roof);
+    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.8), matDark); pipe.position.set(0.6, 1.6, 0.8); setShadows(pipe);
+
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.0, 0.2), matSilver);
+    blade.position.set(0, 0.5, 1.8);
+    blade.rotation.x = Math.PI / 12;
+    setShadows(blade);
+
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.5), matYellow); armL.position.set(1.0, 0.5, 1.2); setShadows(armL);
+    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.5), matYellow); armR.position.set(-1.0, 0.5, 1.2); setShadows(armR);
+
+    group.add(tL, tR, base, cab, roof, pipe, blade, armL, armR);
+    group.scale.set(scale, scale, scale);
+    return group;
+  }
+
+  function createDump(isLarge = false) {
+    const group = new THREE.Group();
+    const bedLength = isLarge ? 5.5 : 3.5;
+    const zOffset = isLarge ? -1.0 : 0;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matYellow); cab.position.set(0, 1.5, 2.0); setShadows(cab);
+    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, 1.8, 2.0); setShadows(wnd);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, bedLength), matSilver); bed.position.set(0, 1.8, -0.8 + zOffset); setShadows(bed);
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, 0.8, -0.2 + zOffset/2); setShadows(chassis);
+    const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
+    const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset] ];
+    if (isLarge) { positions.push([1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset]); }
+    positions.forEach(p => {
+      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], 0.5, p[1]); setShadows(tire); group.add(tire);
+    });
+    group.add(cab, wnd, bed, chassis);
+    group.rotation.y = Math.PI;
+    return group;
+  }
+
+  function createMixerTruck() {
+    const group = new THREE.Group();
+    const bedLength = 5.5;
+    const zOffset = -1.0;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matSkyBlue); cab.position.set(0, 1.5, 2.0); setShadows(cab);
+    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, 1.8, 2.0); setShadows(wnd);
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, 0.8, -0.2 + zOffset/2); setShadows(chassis);
+
+    const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
+    const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset], [1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset] ];
+    positions.forEach(p => {
+      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], 0.5, p[1]); setShadows(tire); group.add(tire);
+    });
+
+    // r026: マスター提示の側面図に合わせ、単純な片テーパー円柱ではなく
+    // 「コーンを2個、くびれ部分で背中合わせにした紡錘形（＜＞のような形）」に作り直し。
+    // くびれ(中央最大径)を境に、前方(cab側)と後方(hopper/シュート側)それぞれ別のテーパーで先細りさせる。
+    const drumHalfLen = 2.0;   // 中央から前後それぞれの長さ
+    const drumWaistR = 1.25;   // 中央（くびれ）の最大半径
+    const drumFrontTipR = 0.32; // 前方(cab側)先端の半径
+    const drumRearTipR  = 0.42; // 後方(hopper/シュート側)先端の半径（前方よりわずかに太め）
+
+    // 前半（くびれ→前方先端）: ローカルZ 0→+drumHalfLen
+    const drumFrontGeo = new THREE.CylinderGeometry(drumFrontTipR, drumWaistR, drumHalfLen, 16);
+    drumFrontGeo.rotateX(Math.PI / 2);
+    drumFrontGeo.translate(0, 0, drumHalfLen / 2);
+    // 後半（くびれ→後方先端）: ローカルZ 0→-drumHalfLen
+    const drumRearGeo = new THREE.CylinderGeometry(drumWaistR, drumRearTipR, drumHalfLen, 16);
+    drumRearGeo.rotateX(Math.PI / 2);
+    drumRearGeo.translate(0, 0, -drumHalfLen / 2);
+
+    const drumFrontMesh = new THREE.Mesh(drumFrontGeo, matSkyBlue);
+    const drumRearMesh  = new THREE.Mesh(drumRearGeo, matSkyBlue);
+    setShadows(drumFrontMesh); setShadows(drumRearMesh);
+
+    const drum = new THREE.Group();
+    drum.add(drumFrontMesh, drumRearMesh);
+    drum.position.set(0, 2.0, -1.0);
+    drum.rotation.x = Math.PI / 12; // r025: 後方(hopper側)が高くなるよう符号を反転（マスター実車確認による指摘）
+
+    const waterTank = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 0.8), matSilver);
+    waterTank.position.set(0, 1.4, 0.8); setShadows(waterTank);
+
+    const hopper = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 1.0), matSkyBlue);
+    hopper.position.set(0, 2.5, -3.2); setShadows(hopper);
+
+    group.add(cab, wnd, chassis, drum, waterTank, hopper);
+    group.rotation.y = Math.PI;
+    return group;
+  }
+
+  function createPumpTruck() {
+    const group = new THREE.Group();
+    const bedLength = 5.5;
+    const zOffset = -1.0;
+
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matYellow); cab.position.set(0, 1.5, 2.0); setShadows(cab);
+    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, 1.8, 2.0); setShadows(wnd);
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, 0.8, -0.2 + zOffset/2); setShadows(chassis);
+
+    const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
+    const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset], [1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset] ];
+    positions.forEach(p => {
+      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], 0.5, p[1]); setShadows(tire); group.add(tire);
+    });
+
+    const pumpUnit = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.0, 4.0), matSilver);
+    pumpUnit.position.set(0, 1.4, -1.5); setShadows(pumpUnit);
+
+    const outL = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.2, 0.4), matDark); outL.position.set(0, 1.0, 0.5); setShadows(outL);
+    const outR = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.2, 0.4), matDark); outR.position.set(0, 1.0, -3.0); setShadows(outR);
+
+    const upperGroup = new THREE.Group();
+    upperGroup.position.set(0, 1.9, -2.0);
+    upperGroup.userData.isUpper = true;
+
+    const boomGroup = new THREE.Group();
+
+    const arm1Len = 4.0;
+    const arm1Geo = new THREE.BoxGeometry(0.4, arm1Len, 0.6);
+    arm1Geo.translate(0, arm1Len / 2, 0);
+    const arm1 = new THREE.Mesh(arm1Geo, matRedGlow);
+    arm1.rotation.x = Math.PI / 6;
+    arm1.userData.isBoom = true;
+    setShadows(arm1);
+
+    const arm2Len = 3.5;
+    const arm2Geo = new THREE.BoxGeometry(0.3, arm2Len, 0.5);
+    arm2Geo.translate(0, arm2Len / 2, 0);
+    const arm2 = new THREE.Mesh(arm2Geo, matRedGlow);
+    arm2.position.set(0, Math.cos(Math.PI / 6) * arm1Len, Math.sin(Math.PI / 6) * arm1Len);
+    arm2.rotation.x = Math.PI * 0.6;
+    arm2.userData.isBoom = true;
+    setShadows(arm2);
+
+    const arm3Len = 3.0;
+    const arm3Geo = new THREE.BoxGeometry(0.2, arm3Len, 0.4);
+    arm3Geo.translate(0, arm3Len / 2, 0);
+    const arm3 = new THREE.Mesh(arm3Geo, matRedGlow);
+    arm3.position.set(
+      0,
+      Math.cos(Math.PI / 6) * arm1Len + Math.cos(Math.PI * 0.6) * arm2Len,
+      Math.sin(Math.PI / 6) * arm1Len + Math.sin(Math.PI * 0.6) * arm2Len
+    );
+    arm3.rotation.x = Math.PI * 0.8;
+    arm3.userData.isBoom = true;
+    setShadows(arm3);
+
+    const marker = createDragMarker(0.2);
+    marker.position.set(0, arm3Len, 0);
+    arm3.add(marker);
+
+    boomGroup.add(arm1, arm2, arm3);
+    upperGroup.add(boomGroup);
+
+    group.add(cab, wnd, chassis, pumpUnit, outL, outR, upperGroup);
+    group.rotation.y = Math.PI;
+    return group;
+  }
+
+  function createRoughTerrainCrane(type) {
+    const group = new THREE.Group();
+
+    let l = 5.3, w = 2.2, h = 1.2, outR = 5.2, outSpan = 4.4, tZ = 1.6;
+    let upperL = 3.5, upperH = 0.8, cabH = 1.2;
+    if (type === 'rt_25t') { l = 7.9; w = 2.62; h = 1.4; outR = 6.6; outSpan = 6.0; tZ = 2.5; upperL = 4.5; upperH = 0.9; cabH = 1.4; }
+    else if (type === 'rt_60t') { l = 9.7; w = 2.78; h = 1.6; outR = 7.6; outSpan = 7.6; tZ = 3.2; upperL = 5.5; upperH = 1.0; cabH = 1.5; }
+
+    const tR = 0.6;
+    const tD = (w / 2) - 0.2;
+
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), matCraneBody);
+    chassis.position.set(0, tR + h / 2, 0);
+    setShadows(chassis);
+    group.add(chassis);
+
+    const tireGeo = new THREE.CylinderGeometry(tR, tR, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
+    const tirePositions = [];
+    if (type === 'rt_60t') {
+      tirePositions.push([tD, tZ], [-tD, tZ], [tD, tZ - 1.5], [-tD, tZ - 1.5], [tD, -tZ], [-tD, -tZ]);
+    } else {
+      tirePositions.push([tD, tZ], [-tD, tZ], [tD, -tZ], [-tD, -tZ]);
+    }
+    tirePositions.forEach(pos => {
+      const tire = new THREE.Mesh(tireGeo, matDark);
+      tire.position.set(pos[0], tR, pos[1]);
+      setShadows(tire);
+      group.add(tire);
+    });
+
+    const outZ_F = outSpan / 2;
+    const outZ_R = -outSpan / 2;
+    const outriggerBeam = new THREE.BoxGeometry(outR, 0.3, 0.4);
+
+    const beamF = new THREE.Mesh(outriggerBeam, matDark);
+    beamF.position.set(0, tR + 0.3, outZ_F);
+    const beamR = new THREE.Mesh(outriggerBeam, matDark);
+    beamR.position.set(0, tR + 0.3, outZ_R);
+    setShadows(beamF); setShadows(beamR);
+    group.add(beamF, beamR);
+
+    const jackGeo = new THREE.CylinderGeometry(0.12, 0.12, tR + 0.3, 8);
+    jackGeo.translate(0, (tR + 0.3)/2, 0);
+    [ [outR/2, outZ_F], [-outR/2, outZ_F], [outR/2, outZ_R], [-outR/2, outZ_R] ].forEach(pos => {
+      const jack = new THREE.Mesh(jackGeo, matSilver);
+      jack.position.set(pos[0], 0, pos[1]);
+      setShadows(jack);
+
+      const float = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.5), matDark);
+      float.position.set(pos[0], 0.05, pos[1]);
+      setShadows(float);
+
+      group.add(jack, float);
+    });
+
+    const upperGroup = new THREE.Group();
+    const turretZ = -l * 0.05;
+    upperGroup.position.set(0, tR + h + 0.1, turretZ);
+    upperGroup.userData.isUpper = true;
+
+    const rearL = upperL * 0.5;
+    const rearBox = new THREE.Mesh(new THREE.BoxGeometry(w, upperH, rearL), matCraneBody);
+    rearBox.position.set(0, upperH/2, -rearL/2);
+    setShadows(rearBox);
+    upperGroup.add(rearBox);
+
+    const cabW = w / 2;
+    const cabL = upperL * 0.5;
+    const cabBase = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH * 0.5, cabL), matCraneBody);
+    cabBase.position.set(-w/4, cabH * 0.25, cabL/2);
+    setShadows(cabBase);
+    const cabTop = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH * 0.5, cabL * 0.7), matGlass);
+    cabTop.position.set(-w/4, cabH * 0.75, cabL/2 - cabL * 0.15);
+    setShadows(cabTop);
+    upperGroup.add(cabBase, cabTop);
+
+    const boomGroup = new THREE.Group();
+    boomGroup.position.set(w/4, upperH, -rearL * 0.3);
+    boomGroup.rotation.x = Math.PI * (35/180);
+
+    const boomLen = type === 'rt_60t' ? 12 : (type === 'rt_25t' ? 10 : 8);
+    const boomGeo1 = new THREE.BoxGeometry(0.8, boomLen, 0.8);
+    boomGeo1.translate(0, boomLen/2, 0);
+    const boom1 = new THREE.Mesh(boomGeo1, matBoomColor);
+    boom1.userData.isBoom = true;
+    setShadows(boom1);
+
+    const boomGeo2 = new THREE.BoxGeometry(0.6, boomLen * 0.5, 0.6);
+    boomGeo2.translate(0, boomLen + (boomLen * 0.5)/2 - 0.5, 0);
+    const boom2 = new THREE.Mesh(boomGeo2, matBoomColor);
+    boom2.userData.isBoom = true;
+    setShadows(boom2);
+
+    const marker = createDragMarker(0.25);
+    marker.position.set(0, boomLen * 1.45, 0);
+    boom2.add(marker);
+
+    boomGroup.add(boom1, boom2);
+    upperGroup.add(boomGroup);
+
+    group.add(upperGroup);
+    return group;
+  }
+
+  // r025(マスター指示①): 80tクローラークレーンの外形を充実化。
+  // ・ブームのトラス(matTruss)テクスチャ表現は気に入っているとのことでそのまま維持
+  // ・ワイヤー/フックの再現はしない
+  // ・色は既存のmatDark/matCraneBody/matGlassをそのまま流用(変更なし)
+  // ・AreCal 2Dイラスト・実写真を参考に、下部走行体(クローラー)にスプロケット/
+  //   アイドラーの円柱を追加して機械らしさを出し、上部旋回体を「デッキ(エンジン
+  //   ハウス相当)＋カウンターウェイト」の2段構成にしてボリューム感を出し、
+  //   ブーム基部にペデスタル(台座)を追加してブームがせり上がって生えている
+  //   構造を再現した。
+  function createCrawlerCrane() {
+    const group = new THREE.Group();
+
+    const trackL = 5.99, trackW = 0.85, trackH = 1.05, trackOutW = 4.9;
+    const bodyW = 3.3, bodyH = 1.3;
+    const trackX = (trackOutW / 2) - (trackW / 2);
+
+    function buildTrack(x) {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(trackW, trackH, trackL), matDark);
+      body.position.y = trackH / 2;
+      setShadows(body);
+      g.add(body);
+      // スプロケット/アイドラー(前後の円柱)。実車のシルエットに近づける
+      const wheelR = trackH / 2 * 0.92;
+      const wheelGeo = new THREE.CylinderGeometry(wheelR, wheelR, trackW * 1.04, 12);
+      [trackL / 2 - wheelR * 0.5, -(trackL / 2 - wheelR * 0.5)].forEach(z => {
+        const wheel = new THREE.Mesh(wheelGeo, matDark);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(0, wheelR, z);
+        setShadows(wheel);
+        g.add(wheel);
+      });
+      g.position.set(x, 0, 0);
+      return g;
+    }
+    group.add(buildTrack(trackX), buildTrack(-trackX));
+
+    const baseGeo = new THREE.BoxGeometry(trackOutW - trackW * 0.3, trackH * 0.85, trackL * 0.55);
+    const base = new THREE.Mesh(baseGeo, matDark);
+    base.position.set(0, trackH / 2, 0);
+    setShadows(base);
+    group.add(base);
+
+    const upperGroup = new THREE.Group();
+    upperGroup.position.set(0, trackH, 0);
+    upperGroup.userData.isUpper = true;
+
+    // デッキ(下段・幅広): エンジンハウス相当のボリューム
+    const turretZ = -1.6;
+    const deckW = bodyW, deckH = bodyH * 0.55, deckL = 7.4;
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(deckW, deckH, deckL), matCraneBody);
+    deck.position.set(0, deckH / 2, turretZ);
+    setShadows(deck);
+    upperGroup.add(deck);
+
+    // カウンターウェイト(上段・後方寄り、やや幅を絞る): 実車の後部の張り出し
+    const cwW = bodyW * 0.9, cwH = bodyH * 0.65, cwL = deckL * 0.4;
+    const counterweight = new THREE.Mesh(new THREE.BoxGeometry(cwW, cwH, cwL), matCraneBody);
+    counterweight.position.set(0, deckH + cwH / 2, turretZ - deckL / 2 + cwL / 2 + 0.1);
+    setShadows(counterweight);
+    upperGroup.add(counterweight);
+
+    const cabW = 1.0, cabH = 1.5, cabL = 1.7;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH, cabL), matGlass);
+    cab.position.set(-deckW / 2 + cabW / 2 + 0.08, deckH + cabH / 2, turretZ + deckL / 2 - cabL / 2 - 0.1);
+    setShadows(cab);
+    upperGroup.add(cab);
+
+    // ブーム基部のペデスタル(台座): ブームが本体からせり上がって生えている
+    // 構造を再現するための土台
+    const pedestalH = 0.55;
+    const pedestal = new THREE.Mesh(new THREE.BoxGeometry(bodyW * 0.5, pedestalH, 1.0), matCraneBody);
+    pedestal.position.set(0, deckH + pedestalH / 2, 1.0);
+    setShadows(pedestal);
+    upperGroup.add(pedestal);
+
+    const boomGroup = new THREE.Group();
+    boomGroup.position.set(0, deckH + pedestalH, 1.0);
+    boomGroup.rotation.x = Math.PI * (25 / 180);
+
+    const boomLen = 15;
+    const boomGeo1 = new THREE.BoxGeometry(1.0, boomLen, 1.0);
+    boomGeo1.translate(0, boomLen / 2, 0);
+    const boom1 = new THREE.Mesh(boomGeo1, matTruss);
+    boom1.userData.isBoom = true;
+    setShadows(boom1);
+
+    const marker = createDragMarker(0.3);
+    marker.position.set(0, boomLen, 0);
+    boom1.add(marker);
+
+    boomGroup.add(boom1);
+    upperGroup.add(boomGroup);
+
+    group.add(upperGroup);
+    return group;
+  }
+
+  // r025(マスター指示・追1): 測点フラグ。Voldia本体の測点(実座標mm→m変換済み)を
+  // 受け取り、テレイン上(GL, y=0)に自動配置する。ポールはまっすぐ垂直に立てる
+  // (参考画像のイラストは斜めだが、それは絵の見栄え用の傾きなので採用しない)。
+  let surveyFlags = [];
+  let _lastSurveyPoints = []; // r030: 地形GLBの非同期読込完了と測点postMessageの到着順が
+  // 保証されないため(親から同時送信・iframe側はgltfLoader.parseが非同期)、直近の測点座標を
+  // 保持しておき、地形読込が完了するたび(loadTerrainFromArrayBuffer末尾)に必ず再配置し直す。
+  // 新6(2026-08-24 引継ぎ19回目): 本体から受け取ったノースアロー方位角(度、画面上=0・時計回り正)
+  let _northAngleDeg = 0;
+  function updateCompassVisibility(){
+    const wrap = document.getElementById('placement-compass-wrap');
+    if(wrap) wrap.style.display = (_lastSurveyPoints && _lastSurveyPoints.length>0) ? '' : 'none';
+  }
+  let yamadomeMarker = null;
+  let _lastYamadomeLine = []; // r044: 山留ラインも測点と同じ理由で直近座標を保持し、
+  // 地形読込完了のたびに再配置し直す。
+  // 追加2(2026-08-24 引継ぎ18回目): 本体側の実寸値も同様に保持(地形読込完了時の再配置で使う)
+  let _lastYamadomeRealYTop = null, _lastYamadomeRealYBot = null, _lastYamadomeBatterDeg = 1;
+  function createSurveyFlag(no) {
+    const g = new THREE.Group();
+    g.userData = { isRoot: true, type: 'survey_flag', no, isFlag: true };
+    const poleH = 1.6, poleR = 0.022;
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(poleR, poleR, poleH, 8),
+      new THREE.MeshLambertMaterial({ color: 0xded9ba })
+    );
+    pole.position.y = poleH / 2;
+    g.add(pole);
+    // 旗（右に伸びる三角形の吹き流し、上辺だけ少し波打たせる）
+    const fw = 0.56, fh = 0.34;
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(0, fh);
+    shape.quadraticCurveTo(fw * 0.42, fh * 0.8, fw * 0.6, fh * 0.62);
+    shape.lineTo(fw, fh * 0.42);
+    shape.lineTo(0, 0);
+    const flagGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.01, bevelEnabled: false });
+    const flagMesh = new THREE.Mesh(
+      flagGeo,
+      new THREE.MeshLambertMaterial({ color: 0xe8391f, side: THREE.DoubleSide })
+    );
+    flagMesh.position.set(poleR, poleH - fh - 0.02, 0);
+    flagMesh.userData.isFlagCloth = true; // r025(マスター指示): なびきアニメ用マーカー
+    g.add(flagMesh);
+    return g;
+  }
+  function placeSurveyFlags(points) {
+    // r025(マスター指示・追1直し): y=0固定だと浮いてしまう(テレインは平坦でないため)。
+    // 既存オブジェクトと同じspawn+fallingObjects物理演算に乗せて、実際の地形面まで
+    // 落下させるようにする。
+    surveyFlags.forEach(f => scene.remove(f));
+    surveyFlags = [];
+    // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+    points.forEach(p => {
+      const flag = createSurveyFlag(p.no);
+      flag.position.set(p.x, 50, p.z);
+      scene.add(flag);
+      surveyFlags.push(flag);
+
+      fallRaycaster.set(new THREE.Vector3(p.x, 100, p.z), new THREE.Vector3(0, -1, 0));
+      const intersects = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+      let targetY = 0, normal = new THREE.Vector3(0, 1, 0);
+      if (intersects.length > 0) {
+        targetY = intersects[0].point.y;
+        normal = intersects[0].face.normal.clone();
+        const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersects[0].object.matrixWorld);
+        normal.applyMatrix3(normalMatrix).normalize();
+      }
+      // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+      fallingObjects.push({ mesh: flag, targetY, normal, speed: 0, isBouncing: false, vx: 0, vz: 0 });
+    });
+    renderer.shadowMap.needsUpdate = true;
+  }
+  let _yamadomeHatchTex = null;
+  function _getYamadomeHatchTexture(){
+    // r045: 本体側(voldia3d_voldia_rXXX.js)の断面ハッチと統一感を出すため、
+    // 同じ「粗目の縦格子」パターンを配置モード側にも用意する。
+    if (_yamadomeHatchTex) return _yamadomeHatchTex;
+    const cv = document.createElement('canvas');
+    cv.width = 64; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, 64, 64);
+    ctx.fillStyle = 'rgba(255,120,40,0.95)';
+    ctx.fillRect(0, 0, 22, 64);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.needsUpdate = true;
+    _yamadomeHatchTex = tex;
+    return tex;
+  }
+  function placeYamadomeMarker(points, realYTop, realYBot, batterDeg) {
+    // 追加2(2026-08-24 引継ぎ18回目マスター指示): 従来はここで地形へレイキャストして
+    // 天端(GL±0固定)・根切底(推測)の高さを求めていたが、「配置済みの通常計算
+    // オブジェクトと全く同じ形状の山留を描くと、レイキャストがそのオブジェクトの
+    // 上面に誤ヒットしてしまい山留パネルが消える(再現性不明に見えていたのはこれが
+    // 原因)」というバグの温床だった。マスター指示により、地形レイキャストによる
+    // 高さ推測そのものを廃止し、本体側(buildManifoldUnionGeom)で実際に計算済みの
+    // realYTop/realYBotをpostMessageでそのまま受け取って使う方式に変更。
+    // 併せて「厳密に地形に合わせる必要はなく、根切形状より少し手前に出ていて
+    // 気づかれなければ良い」というマスター方針の通り、位置合わせの精度要求を下げつつ
+    // (＝地形との整合を気にしなくてよくなる分、実装は単純かつ堅牢になる)、
+    // 式自体は本体の_buildYamadomeOverlayGeomData()と同一にして厳密一致させている。
+    // ★本体側と同じロジックの意図的な複製(重複)。片方だけ式を変えると再びズレる
+    // 不整合が起きるので、変更時は両方(本体r0XX.jsの_buildYamadomeOverlayGeomDataと
+    // ここ)を必ずセットで直すこと。
+    if (yamadomeMarker) { scene.remove(yamadomeMarker); yamadomeMarker = null; }
+    if (!points || points.length < 3) return;
+    if (typeof realYTop !== 'number' || typeof realYBot !== 'number') {
+      // 本体が土量計算を一度も実行していない(通常計算のみ等)場合はここに来る。
+      // 誤った推測値で描画するより、何も描かない方が安全。
+      console.warn('[YAMADOME] realYTop/realYBot未受信のため山留パネル描画をスキップ(土量計算未実行の可能性)');
+      return;
+    }
+    const STRIPE_W = 0.4; // 本体側と統一(0.4mごとに1縞)
+    const CLEAR = 0.01; // 1cm。本体と統一(空洞側に確保するクリアランス)
+    const n = points.length;
+    const group = new THREE.Group();
+    group.userData = { isRoot: true, type: 'yamadome_marker' };
+    const hatchTex = _getYamadomeHatchTexture();
+    let cenX = 0, cenZ = 0;
+    points.forEach(p => { cenX += p.x; cenZ += p.z; });
+    cenX /= n; cenZ /= n;
+    const BATTER_DEG = (typeof batterDeg === 'number') ? batterDeg : 1; // 本体側と統一
+    const h = Math.max(0.01, realYTop - realYBot);
+    const battOut = Math.tan(BATTER_DEG * Math.PI / 180) * h;
+    let cum = 0; // 境界線に沿った累積距離(m) — ハッチのUがずれないようパネル間で通しにする
+    for (let i = 0; i < n; i++) {
+      try {
+      const a = points[i], b = points[(i + 1) % n];
+      const segLen = Math.hypot(b.x - a.x, b.z - a.z);
+      const midX = (a.x + b.x) / 2, midZ = (a.z + b.z) / 2;
+      const outDx = midX - cenX, outDz = midZ - cenZ;
+      const outLen = Math.hypot(outDx, outDz) || 1;
+      const odx = outDx / outLen, odz = outDz / outLen; // このエッジの外向き単位法線
+      const botOut = -CLEAR, topOut = battOut - CLEAR;
+      const aBot = new THREE.Vector3(a.x + odx * botOut, realYBot, a.z + odz * botOut);
+      const bBot = new THREE.Vector3(b.x + odx * botOut, realYBot, b.z + odz * botOut);
+      const bTop = new THREE.Vector3(b.x + odx * topOut, realYTop, b.z + odz * topOut);
+      const aTop = new THREE.Vector3(a.x + odx * topOut, realYTop, a.z + odz * topOut);
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array([
+        aBot.x, aBot.y, aBot.z,  bBot.x, bBot.y, bBot.z,  bTop.x, bTop.y, bTop.z,
+        aBot.x, aBot.y, aBot.z,  bTop.x, bTop.y, bTop.z,  aTop.x, aTop.y, aTop.z,
+      ]);
+      const u0 = cum / STRIPE_W, u1 = (cum + segLen) / STRIPE_W;
+      const v0 = realYBot / STRIPE_W, v1 = realYTop / STRIPE_W;
+      const uvArr = new Float32Array([
+        u0, v0,  u1, v0,  u1, v1,
+        u0, v0,  u1, v1,  u0, v1,
+      ]);
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+      geo.computeVertexNormals();
+      const mat = new THREE.MeshBasicMaterial({
+        map: hatchTex, color: 0xffffff, transparent: true, opacity: 0.55,
+        side: THREE.DoubleSide, depthWrite: false, depthTest: true
+      });
+      const panel = new THREE.Mesh(geo, mat);
+      panel.renderOrder = 10; // 地形(既定renderOrder=0)より後に描画してZファイティングのちらつきを軽減
+      group.add(panel);
+      cum += segLen;
+      } catch (e) {
+        console.error('[YAMADOME-PANEL] edge', i, 'で例外', e);
+      }
+    }
+    yamadomeMarker = group;
+    scene.add(yamadomeMarker);
+  }
+  window.addEventListener('pointermove', e => {
+    if (surveyFlags.length === 0) return;
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(surveyFlags, true);
+    const tip = document.getElementById('flag-hover-tip');
+    if (hits.length > 0) {
+      let obj = hits[0].object;
+      while (obj && !obj.userData.isRoot) obj = obj.parent;
+      if (obj && obj.userData.type === 'survey_flag') {
+        tip.style.display = 'block';
+        tip.textContent = '📍 No.' + obj.userData.no;
+        tip.style.left = (e.clientX + 14) + 'px';
+        tip.style.top = (e.clientY - 28) + 'px';
+        return;
+      }
+    }
+    tip.style.display = 'none';
+  });
+
+  function createWorker(isGuard = false) {
+    const group = new THREE.Group();
+    const shape = new THREE.Shape();
+    
+    // ★ 警備員: 修正済みのL字ポーズ
+    if (isGuard) {
+      shape.moveTo(-0.18, 2.0); 
+      shape.lineTo( 0.18, 2.0); 
+      shape.lineTo( 0.18, 1.65); 
+      shape.lineTo( 0.40, 1.65); 
+      shape.lineTo( 0.40, 2.15); 
+      shape.lineTo( 0.60, 2.15); 
+      shape.lineTo( 0.60, 1.45); 
+      shape.lineTo( 0.28, 1.45); 
+      shape.lineTo( 0.28, 0.85); 
+      shape.lineTo( 0.42, 0.0);  
+      shape.lineTo( 0.15, 0.0);  
+      shape.lineTo( 0.0,  0.75); 
+      shape.lineTo(-0.15, 0.0);  
+      shape.lineTo(-0.42, 0.0);  
+      shape.lineTo(-0.28, 0.85); 
+      shape.lineTo(-0.28, 1.35); 
+      shape.lineTo(-0.35, 1.35); 
+      shape.lineTo(-0.35, 0.6);  
+      shape.lineTo(-0.55, 0.6);  
+      shape.lineTo(-0.55, 1.55); 
+      shape.lineTo(-0.18, 1.65); 
+      shape.lineTo(-0.18, 2.0);  
+    } else {
+      shape.moveTo(-0.18, 2.0); 
+      shape.lineTo( 0.18, 2.0); 
+      shape.lineTo( 0.18, 1.65); 
+      shape.lineTo( 0.55, 1.55); 
+      shape.lineTo( 0.55, 0.6); 
+      shape.lineTo( 0.35, 0.6); 
+      shape.lineTo( 0.35, 1.35); 
+      shape.lineTo( 0.28, 1.35); 
+      shape.lineTo( 0.28, 0.85); 
+      shape.lineTo( 0.42, 0.0); 
+      shape.lineTo( 0.15, 0.0); 
+      shape.lineTo( 0.0,  0.75); 
+      shape.lineTo(-0.15, 0.0); 
+      shape.lineTo(-0.42, 0.0); 
+      shape.lineTo(-0.28, 0.85); 
+      shape.lineTo(-0.28, 1.35); 
+      shape.lineTo(-0.35, 1.35); 
+      shape.lineTo(-0.35, 0.6); 
+      shape.lineTo(-0.55, 0.6); 
+      shape.lineTo(-0.55, 1.55); 
+      shape.lineTo(-0.18, 1.65); 
+      shape.lineTo(-0.18, 2.0);
+    }
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.2, bevelEnabled: false });
+    geo.center(); 
+    const mat = isGuard ? matGuard : matWorker;
+    const body = new THREE.Mesh(geo, mat);
+    body.position.set(0, 1.0, 0);
+    setShadows(body);
+    group.add(body);
+
+    if (isGuard) {
+      // 修正済みの誘導棒配置
+      const batonGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8);
+      batonGeo.translate(0, 0.25, 0); 
+      const baton = new THREE.Mesh(batonGeo, matRedGlow);
+      
+      const wristX = 0.50 - 0.025;
+      const wristY = 2.15 - 1.075 + 1.0; 
+      
+      baton.position.set(wristX, wristY, 0.1); 
+      baton.rotation.z = -Math.PI / 6; 
+      baton.rotation.x = Math.PI / 8;  
+      group.add(baton);
+    }
+    return group;
+  }
+
+  function createStripedTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#f1c40f'; ctx.fillRect(0, 0, 256, 256); ctx.fillStyle = '#111111';
+    for (let i = -256; i < 512; i += 64) {
+      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 128, 256); ctx.lineTo(i + 128 + 32, 256); ctx.lineTo(i + 32, 0); ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(canvas); tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(4, 1);
+    return tex;
+  }
+  const matStripe = new THREE.MeshLambertMaterial({ map: createStripedTexture() });
+  const matCone   = new THREE.MeshLambertMaterial({ color: 0xe74c3c });
+  const matWhite  = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+  function createConeBar() {
+    const group = new THREE.Group();
+    const makeCone = (xPos) => {
+      const cGrp = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.4), matCone); base.position.set(0, 0.025, 0); setShadows(base);
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.18, 0.7, 16), matCone); body.position.set(0, 0.35, 0); setShadows(body);
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.15, 16), matWhite); band.position.set(0, 0.45, 0);
+      cGrp.add(base, body, band); cGrp.position.set(xPos, 0, 0); return cGrp;
+    };
+    group.add(makeCone(-1.0), makeCone(1.0));
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.0, 8), matStripe);
+    bar.rotation.z = Math.PI / 2; bar.position.set(0, 0.65, 0); setShadows(bar); group.add(bar);
+    return group;
+  }
+
+  function createCustomBoxMesh(w, d, h, colorHex) {
+    const group = new THREE.Group();
+    const geo = new THREE.BoxGeometry(w, h, d);
+    geo.translate(0, h / 2, 0);
+    const mat = new THREE.MeshLambertMaterial({ color: colorHex });
+    const mesh = new THREE.Mesh(geo, mat);
+    setShadows(mesh);
+    group.add(mesh);
+    return group;
+  }
+
+  function createTextBalloonMesh(text) {
+    const group = new THREE.Group();
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const lines = text.split('\n');
+    ctx.font = "bold 32px 'Segoe UI', sans-serif";
+    
+    let maxWidth = 0;
+    lines.forEach(line => {
+      const metrics = ctx.measureText(line);
+      if (metrics.width > maxWidth) maxWidth = metrics.width;
+    });
+    
+    const padding = 20;
+    const tailHeight = 30;
+    const tailWidth = 30;
+    const lineHeight = 40;
+    const boxWidth = maxWidth + padding * 2;
+    const boxHeight = lines.length * lineHeight + padding * 2;
+    
+    canvas.width = boxWidth;
+    canvas.height = boxHeight + tailHeight;
+    
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 4;
+    const r = 10;
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(boxWidth - r, 0);
+    ctx.quadraticCurveTo(boxWidth, 0, boxWidth, r);
+    ctx.lineTo(boxWidth, boxHeight - r);
+    ctx.quadraticCurveTo(boxWidth, boxHeight, boxWidth - r, boxHeight);
+    
+    ctx.lineTo(boxWidth/2 + tailWidth/2, boxHeight);
+    ctx.lineTo(boxWidth/2, boxHeight + tailHeight);
+    ctx.lineTo(boxWidth/2 - tailWidth/2, boxHeight);
+    
+    ctx.lineTo(r, boxHeight);
+    ctx.quadraticCurveTo(0, boxHeight, 0, boxHeight - r);
+    ctx.lineTo(0, r);
+    ctx.quadraticCurveTo(0, 0, r, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    
+    ctx.fillStyle = '#111';
+    ctx.textBaseline = 'top';
+    ctx.font = "bold 32px 'Segoe UI', sans-serif";
+    lines.forEach((line, i) => {
+      ctx.fillText(line, padding, padding + i * lineHeight);
+    });
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const aspect = canvas.width / canvas.height;
+    const scaleY = (boxHeight + tailHeight) / 50; 
+    const scaleX = scaleY * aspect;
+    
+    const planeGeo = new THREE.PlaneGeometry(scaleX, scaleY);
+    planeGeo.translate(0, scaleY / 2, 0);
+    
+    const material = new THREE.MeshLambertMaterial({ 
+      map: texture, 
+      transparent: true,
+      alphaTest: 0.1, 
+      side: THREE.DoubleSide
+    });
+    
+    const billboard = new THREE.Mesh(planeGeo, material);
+    billboard.castShadow = true; 
+    
+    billboard.userData.isBillboard = true;
+    billboard.userData.baseScaleX = scaleX;
+    billboard.userData.baseScaleY = scaleY;
+    billboard.userData.scaleMultiplier = 1;
+
+    billboard.position.y = 0.5;
+    group.add(billboard);
+
+    const dotGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 16);
+    const dotMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+    const dotMesh = new THREE.Mesh(dotGeo, dotMat);
+    dotMesh.position.y = 0.025; 
+    dotMesh.castShadow = true;
+    group.add(dotMesh);
+
+    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8);
+    const poleMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+    const poleObj = new THREE.Mesh(poleGeo, poleMat);
+    poleObj.position.y = 0.25;
+    poleObj.castShadow = true;
+    group.add(poleObj);
+    
+    return group;
+  }
+
+  // ==========================================
+  // ★ 地形に沿う作業半径・線描画ロジック
+  // ==========================================
+  const fallRaycaster = new THREE.Raycaster();
+  
+  function getSnappedLinePoints(p1, p2) {
+    const points = [];
+    const dist = Math.hypot(p2.x - p1.x, p2.z - p1.z);
+    const segments = Math.max(1, Math.ceil(dist / 0.5)); 
+    
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const px = p1.x + (p2.x - p1.x) * t;
+      const pz = p1.z + (p2.z - p1.z) * t;
+      
+      fallRaycaster.set(new THREE.Vector3(px, 100, pz), new THREE.Vector3(0, -1, 0));
+      const hits = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+      let py = p1.y + (p2.y - p1.y) * t; 
+      if (hits.length > 0) {
+        py = hits[0].point.y + 0.15; 
+      }
+      points.push(new THREE.Vector3(px, py, pz));
+    }
+    return points;
+  }
+
+  function updateWorkingRadius(craneObj) {
+    if (craneObj.userData.radiusMesh) {
+      scene.remove(craneObj.userData.radiusMesh);
+      craneObj.userData.radiusMesh.geometry.dispose();
+      craneObj.userData.radiusMesh.material.dispose();
+      craneObj.userData.radiusMesh = null;
+    }
+    
+    const r = craneObj.userData.radiusValue;
+    if (!r || r <= 0) return;
+
+    const points = [];
+    const segments = 64; 
+    const cx = craneObj.position.x;
+    const cz = craneObj.position.z;
+    const upVector = new THREE.Vector3(0, -1, 0);
+    
+    for (let i = 0; i < segments; i++) {
+      const theta = (i / segments) * Math.PI * 2;
+      const px = cx + Math.cos(theta) * r;
+      const pz = cz + Math.sin(theta) * r;
+      
+      fallRaycaster.set(new THREE.Vector3(px, 100, pz), upVector);
+      const hits = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+      if (hits.length > 0) {
+        points.push(new THREE.Vector3(px, hits[0].point.y + 0.15, pz)); 
+      } else {
+        points.push(new THREE.Vector3(px, craneObj.position.y, pz));
+      }
+    }
+    points.push(points[0].clone());
+    
+    const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', 0);
+    const tubeGeo = new THREE.TubeGeometry(curve, segments, 0.15, 4, false);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff3333, transparent: true, opacity: 0.6 });
+    const ringMesh = new THREE.Mesh(tubeGeo, ringMat);
+    ringMesh.raycast = function(){}; 
+    ringMesh.userData.isRadiusMesh = true;
+    
+    ringMesh.visible = !craneObj.userData.isFallen;
+    
+    scene.add(ringMesh);
+    craneObj.userData.radiusMesh = ringMesh;
+  }
+
+  // ==========================================
+  // ★ テンキーUI操作ロジック
+  // ==========================================
+  let currentTargetCrane = null;
+  let numpadValue = "";
+
+  function openNumpad(craneObj) {
+    currentTargetCrane = craneObj;
+    numpadValue = "";
+    document.getElementById('numpad-display').innerText = "0";
+    document.getElementById('numpad-ui').style.display = "block";
+    controls.enabled = false;
+  }
+
+  function closeNumpad() {
+    document.getElementById('numpad-ui').style.display = "none";
+    currentTargetCrane = null;
+    controls.enabled = true;
+  }
+
+  document.querySelectorAll('.numpad-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const val = e.target.innerText;
+      if (val === 'C') {
+        numpadValue = "";
+        document.getElementById('numpad-display').innerText = "0";
+      } else if (val.includes('OK')) {
+        applyWorkingRadius();
+        closeNumpad();
+      } else {
+        if (numpadValue.length < 5) {
+          if (val === '.' && numpadValue.includes('.')) return; 
+          numpadValue += val;
+          document.getElementById('numpad-display').innerText = numpadValue;
+        }
+      }
+    });
+  });
+
+  document.getElementById('numpad-cancel').addEventListener('click', closeNumpad);
+
+  function applyWorkingRadius() {
+    if (!currentTargetCrane) return;
+    const r = parseFloat(numpadValue);
+    
+    if (isNaN(r) || r <= 0) {
+      if (currentTargetCrane.userData.radiusMesh) {
+        scene.remove(currentTargetCrane.userData.radiusMesh);
+        currentTargetCrane.userData.radiusMesh = null;
+      }
+      currentTargetCrane.userData.radiusValue = 0;
+      return;
+    }
+    
+    currentTargetCrane.userData.radiusValue = r;
+    updateWorkingRadius(currentTargetCrane);
+  }
+
+  // ==========================================
+  // ★ カスタムボックス用 UIロジック
+  // ==========================================
+  let boxParams = { boxW: "1.0", boxD: "1.0", boxH: "1.0" };
+  let activeBoxParam = null; 
+  let isFreshSelection = false; 
+  let boxColor = 0xe74c3c;
+
+  document.querySelectorAll('.box-input-group').forEach(el => {
+    el.addEventListener('click', () => {
+      document.querySelectorAll('.box-input-group').forEach(e => e.classList.remove('active'));
+      el.classList.add('active');
+      activeBoxParam = el.dataset.target;
+      isFreshSelection = true; 
+    });
+  });
+
+  document.querySelectorAll('.b-color-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.b-color-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      boxColor = parseInt(btn.dataset.color, 16);
+    });
+  });
+
+  document.querySelectorAll('.box-numpad-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      if (!activeBoxParam) return; 
+      
+      const val = e.target.innerText;
+      let curr = boxParams[activeBoxParam];
+      
+      if (val === 'C') {
+        curr = "0";
+        isFreshSelection = false;
+      } else {
+        if (isFreshSelection) {
+          curr = ""; 
+          isFreshSelection = false;
+        }
+        if (curr === "0" && val !== ".") curr = "";
+        if (curr.length < 5) {
+          if (val === '.' && curr.includes('.')) return;
+          if (curr === "" && val === ".") curr = "0";
+          curr += val;
+        }
+      }
+      if (curr === "") curr = "0";
+      boxParams[activeBoxParam] = curr;
+      document.getElementById('box-val-' + activeBoxParam).innerText = curr;
+    });
+  });
+
+  document.getElementById('box-btn-cancel').addEventListener('click', () => {
+    exitPlacementMode();
+  });
+
+  document.getElementById('box-btn-ok').addEventListener('click', () => {
+    document.getElementById('box-input-ui').style.display = 'none';
+    currentType = 'custom_box';
+    document.getElementById('placement-mode-msg').style.display = 'block';
+    document.getElementById('placement-msg-text').innerText = "ボックスの配置場所をクリックしてください";
+    document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+    setTimeout(() => { controls.enabled = true; }, 10);
+  });
+
+  // ==========================================
+  // ★ オブジェクトの衝突・重なり回避ロジック
+  // ==========================================
+  function getBoundingBox(obj) {
+    const box = new THREE.Box3();
+    obj.traverse(child => {
+      if (child.isMesh && !child.userData.isRadiusMesh && !child.userData.isBillboard && !child.userData.isDragMarker && !child.userData.isDragHitbox) {
+        const geometry = child.geometry;
+        if (geometry) {
+          if (!geometry.boundingBox) geometry.computeBoundingBox();
+          const childBox = geometry.boundingBox.clone();
+          childBox.applyMatrix4(child.matrixWorld);
+          box.union(childBox);
+        }
+      }
+    });
+    // r015: 当たり判定用ボックスを各辺35%ずつ内側に縮小。ファイル復元時は
+    // 「配置→地形に着地→少し遅れて保存済みの向きを再適用」という順序に
+    // なっており、衝突判定が実際に走る瞬間の向きと最終的な向きがズレる
+    // ことがある（重機は向きによって世界座標AABBの大きさ・形が変わる
+    // ため）。多少の食い込みを許容する余裕を持たせておくことで、この
+    // 向きのズレによる誤判定（本来重ならないのに押し出される／本来
+    // 重なるのに素通りする）の影響を和らげる。
+    if(!box.isEmpty()){
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const inset = size.multiplyScalar(0.35 * 0.5); // 各辺35%(片側17.5%ずつ)
+      box.min.add(inset);
+      box.max.sub(inset);
+    }
+    return box;
+  }
+
+  function checkOverlapSimple(obj) {
+    if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow') return false; 
+    const objBox = getBoundingBox(obj);
+    for (const other of placedObjects) {
+      // r065: 構台は「載る面」であって障害物ではないため、通常の衝突判定からは除外する
+      if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai') continue;
+      const otherBox = getBoundingBox(other);
+      if (objBox.intersectsBox(otherBox)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function resolveKotaiOverlap(obj) {
+    // r065: 構台が非表示の間に配置/移動したオブジェクトが、構台を再表示した際に
+    // 衝突しないよう先回りでスライドさせる。checkOverlapSimple/resolveOverlapは
+    // 構台を除外しているため、この専用チェックで補う。
+    if (!obj || obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow' || obj.userData.type === 'kotai') return;
+    if (kotaiMeshes.length === 0) return;
+    let overlap = true, attempts = 0;
+    while (overlap && attempts < 30) {
+      overlap = false;
+      obj.updateMatrixWorld(true);
+      const objBox = getBoundingBox(obj);
+      for (const km of kotaiMeshes) {
+        km.updateMatrixWorld(true);
+        const kBox = getBoundingBox(km);
+        if (objBox.intersectsBox(kBox)) {
+          overlap = true;
+          const c1 = new THREE.Vector3(); objBox.getCenter(c1);
+          const c2 = new THREE.Vector3(); kBox.getCenter(c2);
+          let dx = c1.x - c2.x, dz = c1.z - c2.z;
+          if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) { dx = Math.random() - 0.5; dz = Math.random() - 0.5; }
+          const len = Math.hypot(dx, dz) || 1;
+          obj.position.x += (dx / len) * 1.0;
+          obj.position.z += (dz / len) * 1.0;
+          break;
+        }
+      }
+      attempts++;
+    }
+  }
+
+  function resolveOverlap(obj) {
+    if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow') return; 
+    let overlap = true;
+    let attempts = 0;
+    while (overlap && attempts < 30) {
+      overlap = false;
+      obj.updateMatrixWorld(true);
+      const objBox = getBoundingBox(obj);
+      
+      for (const other of placedObjects) {
+        if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai') continue;
+        other.updateMatrixWorld(true);
+        const otherBox = getBoundingBox(other);
+        
+        if (objBox.intersectsBox(otherBox)) {
+          overlap = true;
+          const c1 = new THREE.Vector3();
+          objBox.getCenter(c1);
+          const c2 = new THREE.Vector3();
+          otherBox.getCenter(c2);
+          
+          let dx = c1.x - c2.x;
+          let dz = c1.z - c2.z;
+          if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) {
+            dx = Math.random() - 0.5;
+            dz = Math.random() - 0.5;
+          }
+          const len = Math.hypot(dx, dz);
+          const pushDist = 1.0; 
+          obj.position.x += (dx / len) * pushDist;
+          obj.position.z += (dz / len) * pushDist;
+          break; 
+        }
+      }
+      attempts++;
+    }
+  }
+
+  function checkFallenStatus(obj, isDrop = false) {
+    const excemptTypes = ['bh_mini', 'bh_025', 'bh_045', 'bh_07', 'bh_12', 'custom_box', 'conebar', 'worker', 'guard', 'text_balloon', 'arrow'];
+    if (excemptTypes.includes(obj.userData.type)) return;
+
+    const isFallen = obj.userData.normal.y < 0.995; 
+    
+    if (isFallen !== obj.userData.isFallen) {
+      obj.userData.isFallen = isFallen;
+      
+      obj.traverse(child => {
+        if (child.isMesh && child.material && !child.userData.isRadiusMesh && !child.userData.isBillboard && !child.userData.isDragMarker && !child.userData.isDragHitbox) {
+          if (isFallen) {
+            child.material.emissive.setHex(0xaa0000); 
+          } else {
+            child.material.emissive.setHex(0x000000); 
+          }
+        }
+      });
+      
+      if (obj.userData.radiusMesh) {
+        obj.userData.radiusMesh.visible = !isFallen;
+      }
+    }
+
+    if (isDrop && isFallen) {
+      showToast('⚠️ 倒れているオブジェクトがあります');
+    }
+  }
+
+  function removeObject(mesh) {
+    scene.remove(mesh);
+    if (mesh.userData.radiusMesh) {
+      scene.remove(mesh.userData.radiusMesh);
+      mesh.userData.radiusMesh.geometry.dispose();
+      mesh.userData.radiusMesh.material.dispose();
+    }
+    // r065(AIS修正案): scene.remove()だけではgeometry/materialのGPUメモリが
+    // 解放されず、削除を繰り返すとメモリリークするバグを修正。子要素(当たり判定
+    // ヒットボックス・輪郭線・テキストスプライト等)も含めて全てdispose()する。
+    mesh.traverse(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+        } else {
+          if (child.material.map) child.material.map.dispose();
+          child.material.dispose();
+        }
+      }
+    });
+    const idx = placedObjects.indexOf(mesh);
+    if (idx !== -1) placedObjects.splice(idx, 1);
+    renderer.shadowMap.needsUpdate = true; 
+  }
+
+  // ==========================================
+  // ★ 仮囲い（線引き）ステート管理とカラーピッカー
+  // ==========================================
+  let currentLinePoints = []; 
+  let currentLineMesh = null; 
+  let previewLineMesh = null; 
+  let fenceLines = []; 
+  let fenceToDelete = null;
+  let currentLineColor = 0xf1c40f; 
+  let _lineCloseHover = false; // r025: 始点付近ホバー中かどうか（マスター指示: 線を始点クリックで閉じる機能）
+  const LINE_CLOSE_DIST = 1.0; // r025: 始点への吸着判定距離（ワールド座標,メートル）
+
+  document.querySelectorAll('.color-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentLineColor = parseInt(btn.dataset.color, 16);
+    });
+  });
+
+  function updateCurrentLineMesh() {
+    if (currentLineMesh) {
+      scene.remove(currentLineMesh);
+      currentLineMesh = null;
+    }
+    if (currentLinePoints.length < 2) return;
+    
+    currentLineMesh = new THREE.Group();
+    currentLineMesh.userData.isFenceLine = true;
+    
+    for (let i = 0; i < currentLinePoints.length - 1; i++) {
+      const pts = getSnappedLinePoints(currentLinePoints[i], currentLinePoints[i+1]);
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0);
+      const geo = new THREE.TubeGeometry(curve, pts.length, 0.15, 6, false);
+      const mat = new THREE.MeshBasicMaterial({ color: currentLineColor }); 
+      const mesh = new THREE.Mesh(geo, mat);
+      currentLineMesh.add(mesh);
+    }
+    scene.add(currentLineMesh);
+  }
+
+  function updatePreviewLine(targetPoint) {
+    if (previewLineMesh) {
+      scene.remove(previewLineMesh);
+      previewLineMesh.geometry.dispose();
+      previewLineMesh.material.dispose();
+      previewLineMesh = null;
+    }
+    if (currentLinePoints.length === 0) return;
+    
+    const lastPt = currentLinePoints[currentLinePoints.length - 1];
+    const pts = getSnappedLinePoints(lastPt, targetPoint);
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0);
+    const geo = new THREE.TubeGeometry(curve, pts.length, 0.15, 6, false);
+    const mat = new THREE.MeshBasicMaterial({ color: currentLineColor, transparent: true, opacity: 0.5 });
+    previewLineMesh = new THREE.Mesh(geo, mat);
+    previewLineMesh.raycast = function(){};
+    scene.add(previewLineMesh);
+  }
+
+  // ==========================================
+  // ★ モード終了・ツールリセットの一元管理
+  // ==========================================
+  function exitPlacementMode() {
+    if (!currentType) return;
+    const t = currentType;
+    currentType = null;
+    
+    if (t === 'line') {
+      if (currentLinePoints.length > 1) {
+        fenceLines.push(currentLineMesh);
+      } else if (currentLineMesh) {
+        scene.remove(currentLineMesh);
+      }
+      if (previewLineMesh) scene.remove(previewLineMesh);
+      currentLineMesh = null;
+      previewLineMesh = null;
+      currentLinePoints = [];
+      _lineCloseHover = false;
+      document.getElementById('line-close-tip').style.display = 'none';
+    }
+
+    if (t === 'kotai') {
+      _kotaiCleanupListeners();
+      _kotaiClearPreview();
+      _kotaiRestoreCamera();
+      kotaiPoints = [];
+    }
+
+    if (t === 'h_pile') {
+      _hpileExit();
+    }
+
+    cancelTextInput(); 
+    document.getElementById('box-input-ui').style.display = 'none';
+    controls.enabled = true;
+    
+    document.querySelectorAll('.pal-btn').forEach(b => b.classList.remove('active'));
+    placementMarker.visible = false;
+    document.getElementById('placement-mode-msg').style.display = 'none';
+    document.getElementById('line-color-picker').style.display = 'none';
+    document.getElementById('finish-line-btn').style.display = 'none';
+  }
+
+  function finishLine() {
+    exitPlacementMode();
+  }
+
+  document.getElementById('finish-line-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    finishLine();
+  });
+
+  document.getElementById('custom-confirm-yes').addEventListener('click', () => {
+    if (fenceToDelete) {
+      scene.remove(fenceToDelete);
+      fenceLines.splice(fenceLines.indexOf(fenceToDelete), 1);
+      fenceToDelete.traverse(child => {
+        if(child.isMesh) {
+          child.geometry.dispose();
+          child.material.dispose();
+        }
+      });
+      showToast('🗑️ 線を削除しました');
+      fenceToDelete = null;
+    }
+    document.getElementById('custom-confirm-overlay').style.display = 'none';
+    controls.enabled = true;
+  });
+
+  document.getElementById('custom-confirm-no').addEventListener('click', () => {
+    fenceToDelete = null;
+    document.getElementById('custom-confirm-overlay').style.display = 'none';
+    controls.enabled = true;
+  });
+
+  // ==========================================
+  // ★ テキスト入力UIロジック
+  // ==========================================
+  let pendingTextPos = null;
+  let editingBalloonObj = null; // r025: 右クリック編集対象（新規作成時はnull）
+
+  function cancelTextInput() {
+    document.getElementById('text-input-ui').style.display = 'none';
+    pendingTextPos = null;
+    editingBalloonObj = null;
+    controls.enabled = true;
+  }
+
+  document.getElementById('text-btn-cancel').addEventListener('click', () => {
+    editingBalloonObj = null;
+    exitPlacementMode();
+  });
+
+  document.getElementById('text-btn-ok').addEventListener('click', () => {
+    const text = document.getElementById('text-input-area').value.trim();
+    if (text && editingBalloonObj) {
+      // r025: 編集モード。ビルボード（テキスト部分）だけ差し替え、位置/dot/pole等は維持
+      const oldBillboard = editingBalloonObj.children.find(c => c.userData.isBillboard);
+      if (oldBillboard) {
+        editingBalloonObj.remove(oldBillboard);
+        oldBillboard.geometry.dispose();
+        oldBillboard.material.map.dispose();
+        oldBillboard.material.dispose();
+      }
+      const freshGroup = createTextBalloonMesh(text);
+      const newBillboard = freshGroup.children.find(c => c.userData.isBillboard);
+      editingBalloonObj.add(newBillboard);
+      editingBalloonObj.userData.text = text;
+      renderer.shadowMap.needsUpdate = true; 
+    } else if (text && pendingTextPos) {
+      const balloon = createTextBalloonMesh(text);
+      balloon.position.copy(pendingTextPos);
+      balloon.userData = { isRoot: true, type: 'text_balloon', yaw: 0, isFallen: false, radiusValue: 0, isPlaced: true, text: text };
+      scene.add(balloon);
+      placedObjects.push(balloon);
+      renderer.shadowMap.needsUpdate = true; 
+    }
+    const _wasBalloonPlaced = !!(text && pendingTextPos && !editingBalloonObj);
+    cancelTextInput();
+    exitPlacementMode(); 
+    if (_wasBalloonPlaced) showToast('✅ 吹き出しを設置しました　⏎ Enterでリピート可');
+  });
+
+
+  // ==========================================
+  // 4. UIロジックと配置管理
+  // ==========================================
+  let currentType = null;
+  let _lastPalBtnForRepeat = null; // r051: Enterキーでのリピート機能。構台(kotai)・保存系は対象外。
+  const placedObjects = []; 
+
+  document.querySelectorAll('.pal-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // r051: リピート機能(手動・Enterキー)用に直前選択ボタンを記録。構台(kotai)は対象外。
+      if(btn.dataset.type !== 'kotai') _lastPalBtnForRepeat = btn;
+      const nextType = btn.dataset.type;
+      const isSame = (currentType === nextType);
+
+      if (currentType) exitPlacementMode();
+      
+      if (isSame) return; 
+      
+      btn.classList.add('active');
+      currentType = nextType;
+      
+      if (currentType === 'custom_box_input') {
+        document.getElementById('box-input-ui').style.display = 'block';
+        controls.enabled = false;
+        
+        boxParams = { boxW: "1.0", boxD: "1.0", boxH: "1.0" };
+        activeBoxParam = null; 
+        isFreshSelection = false; 
+        document.querySelectorAll('.box-input-group').forEach(e => e.classList.remove('active'));
+        document.getElementById('box-val-boxW').innerText = "1.0";
+        document.getElementById('box-val-boxD').innerText = "1.0";
+        document.getElementById('box-val-boxH').innerText = "1.0";
+        
+        boxColor = 0xe74c3c;
+        document.querySelectorAll('.b-color-btn').forEach(b => b.classList.remove('active'));
+        document.querySelector('.b-color-btn[data-color="0xe74c3c"]').classList.add('active');
+        return;
+      }
+
+      const msg = document.getElementById('placement-mode-msg');
+      msg.style.display = 'block';
+      
+      if (currentType === 'line') {
+        document.getElementById('placement-msg-text').innerText = "1点目をクリックしてください";
+        document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+        document.getElementById('line-color-picker').style.display = "flex";
+        document.getElementById('finish-line-btn').style.display = "none";
+      } else if (currentType === 'text_balloon' || currentType === 'arrow') {
+        document.getElementById('placement-msg-text').innerText = "配置場所をクリックしてください";
+        document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+        document.getElementById('line-color-picker').style.display = "none";
+        document.getElementById('finish-line-btn').style.display = "none";
+      } else if (currentType === 'h_pile') {
+        document.getElementById('placement-msg-text').innerText = "3Dビュー上の配置位置をクリックしてください";
+        document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+        document.getElementById('line-color-picker').style.display = "none";
+        document.getElementById('finish-line-btn').style.display = "none";
+        _hpileEnter();
+      } else if (currentType === 'kotai') {
+        // r062: 構台。真上カメラへ切替、多角形描画モードへ入る
+        document.getElementById('placement-msg-text').innerText = "頂点をクリックしてください（0.5mグリッドにスナップ）";
+        document.getElementById('placement-msg-sub').innerText = "始点クリックまたはダブルクリックで確定／Escでキャンセル";
+        document.getElementById('line-color-picker').style.display = "none";
+        document.getElementById('finish-line-btn').style.display = "none";
+        enterKotaiMode();
+      } else {
+        document.getElementById('placement-msg-text').innerText = "✨ 選択したオブジェクトを配置してください";
+        document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+        document.getElementById('line-color-picker').style.display = "none";
+        document.getElementById('finish-line-btn').style.display = "none";
+      }
+    });
+  });
+
+  // r051: リピート機能(手動・Enterキー)。何も選択していない状態でEnterを押すと
+  // 直前に使ったパレット項目(構台=kotaiは対象外)を再選択する。テキスト入力欄
+  // フォーカス中や各種ダイアログ表示中は誤爆防止のため無効化する。
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (currentType) return; // 何か選択中(配置待ち)なら何もしない
+    if (!_lastPalBtnForRepeat) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    const isFormFocus = tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable);
+    const textUiOpen = document.getElementById('text-input-ui') && document.getElementById('text-input-ui').style.display !== 'none';
+    const boxUiOpen = document.getElementById('box-input-ui') && document.getElementById('box-input-ui').style.display !== 'none';
+    const confirmOverlayOpen = document.getElementById('custom-confirm-overlay') && document.getElementById('custom-confirm-overlay').style.display !== 'none';
+    const kotaiConfirmOpen = document.getElementById('kotai-confirm-overlay') && document.getElementById('kotai-confirm-overlay').style.display !== 'none';
+    if (isFormFocus || textUiOpen || boxUiOpen || confirmOverlayOpen || kotaiConfirmOpen) return;
+    e.preventDefault();
+    _lastPalBtnForRepeat.click();
+    showToast(`↩ リピート: ${_lastPalBtnForRepeat.textContent.trim()}`);
+  });
+
+  const radarCanvas = document.getElementById('radar-canvas');
+  const radarCtx = radarCanvas.getContext('2d');
+  let mapRange = 50; 
+  let mapCenter = { x: 0, z: 0 };
+  let kotaiFitRange = 50; // r051: 構台開始時の全体表示用(customGround拡張分を含まない)
+  let terrainMinY = 0; // r062: 地形全体の絶対最低点(鋼材柱の下端に使用)
+  let kotaiMeshes = []; // r063: 構台メッシュ一覧。存在する間は配置先を構台に一本化する
+  let kotaiVisible = true;
+  function _getFloorMeshes(){
+    // r065: 構台は地形の「代わり」ではなく「追加の面」。組み合わせて渡すことで
+    // 地面には常に置けつつ、構台がある場所ではレイの最近傍ヒット(構台の方が
+    // 地形より手前)が自然に優先される。以前の「構台のみ」方式は構台の外側で
+    // 着地先が見つからず無限落下する不具合があったため撤回。
+    return (kotaiMeshes.length > 0 && kotaiVisible) ? [...terrainMeshes, ...kotaiMeshes] : terrainMeshes;
+  }
+
+  function worldToRadar(wx, wz) {
+    const u = ((wx - mapCenter.x + mapRange) / (mapRange * 2)) * radarCanvas.width;
+    const v = ((wz - mapCenter.z + mapRange) / (mapRange * 2)) * radarCanvas.height;
+    return { u, v };
+  }
+  function radarToWorld(u, v) {
+    const wx = (u / radarCanvas.width) * (mapRange * 2) - mapRange + mapCenter.x;
+    const wz = (v / radarCanvas.height) * (mapRange * 2) - mapRange + mapCenter.z;
+    return { wx, wz };
+  }
+
+  const fallingObjects = [];
+
+  function spawnObject(wx, wz) {
+    let mesh;
+    if (currentType === 'bh_mini') mesh = createBackhoe(0.6);
+    else if (currentType === 'bh_025') mesh = createBackhoe(0.8);
+    else if (currentType === 'bh_045') mesh = createBackhoe(1.0);
+    else if (currentType === 'bh_07') mesh = createBackhoe(1.4);
+    else if (currentType === 'bh_12') mesh = createBackhoe(1.8);
+    else if (currentType === 'bd_08t') mesh = createBulldozer(0.8);
+    else if (currentType === 'bd_13t') mesh = createBulldozer(1.0);
+    else if (currentType === 'bd_20t') mesh = createBulldozer(1.3);
+    else if (currentType === 'dump_4t') mesh = createDump(false);
+    else if (currentType === 'dump_10t') mesh = createDump(true);
+    else if (currentType === 'mx_10t') mesh = createMixerTruck();
+    else if (currentType === 'cp_10t') mesh = createPumpTruck();
+    else if (currentType === 'arrow') mesh = createArrowMesh();
+    else if (currentType === 'custom_box') {
+      const bw = parseFloat(boxParams.boxW) || 1.0;
+      const bd = parseFloat(boxParams.boxD) || 1.0;
+      const bh = parseFloat(boxParams.boxH) || 1.0;
+      mesh = createCustomBoxMesh(bw, bd, bh, boxColor);
+    }
+    else if (currentType.startsWith('rt_') || currentType === 'cr_80t') {
+      if (currentType === 'cr_80t') mesh = createCrawlerCrane();
+      else mesh = createRoughTerrainCrane(currentType);
+    }
+    else if (currentType === 'worker') mesh = createWorker(false);
+    else if (currentType === 'guard') mesh = createWorker(true);
+    else if (currentType === 'conebar') mesh = createConeBar();
+
+    mesh.traverse(child => {
+      if (child.isMesh && child.material) {
+        child.material = child.material.clone();
+      }
+    });
+
+    mesh.position.set(wx, 50, wz); 
+    mesh.userData = { isRoot: true, type: currentType, color: getTypeColor(currentType), yaw: 0, isFallen: false, radiusValue: 0, isPlaced: false };
+    if(currentType === 'custom_box'){
+      mesh.userData.boxW = parseFloat(boxParams.boxW) || 1.0;
+      mesh.userData.boxD = parseFloat(boxParams.boxD) || 1.0;
+      mesh.userData.boxH = parseFloat(boxParams.boxH) || 1.0;
+      mesh.userData.boxColor = boxColor;
+    }
+    
+    if (currentType !== 'text_balloon' && currentType !== 'line' && currentType !== 'arrow') {
+      addEdgeLines(mesh);
+    }
+
+    scene.add(mesh);
+    placedObjects.push(mesh);
+
+    fallRaycaster.set(new THREE.Vector3(wx, 100, wz), new THREE.Vector3(0, -1, 0));
+    const intersects = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+
+    let targetY = -Infinity;
+    let normal = new THREE.Vector3(0, 1, 0); 
+
+    if (intersects.length > 0) {
+      targetY = intersects[0].point.y;
+      normal = intersects[0].face.normal.clone();
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersects[0].object.matrixWorld);
+      normal.applyMatrix3(normalMatrix).normalize();
+    }
+
+    fallingObjects.push({ mesh: mesh, targetY: targetY, normal: normal, speed: 0, isBouncing: false, vx: 0, vz: 0 });
+  }
+
+  radarCanvas.addEventListener('mousedown', e => {
+    if (!currentType) return; 
+    const rect = radarCanvas.getBoundingClientRect();
+    const u = e.clientX - rect.left;
+    const v = e.clientY - rect.top;
+    const { wx, wz } = radarToWorld(u, v);
+    
+    if (currentType === 'line') {
+      fallRaycaster.set(new THREE.Vector3(wx, 100, wz), new THREE.Vector3(0, -1, 0));
+      const hits = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+      if (hits.length > 0) {
+        // r025: 始点付近クリックで線を閉じて終了（マスター指示）
+        if (currentLinePoints.length >= 2 && hits[0].point.distanceTo(currentLinePoints[0]) < LINE_CLOSE_DIST) {
+          currentLinePoints.push(currentLinePoints[0].clone());
+          updateCurrentLineMesh();
+          finishLine();
+          return;
+        }
+        currentLinePoints.push(hits[0].point);
+        if (currentLinePoints.length === 1) {
+          document.getElementById('placement-msg-text').innerText = "次の点をクリックしてください";
+          document.getElementById('placement-msg-sub').innerText = "（右クリックで1つ戻る）";
+          document.getElementById('finish-line-btn').style.display = "inline-block";
+        }
+        updateCurrentLineMesh();
+      }
+    } else if (currentType !== 'kotai' && currentType !== 'h_pile' && currentType !== 'text_balloon' && currentType !== 'custom_box_input') {
+      spawnObject(wx, wz);
+      exitPlacementMode(); 
+    }
+  });
+
+  // ==========================================
+  // ★ r062: 鋼材柱 (H鋼杭)
+  // ==========================================
+  // 標準的なH形鋼の断面(300x300、フランジ厚15mm、ウェブ厚10mmを想定)を
+  // アウトライン1本(穴なし)で表現し、縦方向(Y軸)に押し出す。
+  function createHPileMesh(heightM) {
+    const W = 0.3, TF = 0.015, TW = 0.01; // 断面寸法(m)
+    const shape = new THREE.Shape();
+    shape.moveTo(-W/2, -W/2);
+    shape.lineTo(W/2, -W/2);
+    shape.lineTo(W/2, -W/2+TF);
+    shape.lineTo(TW/2, -W/2+TF);
+    shape.lineTo(TW/2, W/2-TF);
+    shape.lineTo(W/2, W/2-TF);
+    shape.lineTo(W/2, W/2);
+    shape.lineTo(-W/2, W/2);
+    shape.lineTo(-W/2, W/2-TF);
+    shape.lineTo(-TW/2, W/2-TF);
+    shape.lineTo(-TW/2, -W/2+TF);
+    shape.lineTo(-W/2, -W/2+TF);
+    shape.lineTo(-W/2, -W/2);
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: heightM, bevelEnabled: false });
+    geo.rotateX(Math.PI / 2); // (x,y,z)→(x,-z,y): z=0面がy=0(上端)、z=heightM面がy=-heightM(下端)
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, metalness: 0.6, roughness: 0.4, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    // r064: H形鋼の断面は薄く(フランジ/ウェブ幅10〜15mm)、中央部分は空洞のため
+    // 実ジオメトリだけでは掴む判定が非常にシビアだった(マスター指摘: 上の方は
+    // 特に掴みにくい)。断面全体を覆う太さ0.3m相当の透明円柱を当たり判定専用
+    // として重ね、ドラッグ開始のピック判定を掴みやすくする。見た目には出さず、
+    // 影・輪郭線・バウンディングボックス(衝突判定)・他オブジェクトの着地先
+    // 判定からは isDragHitbox フラグで除外する。
+    const hitboxGeo = new THREE.CylinderGeometry(0.3, 0.3, heightM, 8);
+    const hitboxMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
+    const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
+    hitbox.position.y = -heightM / 2; // メッシュのローカル座標は上端y=0・下端y=-heightM
+    hitbox.userData.isDragHitbox = true;
+    hitbox.castShadow = false;
+    hitbox.receiveShadow = false;
+    mesh.add(hitbox);
+
+    return mesh;
+  }
+
+  const HPILE_TOP_Y = 0.4; // r062: 鋼材柱の天端固定値(GL+0.4)。配置時・ドラッグ移動後・復元時で共有
+
+  function placeHPile(wx, wz) {
+    const topY = HPILE_TOP_Y;
+    const heightM = topY - terrainMinY;
+    if (heightM <= 0) { showToast('⚠️ 地形の高さが不正なため鋼材柱を配置できません'); return; }
+    const mesh = createHPileMesh(heightM);
+    mesh.position.set(wx, topY, wz);
+    mesh.userData = { isRoot: true, type: 'h_pile', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true, heightM, color: '#8d6e63' };
+    addEdgeLines(mesh);
+    scene.add(mesh);
+    placedObjects.push(mesh);
+    renderer.shadowMap.needsUpdate = true;
+  }
+
+  // r064: 鋼材柱は3Dビューを直接クリックして配置する(PLAN-VIEW/レーダー配置は廃止)。
+  // クリック位置は常に地形(terrainMeshes)へのレイキャストで取得する(構台があっても
+  // 構台面ではなく実際の地面位置に設置するため、_getFloorMeshes()は使わない)。
+  // 正確なポイント選択のためカーソルをクロスヘアに変更する。
+  function _hpileOnPointerDown(e) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const m = new THREE.Vector2(
+      (e.clientX / window.innerWidth) * 2 - 1,
+      -(e.clientY / window.innerHeight) * 2 + 1
+    );
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(m, camera);
+    const hits = rc.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+    if (!hits.length) return;
+    placeHPile(hits[0].point.x, hits[0].point.z);
+    exitPlacementMode();
+  }
+  function _hpileEnter() {
+    renderer.domElement.style.cursor = 'crosshair';
+    renderer.domElement.addEventListener('pointerdown', _hpileOnPointerDown);
+  }
+  function _hpileExit() {
+    renderer.domElement.style.cursor = '';
+    renderer.domElement.removeEventListener('pointerdown', _hpileOnPointerDown);
+  }
+
+  // ==========================================
+  // ★ r062: 構台（真上カメラ + 多角形描画 → 厚み0.4m/天端+1mの3Dオブジェクト化）
+  // ==========================================
+  let kotaiPoints = [];
+  let kotaiPreviewMesh = null;
+  let kotaiPointMarkers = [];
+  let _kotaiSavedCam = null; // { pos, target }
+  const KOTAI_TOP_Y = 0.4;   // 天端 GL+0.4m
+  const KOTAI_THICK = 0.4;   // 厚み0.4m
+  const kotaiGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y=0(GL)平面
+
+  function _kotaiRaycastGround(clientX, clientY) {
+    const m = new THREE.Vector2(
+      (clientX / window.innerWidth) * 2 - 1,
+      -(clientY / window.innerHeight) * 2 + 1
+    );
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(m, camera);
+    const pt = new THREE.Vector3();
+    const hit = rc.ray.intersectPlane(kotaiGroundPlane, pt);
+    return hit ? pt : null;
+  }
+
+  // r064: 旧・角度スナップ(_kotaiApplyOrtho、15°/90°+1m距離丸め)を廃止。
+  // 1m単位の距離スナップだと斜め線を引いた後に始点へぴったり戻れない不具合が
+  // あったため(角度と距離を独立に丸めると座標が無理数的にズレる)、根本的に
+  // 「0.5mグリッド上の格子点しか置けない」方式に変更した。
+  // 直前点からの移動方向は、以下の4系統・計16方向(各系統を4象限に展開)のみ許可する:
+  //   ・縦横(カーディナル)  : (du,dv)=(±1,0)/(0,±1)
+  //   ・縦1×横1 = 45°      : (du,dv)=(±1,±1)
+  //   ・縦2×横1 = 63.434949°: (du,dv)=(±1,±2)
+  //   ・縦1×横2 = 26.565051°: (du,dv)=(±2,±1)
+  // du,dvは0.5m単位のセル数。原点は最初にクリックした点(kotaiPoints[0])で、
+  // 各点は直前点からセル単位の整数移動しかしないため、原点からの相対座標は
+  // 常に0.5mグリッドの格子点に厳密に一致する(始点へのぴったり復帰を保証)。
+  const KOTAI_GRID = 0.5; // 1m→0.5mに変更(マスター指示)
+  const KOTAI_DIRS = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],       // 縦横
+    [1, 1], [1, -1], [-1, 1], [-1, -1],     // 45度
+    [1, 2], [1, -2], [-1, 2], [-1, -2],     // 63.434949度
+    [2, 1], [2, -1], [-2, 1], [-2, -1],     // 26.565051度
+  ];
+  function _kotaiApplyGridSnap(prevPt, pt) {
+    const rawDu = (pt.x - prevPt.x) / KOTAI_GRID;
+    const rawDv = (pt.z - prevPt.z) / KOTAI_GRID;
+    if (Math.hypot(rawDu, rawDv) < 1e-6) return prevPt.clone();
+    const rawAngle = Math.atan2(rawDv, rawDu);
+    let best = KOTAI_DIRS[0], bestDiff = Infinity;
+    for (const dir of KOTAI_DIRS) {
+      const angle = Math.atan2(dir[1], dir[0]);
+      let diff = Math.abs(rawAngle - angle);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+      if (diff < bestDiff) { bestDiff = diff; best = dir; }
+    }
+    const [du, dv] = best;
+    let k = Math.round((rawDu * du + rawDv * dv) / (du * du + dv * dv));
+    if (k < 1) k = 1; // 0長を避け、最低1マスは進む
+    return new THREE.Vector3(prevPt.x + du * k * KOTAI_GRID, 0, prevPt.z + dv * k * KOTAI_GRID);
+  }
+
+  let _kotaiCamCenter = null; // {x,z} 現在の注視点(パンで移動)
+  let _kotaiCamHeight = 20;   // 現在のカメラ高さ(ホイールでズーム)
+  let _kotaiPanning = false;
+  let _kotaiPanLast = null;
+
+  function enterKotaiMode() {
+    kotaiPoints = [];
+    _kotaiSavedCam = { pos: camera.position.clone(), target: controls.target.clone() };
+    controls.enabled = false;
+    // r051マスター指摘対応: 拡張範囲(customGround)込みのmapRangeではなく、
+    // 元のオブジェクト(地形)自体の範囲(kotaiFitRange)だけを見渡す高さにする
+    _kotaiCamHeight = Math.max(kotaiFitRange * 2.2, 8);
+    _kotaiCamCenter = { x: mapCenter.x, z: mapCenter.z };
+    camera.up.set(0, 0, -1);
+    _kotaiApplyCamera();
+
+    renderer.domElement.addEventListener('pointerdown', _kotaiOnPointerDown);
+    renderer.domElement.addEventListener('pointermove', _kotaiOnPointerMove);
+    renderer.domElement.addEventListener('pointerup', _kotaiOnPointerUp);
+    renderer.domElement.addEventListener('dblclick', _kotaiOnDblClick);
+    renderer.domElement.addEventListener('wheel', _kotaiOnWheel, { passive: false });
+    window.addEventListener('keydown', _kotaiOnKeyDown);
+  }
+
+  function _kotaiApplyCamera() {
+    camera.position.set(_kotaiCamCenter.x, _kotaiCamHeight, _kotaiCamCenter.z);
+    camera.lookAt(_kotaiCamCenter.x, 0, _kotaiCamCenter.z);
+  }
+
+  function _kotaiOnWheel(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const factor = e.deltaY > 0 ? 1.1 : 0.9;
+    _kotaiCamHeight = Math.min(Math.max(_kotaiCamHeight * factor, 3), mapRange * 8);
+    _kotaiApplyCamera();
+  }
+
+  function _kotaiCleanupListeners() {
+    renderer.domElement.removeEventListener('pointerdown', _kotaiOnPointerDown);
+    renderer.domElement.removeEventListener('pointermove', _kotaiOnPointerMove);
+    renderer.domElement.removeEventListener('pointerup', _kotaiOnPointerUp);
+    renderer.domElement.removeEventListener('dblclick', _kotaiOnDblClick);
+    renderer.domElement.removeEventListener('wheel', _kotaiOnWheel);
+    window.removeEventListener('keydown', _kotaiOnKeyDown);
+    _kotaiPanning = false;
+    _kotaiPanLast = null;
+  }
+
+  function _kotaiRestoreCamera() {
+    if (_kotaiSavedCam) {
+      camera.position.copy(_kotaiSavedCam.pos);
+      camera.up.set(0, 1, 0);
+      controls.target.copy(_kotaiSavedCam.target);
+      controls.update();
+      _kotaiSavedCam = null;
+    }
+    controls.enabled = true;
+  }
+
+  function _kotaiClearPreview() {
+    if (kotaiPreviewMesh) { scene.remove(kotaiPreviewMesh); kotaiPreviewMesh = null; }
+    kotaiPointMarkers.forEach(m => scene.remove(m));
+    kotaiPointMarkers = [];
+  }
+
+  function _kotaiAddPointMarker(pt) {
+    const geo = new THREE.SphereGeometry(0.35, 12, 12);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffb300 });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(pt).setY(0.05);
+    m.raycast = function(){};
+    scene.add(m);
+    kotaiPointMarkers.push(m);
+  }
+
+  function _kotaiUpdatePreviewLine(hoverPt) {
+    if (kotaiPreviewMesh) { scene.remove(kotaiPreviewMesh); kotaiPreviewMesh = null; }
+    if (kotaiPoints.length === 0) return;
+    const pts = kotaiPoints.map(p => new THREE.Vector3(p.x, 0.05, p.z));
+    if (hoverPt) pts.push(new THREE.Vector3(hoverPt.x, 0.05, hoverPt.z));
+    if (pts.length < 2) return;
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: 0xffb300, linewidth: 2 });
+    kotaiPreviewMesh = new THREE.Line(geo, mat);
+    kotaiPreviewMesh.raycast = function(){};
+    scene.add(kotaiPreviewMesh);
+  }
+
+  function _kotaiOnPointerDown(e) {
+    e.stopPropagation();
+    if (e.button === 1) { e.preventDefault(); _kotaiPanning = true; _kotaiPanLast = { x: e.clientX, y: e.clientY }; return; }
+    if (e.button === 2) { _kotaiShowExitConfirm(); return; }
+    if (e.button !== 0) return;
+    let pt = _kotaiRaycastGround(e.clientX, e.clientY);
+    if (!pt) return;
+    if (kotaiPoints.length > 0) {
+      pt = _kotaiApplyGridSnap(kotaiPoints[kotaiPoints.length - 1], pt);
+    }
+    // 始点付近クリックで閉じる
+    if (kotaiPoints.length >= 4 && pt.distanceTo(kotaiPoints[0]) < LINE_CLOSE_DIST) {
+      finishKotai();
+      return;
+    }
+    kotaiPoints.push(pt);
+    _kotaiAddPointMarker(pt);
+    _kotaiUpdatePreviewLine(null);
+  }
+
+  function _kotaiOnPointerMove(e) {
+    if (_kotaiPanning) {
+      // レイキャストベースでドラッグ量をワールド座標に変換(カメラ向きに依存しない安全な方式)
+      const oldGround = _kotaiRaycastGround(_kotaiPanLast.x, _kotaiPanLast.y);
+      const newGround = _kotaiRaycastGround(e.clientX, e.clientY);
+      if (oldGround && newGround) {
+        _kotaiCamCenter.x -= (newGround.x - oldGround.x);
+        _kotaiCamCenter.z -= (newGround.z - oldGround.z);
+        _kotaiApplyCamera();
+      }
+      _kotaiPanLast = { x: e.clientX, y: e.clientY };
+      return;
+    }
+    if (kotaiPoints.length === 0) return;
+    let pt = _kotaiRaycastGround(e.clientX, e.clientY);
+    if (!pt) return;
+    if (kotaiPoints.length > 0) pt = _kotaiApplyGridSnap(kotaiPoints[kotaiPoints.length - 1], pt);
+    _kotaiUpdatePreviewLine(pt);
+  }
+
+  function _kotaiOnPointerUp(e) {
+    if (e.button === 1) { _kotaiPanning = false; _kotaiPanLast = null; }
+  }
+
+  function _kotaiOnDblClick(e) {
+    e.stopPropagation();
+    if (kotaiPoints.length >= 4) finishKotai();
+  }
+
+  function _kotaiOnKeyDown(e) {
+    if (e.key === 'Escape') { exitPlacementMode(); }
+  }
+
+  let _kotaiConfirmCallback = null;
+  function _kotaiShowConfirm(msg, onYes) {
+    document.getElementById('kotai-confirm-msg').textContent = msg;
+    _kotaiConfirmCallback = onYes;
+    document.getElementById('kotai-confirm-overlay').style.display = 'flex';
+  }
+  function _kotaiShowExitConfirm() {
+    _kotaiShowConfirm('構台作図を終了しますか？', finishKotai);
+  }
+
+  function deleteKotaiMesh(mesh) {
+    scene.remove(mesh);
+    mesh.traverse(c => {
+      if (c.isMesh) { c.geometry.dispose(); c.material.dispose(); }
+      if (c.isLineSegments) { c.geometry.dispose(); c.material.dispose(); }
+    });
+    const pi = placedObjects.indexOf(mesh);
+    if (pi >= 0) placedObjects.splice(pi, 1);
+    const ki = kotaiMeshes.indexOf(mesh);
+    if (ki >= 0) kotaiMeshes.splice(ki, 1);
+    renderer.shadowMap.needsUpdate = true; // r062: 削除後、影が残ったままになる問題の対策
+    _kotaiUpdateToggleBtn();
+    showToast('🗑️ 構台を削除しました');
+  }
+
+  function _kotaiUpdateToggleBtn() {
+    const btn = document.getElementById('kotai-toggle-btn');
+    if (!btn) return;
+    if (kotaiMeshes.length === 0) { btn.style.display = 'none'; return; }
+    btn.style.display = 'inline-block';
+    btn.textContent = kotaiVisible ? '🏗️ 構台 表示中' : '🏗️ 構台 非表示中';
+  }
+  function _boxIntersectsAnyKotai(obj) {
+    obj.updateMatrixWorld(true);
+    const objBox = getBoundingBox(obj);
+    return kotaiMeshes.some(km => {
+      km.updateMatrixWorld(true);
+      return objBox.intersectsBox(getBoundingBox(km));
+    });
+  }
+
+  document.getElementById('kotai-toggle-btn').addEventListener('click', () => {
+    if (!kotaiVisible) {
+      // r065: 再表示前に、構台と実際にバウンディングボックスが重なるオブジェクトが
+      // ないか確認する(鋼材柱は貫通する前提のため対象外)。配置時にresolveKotaiOverlapで
+      // 先回り回避しているため、通常はここに引っかからない想定の最終安全策。
+      const blocking = placedObjects.some(o =>
+        o.userData.type !== 'kotai' && o.userData.type !== 'h_pile' && o.userData.isPlaced &&
+        _boxIntersectsAnyKotai(o)
+      );
+      if (blocking) {
+        showToast('⚠️ オブジェクトに当たるため、構台を表示できません');
+        return;
+      }
+      kotaiVisible = true;
+      kotaiMeshes.forEach(m => { m.visible = true; });
+    } else {
+      kotaiVisible = false;
+      kotaiMeshes.forEach(m => { m.visible = false; });
+      // r065: 構台の上に乗っていたオブジェクトは当たり判定を失うので地形へ落下させる
+      placedObjects.forEach(o => {
+        if (o.userData.type === 'kotai' || o.userData.type === 'h_pile' || !o.userData.isPlaced) return;
+        if (!_boxIntersectsAnyKotai(o)) return;
+        fallRaycaster.set(new THREE.Vector3(o.position.x, 100, o.position.z), new THREE.Vector3(0, -1, 0));
+        const hits = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+        if (hits.length) {
+          o.userData.isPlaced = false;
+          fallingObjects.push({ mesh: o, targetY: hits[0].point.y, normal: new THREE.Vector3(0, 1, 0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+        }
+      });
+    }
+    renderer.shadowMap.needsUpdate = true; // r062: 表示/非表示切替直後に影が更新されない問題の対策
+    _kotaiUpdateToggleBtn();
+  });
+
+
+  // r064: 自己交差など「表示に問題が出る形状」の検出。ClipperLib等の外部ライブラリを
+  // 使わず、非隣接エッジ同士の単純な線分交差判定(CCW法)で十分実用的に検出できる。
+  function _segmentsProperlyIntersect(p1, p2, p3, p4) {
+    function ccw(a, b, c) { return (c.z - a.z) * (b.x - a.x) - (b.z - a.z) * (c.x - a.x); }
+    const d1 = ccw(p3, p4, p1), d2 = ccw(p3, p4, p2), d3 = ccw(p1, p2, p3), d4 = ccw(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
+  function _kotaiPolygonSelfIntersects(points) {
+    const n = points.length;
+    if (n < 4) return false;
+    for (let i = 0; i < n; i++) {
+      const a1 = points[i], a2 = points[(i + 1) % n];
+      for (let j = i + 1; j < n; j++) {
+        if (j === i + 1 || (i === 0 && j === n - 1)) continue; // 隣接エッジ(頂点共有)は除外
+        const b1 = points[j], b2 = points[(j + 1) % n];
+        if (_segmentsProperlyIntersect(a1, a2, b1, b2)) return true;
+      }
+    }
+    return false;
+  }
+
+  function _buildKotaiMesh(points) {
+    const shape = new THREE.Shape();
+    shape.moveTo(points[0].x, points[0].z);
+    for (let i = 1; i < points.length; i++) shape.lineTo(points[i].x, points[i].z);
+    shape.lineTo(points[0].x, points[0].z);
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: KOTAI_THICK, bevelEnabled: false });
+    geo.rotateX(Math.PI / 2); // z=0面(輪郭)がy=0、z=KOTAI_THICK面がy=-KOTAI_THICK
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x78909c, metalness: 0.3, roughness: 0.7, side: THREE.DoubleSide, transparent: true, opacity: 0.55 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = KOTAI_TOP_Y; // 輪郭(y=0)がKOTAI_TOP_Yに来る→天端がKOTAI_TOP_Y、下端がKOTAI_TOP_Y-KOTAI_THICK
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData = {
+      isRoot: true, type: 'kotai', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true,
+      color: '#78909c', kotaiPoints: points.map(p => ({ x: p.x, z: p.z }))
+    };
+    addEdgeLines(mesh);
+    scene.add(mesh);
+    placedObjects.push(mesh);
+    kotaiMeshes.push(mesh); // r063: 配置先レイキャストを構台に一本化するための登録
+    renderer.shadowMap.needsUpdate = true;
+    _kotaiUpdateToggleBtn();
+  }
+
+  function finishKotai() {
+    if (kotaiPoints.length < 4) {
+      // r066: 点が3つ以下の状態で「終了しますか？」にYesした場合、従来は
+      // 何もせず放置され(placement modeに閉じ込められる)ループの一因になっていた。
+      // 作れる形状が無いのだから、素直に配置モードを抜ける。
+      kotaiPoints = [];
+      _kotaiClearPreview();
+      exitPlacementMode();
+      return;
+    }
+    // r066(マスター指摘): 自己交差形状のまま頂点を残していると、右クリック→
+    // 「終了しますか？」→Yes→finishKotai()→異常形状で弾かれる→まだ終了扱いに
+    // ならず点も残る…という抜け出せないループになっていた。異常形状を検出したら
+    // 作図中のライン・頂点マーカーをその場で消去し、すぐにやり直せる状態にする。
+    if (_kotaiPolygonSelfIntersects(kotaiPoints)) {
+      showToast('⚠️ この形状は作図出来ません（線をやり直してください）');
+      kotaiPoints = [];
+      _kotaiClearPreview();
+      return;
+    }
+    _buildKotaiMesh(kotaiPoints);
+    exitPlacementMode();
+  }
+
+  document.getElementById('kotai-confirm-yes').addEventListener('click', () => {
+    document.getElementById('kotai-confirm-overlay').style.display = 'none';
+    const cb = _kotaiConfirmCallback; _kotaiConfirmCallback = null;
+    if (cb) cb();
+  });
+  document.getElementById('kotai-confirm-no').addEventListener('click', () => {
+    document.getElementById('kotai-confirm-overlay').style.display = 'none';
+    _kotaiConfirmCallback = null;
+  });
+
+  function getTypeColor(type) {
+    if (!type) return '#ffffff';
+    if (type === 'line') return '#f1c40f'; 
+    if (type.startsWith('bh_')) return '#f39c12';
+    if (type.startsWith('bd_')) return '#f39c12';
+    if (type.startsWith('dump_')) return '#bdc3c7';
+    if (type.startsWith('rt_') || type === 'cr_80t') return '#1f5c87';
+    if (type === 'custom_box') return '#' + boxColor.toString(16).padStart(6, '0');
+    if (type === 'arrow') return '#ff0000';
+    if (type === 'text_balloon') return '#ffffff'; 
+    if (type === 'worker') return '#2e7d32'; 
+    if (type === 'guard') return '#1565c0'; 
+    if (type === 'conebar') return '#e74c3c'; 
+    if (type === 'h_pile') return '#8d6e63';
+    return '#ffffff'; 
+  }
+
+  // ==========================================
+  // 5. ドラッグ移動 ＆ クリック回転 ＆ モード分離
+  // ==========================================
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+
+  let dragObj = null;
+  let dragOffset = new THREE.Vector3();
+  let isDragging = false;
+  let pointerDownPos = { x: 0, y: 0 };
+  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); 
+
+  function updateOrientation(obj) {
+    if (obj.userData.type === 'text_balloon') {
+      return; 
+    }
+    const n = obj.userData.normal || new THREE.Vector3(0, 1, 0);
+    const yaw = obj.userData.yaw || 0;
+    const qNormal = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    obj.quaternion.copy(qNormal).multiply(qYaw);
+  }
+
+  window.addEventListener('dblclick', e => {
+    if (currentType) return; 
+    
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    
+    // ★ コメントと矢印のダブルクリック判定（サイズ拡大）
+    const objHits = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
+    if (objHits.length > 0) {
+      let obj = objHits[0].object;
+      while (obj && !obj.userData.isRoot) { obj = obj.parent; }
+      if (obj) {
+        if (obj.userData.type === 'kotai') {
+          _kotaiShowConfirm('構台を削除しますか？', () => deleteKotaiMesh(obj));
+          return;
+        } else if (obj.userData.type === 'arrow') {
+          let upper = null;
+          obj.traverse(c => { if (c.userData.isUpper) upper = c; });
+          if (upper) {
+            let currentM = obj.userData.scaleMultiplier || 1;
+            currentM = (currentM % 3) + 1;
+            obj.userData.scaleMultiplier = currentM;
+            upper.scale.set(currentM, currentM, currentM);
+            // r011: upperGroupはローカル原点(headRadius=0.7だけ下に張り出した
+            // 円錐形状の中心)を基準に拡大されるため、倍率を上げるほど矢印の
+            // 下端がポール高さ(1.0)より下、最悪地面下まで沈む
+            // （headRadius×倍率が沈み込み量）。ポール高さはそのままに、
+            // 沈んだ分だけ上に持ち上げて元の見た目の高さを維持する。
+            const ARROW_HEAD_RADIUS = 0.7; // createArrowMesh()のheadRadiusと同じ値
+            upper.position.y = 1.0 + (currentM - 1) * ARROW_HEAD_RADIUS;
+          }
+          renderer.shadowMap.needsUpdate = true;
+          return; 
+        } else if (obj.userData.type === 'text_balloon') {
+          obj.children.forEach(child => {
+            if (child.userData.isBillboard) {
+              child.userData.scaleMultiplier = (child.userData.scaleMultiplier % 3) + 1;
+              const m = child.userData.scaleMultiplier;
+              child.scale.set(m, m, 1);
+            }
+          });
+          renderer.shadowMap.needsUpdate = true;
+          return;
+        }
+      }
+    }
+
+    for (const fenceGroup of fenceLines) {
+      const hits = raycaster.intersectObjects(fenceGroup.children, true);
+      if (hits.length > 0) {
+        fenceToDelete = fenceGroup;
+        document.getElementById('custom-confirm-overlay').style.display = 'flex';
+        controls.enabled = false;
+        break;
+      }
+    }
+  });
+
+  window.addEventListener('pointerdown', e => {
+    pointerDownPos = { x: e.clientX, y: e.clientY };
+
+    if (e.target.tagName !== 'CANVAS' || e.target.id === 'radar-canvas') return;
+    if (document.getElementById('numpad-ui').style.display === 'block') return; 
+    if (document.getElementById('custom-confirm-overlay').style.display === 'flex') return; 
+    if (document.getElementById('text-input-ui').style.display === 'block') return; 
+    if (document.getElementById('box-input-ui').style.display === 'block') return;
+    
+    if (e.button !== 0 && e.button !== 2) return; 
+
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    if (e.button === 2) {
+      if (currentType === 'line') {
+        controls.enabled = false; 
+        if (currentLinePoints.length > 0) {
+          currentLinePoints.pop();
+          updateCurrentLineMesh();
+          if (currentLinePoints.length === 0) {
+            document.getElementById('placement-msg-text').innerText = "1点目をクリックしてください";
+            document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+            document.getElementById('finish-line-btn').style.display = "none";
+            if(previewLineMesh) { scene.remove(previewLineMesh); previewLineMesh = null; }
+          } else {
+            raycaster.setFromCamera(mouse, camera);
+            const terrainHits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+            if (terrainHits.length > 0) {
+              updatePreviewLine(terrainHits[0].point);
+            }
+          }
+        } else {
+          exitPlacementMode();
+        }
+        return;
+      } else if (currentType) {
+        controls.enabled = false; 
+        exitPlacementMode(); 
+        return;
+      } else {
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
+        if (intersects.length > 0) {
+          let obj = intersects[0].object;
+          while (obj && !obj.userData.isRoot) { obj = obj.parent; }
+          if (obj && (obj.userData.type.startsWith('rt_') || obj.userData.type === 'cr_80t')) {
+            controls.enabled = false; 
+            if (obj.userData.isFallen) {
+              showToast('⚠️ クレーンが傾いているため作業半径を設定できません');
+              controls.enabled = true; 
+            } else {
+              openNumpad(obj);
+            }
+            return;
+          } else if (obj && obj.userData.type === 'text_balloon') {
+            // r025: 吹き出し右クリック編集（既存分岐に無かったため未実装だった）
+            controls.enabled = false;
+            editingBalloonObj = obj;
+            document.getElementById('text-input-area').value = obj.userData.text || '';
+            document.getElementById('text-input-ui').style.display = 'block';
+            setTimeout(() => document.getElementById('text-input-area').focus(), 10);
+            return;
+          }
+        }
+      }
+    }
+
+    if (e.button === 0 && !currentType) {
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
+      if (intersects.length > 0) {
+        let hitObj = intersects[0].object;
+        let isBoom = hitObj.userData.isBoom === true || hitObj.userData.isDragMarker === true;
+
+        let obj = hitObj;
+        let upper = null;
+        while (obj && !obj.userData.isRoot) {
+          if (obj.userData.isUpper) upper = obj;
+          obj = obj.parent;
+        }
+        if (obj && obj.userData.type !== 'kotai') {
+          dragObj = obj; isDragging = false; controls.enabled = false;
+
+          if (hitObj.userData.isDragMarker && upper) {
+            dragObj.userData.isBoomDragging = true;
+            dragObj.userData.dragUpper = upper;
+            dragPlane.constant = -obj.position.y;
+            
+            upper.traverse(c => {
+              if (c.userData.isDragMarker) {
+                c.scale.set(1.5, 1.5, 1.5);
+                c.material.color.setHex(0xff3333);
+              }
+            });
+          } else if (isBoom && upper && obj.userData.type !== 'arrow') { 
+            dragObj.userData.isBoomDragging = true;
+            dragObj.userData.dragUpper = upper;
+            dragPlane.constant = -obj.position.y;
+            
+            upper.traverse(c => {
+              if (c.userData.isDragMarker) {
+                c.scale.set(1.5, 1.5, 1.5);
+                c.material.color.setHex(0xff3333);
+              }
+            });
+          } else {
+            dragObj.userData.isBoomDragging = false;
+            dragObj.userData.isPlaced = false;
+            dragPlane.constant = -obj.position.y;
+            const intersectPt = new THREE.Vector3();
+            raycaster.ray.intersectPlane(dragPlane, intersectPt);
+            if (intersectPt) { dragOffset.copy(intersectPt).sub(obj.position); }
+          }
+        }
+      }
+    }
+  });
+
+  window.addEventListener('pointermove', e => {
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const terrainHits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+
+    if (currentType === 'line' && currentLinePoints.length > 0) {
+      if (terrainHits.length > 0) {
+        // r025: 始点(currentLinePoints[0])付近なら、閉じる候補としてスナップ＋ツールチップ表示
+        const closeTip = document.getElementById('line-close-tip');
+        if (currentLinePoints.length >= 2 && terrainHits[0].point.distanceTo(currentLinePoints[0]) < LINE_CLOSE_DIST) {
+          _lineCloseHover = true;
+          updatePreviewLine(currentLinePoints[0]); // 始点にスナップした線を表示
+          closeTip.style.display = 'block';
+          closeTip.style.left = (e.clientX + 14) + 'px';
+          closeTip.style.top = (e.clientY - 28) + 'px';
+        } else {
+          _lineCloseHover = false;
+          closeTip.style.display = 'none';
+          updatePreviewLine(terrainHits[0].point);
+        }
+      }
+    } else if (previewLineMesh) {
+      scene.remove(previewLineMesh);
+      previewLineMesh = null;
+      _lineCloseHover = false;
+      document.getElementById('line-close-tip').style.display = 'none';
+    }
+
+    if (currentType && !dragObj && currentType !== 'text_balloon' && currentType !== 'arrow' && currentType !== 'custom_box_input' && currentType !== 'kotai') {
+      if (terrainHits.length > 0) {
+        placementMarker.visible = true;
+        placementMarker.position.copy(terrainHits[0].point);
+        placementMarker.position.y += 0.2; 
+        
+        const normal = terrainHits[0].face.normal.clone();
+        const nMat = new THREE.Matrix3().getNormalMatrix(terrainHits[0].object.matrixWorld);
+        normal.applyMatrix3(nMat).normalize();
+        
+        const qNormal = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+        placementMarker.quaternion.copy(qNormal);
+        
+        placementMarker.material.color.set(getTypeColor(currentType));
+      } else {
+        placementMarker.visible = false;
+      }
+    } else {
+      placementMarker.visible = false;
+    }
+
+    if (!dragObj) return;
+
+    const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+    if (dist > 5) isDragging = true;
+
+    if (isDragging) {
+      const intersectPt = new THREE.Vector3();
+      raycaster.ray.intersectPlane(dragPlane, intersectPt);
+      
+      if (intersectPt) {
+        if (dragObj.userData.isBoomDragging) {
+          const upper = dragObj.userData.dragUpper;
+          const localPt = intersectPt.clone().applyMatrix4(new THREE.Matrix4().copy(dragObj.matrixWorld).invert());
+          const dx = localPt.x - upper.position.x;
+          const dz = localPt.z - upper.position.z;
+          upper.rotation.y = Math.atan2(dx, dz);
+          renderer.shadowMap.needsUpdate = true; 
+          return;
+        }
+
+        const newPos = intersectPt.sub(dragOffset);
+        
+        if (dragObj.userData.type === 'text_balloon') {
+          fallRaycaster.set(new THREE.Vector3(newPos.x, 100, newPos.z), new THREE.Vector3(0, -1, 0));
+          const targets = [...terrainMeshes, ...placedObjects.filter(o => o !== dragObj && o.userData.type !== 'text_balloon')];
+          const hits = fallRaycaster.intersectObjects(targets, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragHitbox);
+          if (hits.length > 0) {
+            newPos.y = hits[0].point.y;
+          } else {
+            newPos.y = 0;
+          }
+          dragObj.position.copy(newPos);
+        } else if (dragObj.userData.type === 'h_pile') {
+          // r062: ドラッグ中プレビューも天端をHPILE_TOP_Y固定のままにする
+          // (release時と挙動を揃え、ドラッグ中だけ一瞬地形面まで沈んで見える違和感を防ぐ)
+          newPos.y = HPILE_TOP_Y;
+          dragObj.position.copy(newPos);
+        } else {
+          fallRaycaster.set(new THREE.Vector3(newPos.x, 100, newPos.z), new THREE.Vector3(0, -1, 0));
+          const hits = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+          
+          if (hits.length > 0) {
+            newPos.y = hits[0].point.y;
+            const normal = hits[0].face.normal.clone();
+            const nMat = new THREE.Matrix3().getNormalMatrix(hits[0].object.matrixWorld);
+            normal.applyMatrix3(nMat).normalize();
+            
+            dragObj.userData.normal = normal;
+            updateOrientation(dragObj);
+          } else {
+            newPos.y = 0;
+            dragObj.userData.normal = new THREE.Vector3(0, 1, 0);
+            updateOrientation(dragObj);
+          }
+          dragObj.position.copy(newPos);
+          checkFallenStatus(dragObj, false);
+        }
+        renderer.shadowMap.needsUpdate = true; 
+      }
+    }
+  });
+
+  window.addEventListener('pointerup', e => {
+    // r051マスター指摘対応: 構台作図中に右クリック(終了確認ダイアログ表示)すると、
+    // この汎用処理がcontrols.enabledを無条件でtrueに戻してしまい、以降視点回転が
+    // 復活してしまう不具合の修正。構台モード中は対象外にする。
+    if (e.button === 2 && currentType !== 'kotai' && !document.getElementById('numpad-ui').style.display.includes('block') && !document.getElementById('custom-confirm-overlay').style.display.includes('flex') && !document.getElementById('text-input-ui').style.display.includes('block') && !document.getElementById('box-input-ui').style.display.includes('block')) {
+       controls.enabled = true;
+    }
+
+    if (!dragObj) {
+      const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      if (dist < 5 && e.button === 0 && e.target.tagName === 'CANVAS' && e.target.id !== 'radar-canvas') {
+        if (currentType) {
+          mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+          mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+          raycaster.setFromCamera(mouse, camera);
+          
+          if (currentType === 'text_balloon') {
+            const allHits = raycaster.intersectObjects([...placedObjects, ...terrainMeshes], true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
+            if (allHits.length > 0) {
+              const hit = allHits[0];
+              pendingTextPos = new THREE.Vector3(hit.point.x, hit.point.y, hit.point.z);
+              document.getElementById('text-input-area').value = "";
+              document.getElementById('text-input-ui').style.display = "block";
+              setTimeout(() => document.getElementById('text-input-area').focus(), 10);
+              controls.enabled = false;
+              return;
+            }
+          } else if (currentType === 'custom_box_input') {
+            // ダイアログ操作中のためスキップ
+          } else {
+            const terrainHits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+            if (terrainHits.length > 0) {
+              if (currentType === 'line') {
+                // r025: 始点付近ホバー中のクリックは「閉じる」扱い（マスター指示）
+                if (_lineCloseHover && currentLinePoints.length >= 2) {
+                  currentLinePoints.push(currentLinePoints[0].clone());
+                  updateCurrentLineMesh();
+                  document.getElementById('line-close-tip').style.display = 'none';
+                  finishLine();
+                  return;
+                }
+                currentLinePoints.push(terrainHits[0].point);
+                if (currentLinePoints.length === 1) {
+                  document.getElementById('placement-msg-text').innerText = "次の点をクリックしてください";
+                  document.getElementById('placement-msg-sub').innerText = "（右クリックで1つ戻る）";
+                  document.getElementById('finish-line-btn').style.display = "inline-block";
+                }
+                updateCurrentLineMesh();
+                updatePreviewLine(terrainHits[0].point);
+              } else {
+                spawnObject(terrainHits[0].point.x, terrainHits[0].point.z);
+                exitPlacementMode(); 
+              }
+            }
+          }
+        } else {
+          mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+          mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+          raycaster.setFromCamera(mouse, camera);
+          const objHits = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
+          if (objHits.length > 0) {
+            let obj = objHits[0].object;
+            while (obj && !obj.userData.isRoot) { obj = obj.parent; }
+            if (obj) {
+              if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow' || obj.userData.type === 'kotai') {
+                // シングルクリックによる処理は削除
+              } else {
+                obj.userData.yaw = (obj.userData.yaw || 0) - Math.PI / 12;
+                updateOrientation(obj);
+              }
+              renderer.shadowMap.needsUpdate = true; 
+            }
+          }
+        }
+      }
+    }
+
+    if (dragObj) {
+      if (dragObj.userData.isBoomDragging) {
+        dragObj.userData.dragUpper.traverse(c => {
+          if (c.userData.isDragMarker) {
+            c.scale.set(1, 1, 1);
+            c.material.color.setHex(0x00aaff);
+          }
+        });
+
+        dragObj.userData.isBoomDragging = false;
+        dragObj = null;
+        isDragging = false;
+        controls.enabled = true;
+        renderer.shadowMap.needsUpdate = true; 
+        return;
+      }
+      if (!isDragging && e.button === 0 && !currentType) {
+        if (dragObj.userData.type === 'text_balloon' || dragObj.userData.type === 'arrow') {
+          // シングルクリックでの処理削除
+        } else {
+          dragObj.userData.yaw = (dragObj.userData.yaw || 0) - Math.PI / 12;
+          updateOrientation(dragObj);
+        }
+      }
+
+      if (dragObj.userData.type === 'text_balloon') {
+        fallRaycaster.set(new THREE.Vector3(dragObj.position.x, 100, dragObj.position.z), new THREE.Vector3(0, -1, 0));
+        const targets = [...terrainMeshes, ...placedObjects.filter(o => o !== dragObj && o.userData.type !== 'text_balloon')];
+        const hits = fallRaycaster.intersectObjects(targets, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
+        if (hits.length === 0) {
+          removeObject(dragObj);
+          showToast('🗑️ オブジェクトを削除しました');
+        } else {
+          dragObj.position.y = hits[0].point.y;
+          dragObj.userData.isPlaced = true;
+        }
+      } else if (dragObj.userData.type === 'h_pile') {
+        // r062: 鋼材柱は地形/構台の高さに関わらず天端をHPILE_TOP_Y(GL+0.4)に固定する。
+        // 以前は他オブジェクトと同じ着地処理(_getFloorMeshesの高さにY座標を合わせる)を
+        // 通っていたため、構台が無い場所へドラッグすると天端が実際の地形面まで
+        // 下がってしまっていた(根本原因)。鋼材柱は常に垂直固定のため向き(normal)の
+        // 再計算・傾き判定(checkFallenStatus)も対象外とする。
+        // r066(マスター指摘): 鋼材柱には誤操作時の削除手段が無かったため、地形の
+        // 範囲外(地面が無い場所)へドラッグしたら削除する仕様を追加。判定は構台の
+        // 有無に関わらず常に地形そのもの(terrainMeshes)で行う(鋼材柱は元々
+        // 構台を無視して常に実地形基準、というA3までの設計方針と一貫させるため)。
+        fallRaycaster.set(new THREE.Vector3(dragObj.position.x, 100, dragObj.position.z), new THREE.Vector3(0, -1, 0));
+        const groundHits = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+        if (groundHits.length === 0) {
+          removeObject(dragObj);
+          showToast('🗑️ オブジェクトを削除しました');
+        } else {
+          resolveOverlap(dragObj);
+          if (!kotaiVisible) resolveKotaiOverlap(dragObj);
+          dragObj.position.y = HPILE_TOP_Y;
+          dragObj.userData.isPlaced = true;
+        }
+      } else {
+        resolveOverlap(dragObj);
+        if (!kotaiVisible) resolveKotaiOverlap(dragObj); // r065: 構台非表示時は再表示時の衝突を先回りで回避
+
+        fallRaycaster.set(new THREE.Vector3(dragObj.position.x, 100, dragObj.position.z), new THREE.Vector3(0, -1, 0));
+        const hits = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+        
+        if (hits.length === 0) {
+          removeObject(dragObj);
+          showToast('🗑️ オブジェクトを削除しました');
+        } else {
+          dragObj.position.y = hits[0].point.y;
+          const normal = hits[0].face.normal.clone();
+          const nMat = new THREE.Matrix3().getNormalMatrix(hits[0].object.matrixWorld);
+          normal.applyMatrix3(nMat).normalize();
+          dragObj.userData.normal = normal;
+          updateOrientation(dragObj);
+
+          dragObj.userData.isPlaced = true; 
+          checkFallenStatus(dragObj, true);
+          if (dragObj.userData.radiusValue) {
+            updateWorkingRadius(dragObj);
+          }
+        }
+      }
+
+      dragObj = null;
+      isDragging = false;
+      controls.enabled = true; 
+      renderer.shadowMap.needsUpdate = true; 
+    }
+  });
+
+  // ==========================================
+  // 6. メインループ
+  // ==========================================
+  function animate() {
+    requestAnimationFrame(animate);
+
+    // r025(マスター指示): 旗が風になびくプルプルギミック。旗布(isFlagCloth)を
+    // 微小に回転させるだけの軽量処理（各旗で位相をずらして自然に見せる）
+    if (surveyFlags.length > 0) {
+      const t = performance.now() * 0.001;
+      surveyFlags.forEach((flag, i) => {
+        const cloth = flag.children.find(c => c.userData.isFlagCloth);
+        if (cloth) {
+          const phase = i * 1.7;
+          cloth.rotation.y = Math.sin(t * 3 + phase) * 0.12;
+          cloth.rotation.z = Math.sin(t * 4.3 + phase) * 0.05;
+        }
+      });
+    }
+
+    placedObjects.forEach(obj => {
+      if ((obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow') && obj.userData.isPlaced) {
+        fallRaycaster.set(new THREE.Vector3(obj.position.x, 100, obj.position.z), new THREE.Vector3(0, -1, 0));
+        const targets = [...terrainMeshes, ...placedObjects.filter(o => o !== obj && o.userData.type !== 'text_balloon' && o.userData.type !== 'arrow')];
+        const hits = fallRaycaster.intersectObjects(targets, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
+        if (hits.length > 0) {
+          const targetY = hits[0].point.y;
+          if (obj.position.y > targetY + 0.2) { 
+            obj.userData.isPlaced = false;
+            fallingObjects.push({ mesh: obj, targetY: targetY, normal: new THREE.Vector3(0,1,0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+          }
+        } else {
+           if (obj.position.y > -50) {
+             obj.userData.isPlaced = false;
+             fallingObjects.push({ mesh: obj, targetY: -Infinity, normal: new THREE.Vector3(0,1,0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+           }
+        }
+      }
+    });
+
+    if (fallingObjects.length > 0) {
+      renderer.shadowMap.needsUpdate = true; 
+    }
+
+    for (let i = fallingObjects.length - 1; i >= 0; i--) {
+      const drop = fallingObjects[i];
+      
+      if (drop.isBouncing) {
+        drop.speed += 0.2; 
+        drop.mesh.position.y -= drop.speed;
+        drop.mesh.position.x += drop.vx;
+        drop.mesh.position.z += drop.vz;
+        drop.mesh.rotation.set(drop.mesh.rotation.x + 0.1, drop.mesh.rotation.y + 0.2, drop.mesh.rotation.z + 0.1);
+        
+        if (drop.mesh.position.y < -50) {
+          removeObject(drop.mesh);
+          fallingObjects.splice(i, 1);
+        }
+        continue;
+      }
+
+      drop.speed += 0.2; 
+      drop.mesh.position.y -= drop.speed;
+      
+      if (drop.mesh.userData.type !== 'text_balloon' && drop.mesh.userData.type !== 'arrow') {
+        drop.mesh.updateMatrixWorld(true);
+        if (checkOverlapSimple(drop.mesh)) {
+          drop.isBouncing = true;
+          drop.speed = -3; 
+          drop.vx = (Math.random() - 0.5) * 2;
+          drop.vz = (Math.random() - 0.5) * 2;
+          showToast('💥 衝突！オブジェクトが弾かれました');
+          continue;
+        }
+      }
+      
+      if (drop.targetY !== -Infinity && drop.mesh.position.y <= drop.targetY) {
+        drop.mesh.position.y = drop.targetY; 
+        
+        // r035(マスター指示): 測点フラグは地形が傾斜していても常に鉛直に直立させたい
+        // (他の設置物は地形の傾きに追従して傾ける現行仕様のままでOK)。
+        if (drop.mesh.userData.type !== 'text_balloon' && drop.mesh.userData.type !== 'arrow' && drop.mesh.userData.type !== 'survey_flag') {
+          drop.mesh.userData.normal = drop.normal;
+          updateOrientation(drop.mesh);
+          
+          drop.mesh.updateMatrixWorld(true);
+          if (checkOverlapSimple(drop.mesh)) {
+            drop.isBouncing = true;
+            drop.speed = -3;
+            drop.vx = (Math.random() - 0.5) * 2;
+            drop.vz = (Math.random() - 0.5) * 2;
+            showToast('💥 衝突！オブジェクトが弾かれました');
+            continue;
+          }
+          checkFallenStatus(drop.mesh, true); 
+        }
+
+        if (!kotaiVisible) resolveKotaiOverlap(drop.mesh); // r065: 構台非表示時は再表示時の衝突を先回りで回避
+
+        drop.mesh.userData.isPlaced = true; 
+        fallingObjects.splice(i, 1); 
+      } else if (drop.mesh.position.y < -50) {
+        removeObject(drop.mesh);
+        fallingObjects.splice(i, 1);
+        showToast('🗑️ オブジェクトを削除しました');
+      }
+    }
+
+    radarCtx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
+
+    if (terrainEdges2D && terrainEdges2D.length > 0) {
+      radarCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      radarCtx.lineWidth = 1;
+      radarCtx.beginPath();
+      terrainEdges2D.forEach(edge => {
+        const p1 = worldToRadar(edge.x1, edge.z1);
+        const p2 = worldToRadar(edge.x2, edge.z2);
+        radarCtx.moveTo(p1.u, p1.v);
+        radarCtx.lineTo(p2.u, p2.v);
+      });
+      radarCtx.stroke();
+    }
+
+    radarCtx.strokeStyle = 'rgba(255,255,255,0.1)'; radarCtx.lineWidth = 1;
+    radarCtx.beginPath(); radarCtx.moveTo(108, 0); radarCtx.lineTo(108, 216); radarCtx.stroke();
+    radarCtx.beginPath(); radarCtx.moveTo(0, 108); radarCtx.lineTo(216, 108); radarCtx.stroke();
+
+    placedObjects.forEach(obj => {
+      if (obj.userData.type === 'text_balloon') {
+        obj.children.forEach(child => {
+          if (child.userData.isBillboard) {
+            child.quaternion.copy(camera.quaternion);
+          }
+        });
+        return; 
+      }
+      
+      let angle = -(obj.userData.yaw || 0);
+      if (obj.userData.type === 'arrow') {
+        let upper = null;
+        obj.traverse(c => { if (c.userData.isUpper) upper = c; });
+        if (upper) {
+          angle -= upper.rotation.y;
+        }
+      }
+
+      const pos = worldToRadar(obj.position.x, obj.position.z);
+      
+      radarCtx.save();
+      radarCtx.translate(pos.u, pos.v);
+      radarCtx.rotate(angle);
+      radarCtx.fillStyle = obj.userData.color;
+      radarCtx.fillRect(-4, -4, 8, 8);
+      radarCtx.strokeStyle = '#fff'; radarCtx.lineWidth = 2;
+      radarCtx.beginPath(); radarCtx.moveTo(0, 0); radarCtx.lineTo(0, -8); radarCtx.stroke();
+      radarCtx.restore();
+    });
+
+    // 新6(2026-08-24 引継ぎ19回目): ノースアロー(2Dコンパス)をカメラの水平回転に
+    // 追従させる。北の世界方位角(北=0°・時計回り正、本体の2D画面と同じ規約)から
+    // カメラの現在の水平方位角を引いた分だけアイコンを回転させる。
+    // ★符号(向き)は理屈上の導出であり実機未確認。実際にカメラを回してみて
+    // 矢印が正しく北を指し続けないようなら、下の「- camAngleDeg」の符号を反転すること。
+    {
+      const compassWrap = document.getElementById('placement-compass-wrap');
+      if(compassWrap && compassWrap.style.display !== 'none'){
+        const vdx = controls.target.x - camera.position.x;
+        const vdz = controls.target.z - camera.position.z;
+        const camAngleDeg = Math.atan2(vdx, -vdz) * 180 / Math.PI;
+        const rotor = document.getElementById('placement-compass-rotor');
+        if(rotor) rotor.style.transform = `rotate(${_northAngleDeg - camAngleDeg}deg)`;
+      }
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  animate();
+
+</script>
+</body>
+</html>
