@@ -1314,20 +1314,29 @@ function toggleRectTable(){
   body.style.display = open ? '' : 'none';
   arrow.style.transform = open ? 'rotate(90deg)' : 'rotate(0deg)';
 }
-// 新4(2026-08-24 引継ぎ19回目): 現況地盤GLオフセット入力の検証。符号(+/-)を
-// 必ず要求する。★現状はUI側での値の保持・検証のみ。実際の土量計算/配置モードの
-// GL面への反映方法(全フラスタムのtlに加算するのか等)はマスターに仕様確認してから実装する。
+// 新4(2026-08-24 引継ぎ19回目→v0091/r081でマスター指摘により入力仕様を修正):
+// 現況地盤GLオフセット入力の検証。旧仕様は「+/-どちらも入力必須」だったが、
+// 正しくは「+の入力は不要(未入力=正として扱う)・-は入力必須」。
+// パース後は表示側で常に符号(+/-)を補って見せる(0は"+0"表示)。
+// ★2026-08-25引継ぎ17回目でマスター仕様確定・実装済み: 土量計算モード
+// (mode==='doboku')時のみ、fsの各frustumのD(深さ)に本値をそのまま加算する
+// (calcAll()内、天端0正規化の直後)。通常計算・配置モードへの反映は別途相談(次の段階)。
 window._glOffsetMm = 0;
 function onGlOffsetChange(){
   const el = document.getElementById('gl-offset-mm');
   const v = el.value.trim();
-  if(v===''){ window._glOffsetMm = 0; return; }
-  if(!/^[+-]\d+$/.test(v)){
-    toast('⚠️ GLオフセットは符号(+か-)を付けて入力してください(例: -200)');
-    el.value = window._glOffsetMm ? (window._glOffsetMm>0?'+':'')+window._glOffsetMm : '';
+  if(v===''){
+    window._glOffsetMm = 0;
+    el.value = '+0';
+    return;
+  }
+  if(!/^[+-]?\d+$/.test(v)){
+    toast('⚠️ GLオフセットは数値で入力してください（例: 200 / -200）');
+    el.value = (window._glOffsetMm>=0?'+':'')+window._glOffsetMm;
     return;
   }
   window._glOffsetMm = parseInt(v, 10);
+  el.value = (window._glOffsetMm>=0?'+':'')+window._glOffsetMm; // 常に符号を表示
 }
 function updMeshOpacity(val){
   const op=parseInt(val)/100;
@@ -1772,6 +1781,27 @@ async function runCalc(mode){
       if(tl===0) return f;
       return {...f, D: f.D - tl, tl: 0};
     }).filter(f=>f.D>0);
+    // 新4(2026-08-25引継ぎ17回目マスター指示): 現況地盤GLオフセットの反映。
+    // 「土量計算は常にGL±0まで掘る計算」という前提はそのまま(天端は上で既に0へ正規化済み)、
+    // 掘削の深さ(=下端)だけをオフセット分ずらす、というマスター確定仕様。
+    //   GL+100(地盤面が高い) → 掘削深度が深くなる → 下端-100 ⇔ D+100(体積↑)
+    //   GL-200(地盤面が低い) → 掘削深度が浅くなる → 下端+200 ⇔ D-200(体積↓)
+    // 天端は動かさない(=0のまま)ので、下端=0-D。下端_new = 下端_old − offsetMm を
+    // Dの式に展開すると D_new = D_old + offsetMm の一本にまとまる(符号分岐が不要)。
+    // ★通常計算(mode==='normal')側にはこの調整を適用しない(マスター確定仕様:
+    //   通常計算は3D形状表示のみが目的でGL反映は不要なため)。
+    if(window._glOffsetMm){
+      const glOff = window._glOffsetMm;
+      const excludedGL=[];
+      fs = fs.map(f => ({...f, D: f.D + glOff})).filter(f=>{
+        if(f.D <= 0){ excludedGL.push(f.name || '(無名)'); return false; }
+        return true;
+      });
+      if(excludedGL.length){
+        const shown = excludedGL.slice(0,5).join('、') + (excludedGL.length>5 ? ` 他${excludedGL.length-5}件` : '');
+        toast(`⚠ GLオフセット適用後に深さが0以下になったオブジェクト(${excludedGL.length}件: ${shown})は計算対象外のため除外しました`, 3600);
+      }
+    }
     // r038: 山留クリップは「法面込みで完全に組んでから深さごとに垂直カット」する方式に
     // 変更したため、ここでの平面(2D footprint)事前クリップは廃止。
     // 実際のクリップは _calcVolumeFallback と buildShellMesh 内で、
@@ -1840,7 +1870,8 @@ async function runCalc(mode){
         <div class="di"><span>単独合計</span><span class="dv">${sumM3.toFixed(3)} m³</span></div>
         <div class="di"><span>重複削減</span><span class="dv warn">-${overM3.toFixed(3)} m³</span></div>
         <div class="di"><span>重複率</span><span class="dv warn">${ratio.toFixed(1)} %</span></div>
-        <div class="di"><span>捨コン+砕石</span><span class="dv hi">+${concVal}mm 適用済</span></div>`;
+        <div class="di"><span>捨コン+砕石</span><span class="dv hi">+${concVal}mm 適用済</span></div>
+        ${window._glOffsetMm ? `<div class="di"><span>現状地盤GL</span><span class="dv hi">${window._glOffsetMm>=0?'+':''}${window._glOffsetMm}mm 適用済</span></div>` : ''}`;
       document.getElementById('rect-table-wrap').style.display='none';
     }else{
       document.getElementById('res-vol').innerHTML = `≒${unionM3.toFixed(2)}<span>m³</span>`;
@@ -2222,7 +2253,13 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   edgesGeo.setIndex(new THREE.BufferAttribute(allIdx, 1));
 
   console.log('[CP-15] computeEdgesGeometrySafeGuarded 呼び出し直前 頂点数=', finalPos.length/3, 'index数=', allIdx.length);
-  const _edgeBaseGeo = computeEdgesGeometrySafeGuarded(edgesGeo, 20, 8000);
+  // 新7改修(v0091/r081): 旧閾値8000は「300個の四角形テスト」で三角形数8070となり
+  // エッジ線が消える不具合として報告されたが、マスター確認の結果「実案件でも
+  // 500個規模はあり得る」とのことで、閾値のみ引き上げ対応(30000)。
+  // 三角形数の見積り: テスト実測 8070tri/300個 ≒ 26.9tri/個 → 500個で約13,450tri。
+  // 安全マージンを見て30000に設定(以前からある try/catch による二重の安全網は
+  // そのまま維持されるため、万一超過してもクラッシュはせずエッジ線省略で済む)。
+  const _edgeBaseGeo = computeEdgesGeometrySafeGuarded(edgesGeo, 20, 30000);
   console.log('[CP-16] computeEdgesGeometrySafeGuarded 完了 edge頂点数=', _edgeBaseGeo.attributes.position.count);
   const _edgeMat = new THREE.LineBasicMaterial({
     color: 0x0a1a3a,   // ディープネイビー（暖色面との対比強化）
@@ -4291,6 +4328,17 @@ async function buildNormalCalcPlacementGLB(){
     vOff+=vc; iOff+=g.indices.length;
   }
 
+  // 次の段階(2026-08-25引継ぎ18回目マスター確定仕様): 通常計算は形状(体積・押し出し形)
+  // 自体は変えない(mode==='normal'は非対象のまま)。その代わり、配置モードに設置される
+  // Voldia_FixedObjects本体の「高さ」だけをGLオフセット分ずらす。
+  //   GL+(地盤面が高い) → オブジェクトは相対的に下げる(Y減)
+  //   GL-(地盤面が低い) → オブジェクトは相対的に上げる(Y増)
+  // Y_new = Y_old − offsetMm。GLPlane(地面)側はy=0のまま動かさない。
+  if(window._glOffsetMm){
+    const offMmS = window._glOffsetMm * S;
+    for(let j=1;j<objPos.length;j+=3){ objPos[j] -= offMmS; }
+  }
+
   const meshes=[
     {name:'Voldia_GLPlane', positions:planePos, indices:planeIdx},
     {name:'Voldia_FixedObjects', positions:objPos, indices:objIdx}
@@ -4355,7 +4403,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0054.html';
+      iframe.src='voldia_placement_v0055.html';
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);

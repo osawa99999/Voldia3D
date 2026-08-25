@@ -768,6 +768,16 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
             }
           }
         });
+        // 追加(2026-08-25引継ぎ19回目 B3対応): 通常計算→配置モードでは
+        // Voldia_GLPlane(地面, y=0)とVoldia_FixedObjects(オブジェクト天端がy=0の
+        // ケースがある)が同一平面に来てZファイティングを起こすとの報告。
+        // customGround(953行目付近)が既存踏襲しているy=-0.01の微小オフセット
+        // トリックと同じ考え方で、GLPlane側だけを気づかれない程度にわずかに
+        // 下げてコード上の平面衝突を避ける(ジオメトリの座標自体は変えず
+        // メッシュのposition.yだけをずらすので他の計算には影響しない)。
+        terrainTargets.forEach(child => {
+          if(child.name === 'Voldia_GLPlane') child.position.y = -0.01;
+        });
         terrainTargets.forEach(child => {
             const pos = child.geometry.attributes.position.array;
             const idx = child.geometry.index.array;
