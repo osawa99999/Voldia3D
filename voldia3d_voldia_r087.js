@@ -2299,7 +2299,197 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   // cyanGeo.dispose(); ← メッシュが参照中なのでNG
   // redGeo.dispose();  ← 同上
   edgesGeo.dispose(); // EdgesGeometryは既にコピー済みなのでOK
+
+  // B5(2026-08-25引継ぎ20回目マスター指示): 通常計算(isDoboku===false)の3Dプレビュー
+  // 限定で、面をダブルクリックすると面積を表示する機能。
+  // ・通常計算はcalcAll()で全frustumのnoSlopeを強制trueにしており法面が一切
+  //   発生しない(=全て垂直な側面 or 水平な天端/床面の2種類の法線のみ)という
+  //   マスター確認済みの前提があるため、法線の「なだらかな変化」を考慮した
+  //   角度許容は不要で、ほぼ完全一致(浮動小数点誤差吸収の極小epsilonのみ)で
+  //   同一平面を判定する。
+  // ・「同一平面の集約→外周ループ抽出→2D投影→シューレース公式」という一般的な
+  //   多角形面積計算は行わず、隣接判定でつながった三角形群の面積を単純合計する
+  //   だけで済む(コプラナー三角形の面積の総和＝その面全体の面積のため、外周を
+  //   明示的に求める必要が無い)。
+  if(!isDoboku){
+    _setupAreaPickOnDblClick(threeR.domElement, threeC, threeS, cyanMesh, finalPos, cyanIdxFinal);
+    // ２(2026-08-25引継ぎ22回目マスター指示): 下部の共有toast()だと他の操作トースト
+    // (計算完了メッセージ等)と衝突して一瞬で消えてしまうとの指摘のため、画面上部専用の
+    // toastTop()に変更。
+    toastTop('💡 面をダブルクリックで面積表示できます', 2500);
+  } else {
+    _teardownAreaPickOnDblClick(threeR.domElement);
+  }
+
   console.log('[CP-19] initThree_watertight 完全終了');
+}
+
+// B5(2026-08-25引継ぎ20回目): ダブルクリック面積表示のセットアップ/解除。
+// initThree_watertight は再計算のたびに呼ばれメッシュを作り直すため、古い
+// リスナー(古いfinalPos/cyanIdxFinalをクロージャで握っている)を確実に外してから
+// 新しいものを付け直す。ハンドラ参照はcanvas要素自体に保持し、複数キャンバスが
+// 同時に存在しても互いを取り違えないようにする。
+function _teardownAreaPickOnDblClick(cv){
+  if(cv._areaDblClickHandler){
+    cv.removeEventListener('dblclick', cv._areaDblClickHandler);
+    cv._areaDblClickHandler = null;
+  }
+  if(cv._areaClearHandler){
+    cv.removeEventListener('mousedown', cv._areaClearHandler);
+    cv._areaClearHandler = null;
+  }
+  _clearAreaHighlight(cv);
+}
+// 1(2026-08-25引継ぎ21回目): ハイライトmeshの除去。scene参照はcv側に保持しておき、
+// テアダウン時にscene再取得の引数を要求しないで済むようにする。
+function _clearAreaHighlight(cv){
+  if(cv._areaHighlightMesh){
+    const scene = cv._areaHighlightScene;
+    if(scene) scene.remove(cv._areaHighlightMesh);
+    cv._areaHighlightMesh.geometry.dispose();
+    cv._areaHighlightMesh.material.dispose();
+    cv._areaHighlightMesh = null;
+  }
+}
+// ３(2026-08-25引継ぎ21回目): クリップボードコピー。file://で開いている場合など
+// navigator.clipboard自体が使えない/権限が無い環境向けに、隠しtextarea+
+// execCommand('copy')のフォールバックも用意しておく。
+function _copyTextToClipboard(text){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text).catch(()=>_copyViaExecCommand(text));
+  }
+  return Promise.resolve(_copyViaExecCommand(text));
+}
+function _copyViaExecCommand(text){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  }catch(e){ return false; }
+}
+function _setupAreaPickOnDblClick(cv, camera, scene, mesh, pos, idx){
+  _teardownAreaPickOnDblClick(cv);
+  cv._areaHighlightScene = scene;
+
+  function triNormal(ia, ib, ic){
+    const ax=pos[ia*3],ay=pos[ia*3+1],az=pos[ia*3+2];
+    const bx=pos[ib*3],by=pos[ib*3+1],bz=pos[ib*3+2];
+    const cx=pos[ic*3],cy=pos[ic*3+1],cz=pos[ic*3+2];
+    const v1x=bx-ax,v1y=by-ay,v1z=bz-az, v2x=cx-ax,v2y=cy-ay,v2z=cz-az;
+    let nx=v1y*v2z-v1z*v2y, ny=v1z*v2x-v1x*v2z, nz=v1x*v2y-v1y*v2x;
+    const len=Math.hypot(nx,ny,nz)||1;
+    return [nx/len, ny/len, nz/len];
+  }
+  function triArea(ia, ib, ic){
+    const ax=pos[ia*3],ay=pos[ia*3+1],az=pos[ia*3+2];
+    const bx=pos[ib*3],by=pos[ib*3+1],bz=pos[ib*3+2];
+    const cx=pos[ic*3],cy=pos[ic*3+1],cz=pos[ic*3+2];
+    const v1x=bx-ax,v1y=by-ay,v1z=bz-az, v2x=cx-ax,v2y=cy-ay,v2z=cz-az;
+    const nx=v1y*v2z-v1z*v2y, ny=v1z*v2x-v1x*v2z, nz=v1x*v2y-v1y*v2x;
+    return 0.5*Math.hypot(nx,ny,nz); // finalPosはm単位なのでそのままm²
+  }
+
+  // 辺(頂点ペア)→それを共有する三角形番号のリスト、を一度だけ構築
+  const edgeMap = new Map();
+  const triCount = idx.length/3;
+  for(let t=0;t<triCount;t++){
+    const a=idx[t*3], b=idx[t*3+1], c=idx[t*3+2];
+    const es=[[a,b],[b,c],[c,a]];
+    for(const [p,q] of es){
+      const key = p<q ? (p+'_'+q) : (q+'_'+p);
+      let arr = edgeMap.get(key);
+      if(!arr){ arr=[]; edgeMap.set(key,arr); }
+      arr.push(t);
+    }
+  }
+
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const NORMAL_DOT_EPS = 0.99999; // ほぼ完全一致のみ許容(法面が無い前提のため角度許容は不要)
+
+  // 1A(2026-08-25引継ぎ21回目マスター指示): ダブルクリックした面を青く強調表示。
+  // 選択三角形群だけを抜き出した「非共有・独立バッファ」の別メッシュを重ねる方式
+  // (元メッシュ(cyanGeo)とposition配列を共有すると、このハイライトmeshをdispose()
+  // した時に共有バッファ側のGPUリソースまで巻き添えで破棄されるおそれがあるため、
+  // 座標を複製した専用バッファにして安全に使い回す)。
+  function buildHighlightMesh(triSet){
+    const hlPos = new Float32Array(triSet.size*9);
+    let w=0;
+    triSet.forEach(t=>{
+      for(let k=0;k<3;k++){
+        const vi = idx[t*3+k];
+        hlPos[w++]=pos[vi*3]; hlPos[w++]=pos[vi*3+1]; hlPos[w++]=pos[vi*3+2];
+      }
+    });
+    const hlGeo = new THREE.BufferGeometry();
+    hlGeo.setAttribute('position', new THREE.BufferAttribute(hlPos,3));
+    const hlMat = new THREE.MeshBasicMaterial({
+      color: 0x2196f3, transparent:true, opacity:0.85, side:THREE.DoubleSide,
+      depthTest:true, polygonOffset:true, polygonOffsetFactor:-4, polygonOffsetUnits:-4
+    });
+    return new THREE.Mesh(hlGeo, hlMat);
+  }
+
+  function handler(e){
+    const rect = cv.getBoundingClientRect();
+    ndc.x = ((e.clientX-rect.left)/rect.width)*2-1;
+    ndc.y = -((e.clientY-rect.top)/rect.height)*2+1;
+    raycaster.setFromCamera(ndc, camera);
+    const hits = raycaster.intersectObject(mesh, false);
+    if(!hits.length) return;
+    const startTri = hits[0].faceIndex;
+    const a0=idx[startTri*3], b0=idx[startTri*3+1], c0=idx[startTri*3+2];
+    const startN = triNormal(a0,b0,c0);
+
+    const visited = new Set([startTri]);
+    const queue=[startTri];
+    let totalArea=0;
+    while(queue.length){
+      const t = queue.pop();
+      const a=idx[t*3], b=idx[t*3+1], c=idx[t*3+2];
+      totalArea += triArea(a,b,c);
+      const es=[[a,b],[b,c],[c,a]];
+      for(const [p,q] of es){
+        const key = p<q ? (p+'_'+q) : (q+'_'+p);
+        const neighbors = edgeMap.get(key);
+        if(!neighbors) continue;
+        for(const nt of neighbors){
+          if(visited.has(nt)) continue;
+          const na=idx[nt*3], nb=idx[nt*3+1], nc=idx[nt*3+2];
+          const nn = triNormal(na,nb,nc);
+          const dot = startN[0]*nn[0]+startN[1]*nn[1]+startN[2]*nn[2];
+          if(dot > NORMAL_DOT_EPS){ visited.add(nt); queue.push(nt); }
+        }
+      }
+    }
+
+    _clearAreaHighlight(cv);
+    const hlMesh = buildHighlightMesh(visited);
+    scene.add(hlMesh);
+    cv._areaHighlightMesh = hlMesh;
+
+    const areaStr = totalArea.toFixed(3);
+    _copyTextToClipboard(areaStr).then(()=>{
+      toast(`📐 面積: ${areaStr} m²（三角形${visited.size}枚を集約）／クリップボードにコピーしました`, 3000);
+    });
+  }
+  cv._areaDblClickHandler = handler;
+  cv.addEventListener('dblclick', handler);
+
+  // 1A(2026-08-25引継ぎ21回目マスター指示): 「他の場所を1回でもクリックしたら
+  // 元に戻す(中クリックでは解除されない)」。中クリック=マウスホイールクリック
+  // (e.button===1)の時だけ除外し、それ以外のボタンでのmousedownでハイライトを消す。
+  // (パン操作は本ファイルではbutton===2=右クリックに割り当てられているが、
+  //  マスター指示の「中クリックでは消えない」を素直に反映し、button===1だけを除外する)
+  function clearHandler(e){
+    if(e.button === 1) return;
+    _clearAreaHighlight(cv);
+  }
+  cv._areaClearHandler = clearHandler;
+  cv.addEventListener('mousedown', clearHandler);
 }
 
 // 法線角度変化が急峻（15度以上）な頂点を正しく仕分けるためのヘルパー関数よ
@@ -4403,7 +4593,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0055.html';
+      iframe.src='voldia_placement_v0056.html';
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);
