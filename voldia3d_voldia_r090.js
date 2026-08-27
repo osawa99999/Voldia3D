@@ -4942,7 +4942,14 @@ function _evRunAnalysis(mode, glbArrayBuffer){
         Object.values(clusters).forEach(c=>{
           if(c.projArea<0.01) return;
           const avgH=c.hSum/c.projArea;
-          if(avgH<=0.001 && mode==='earthwork') return;
+          // r090(24回目・追加修正・項目12): 従来はearthwork(土量計算)限定のガードだった。
+          // structure(通常計算)側でも、上部と下部の形状が同じ(=高さ差0)場合に
+          // volume=0の計算が発生し、Excelに無意味な行が並ぶ・PDF/PNGの番号が
+          // 同一座標に重複して読めなくなる、という不具合の報告を受け、mode制限を撤廃。
+          // structure側もcalcHeight=avgY-yBaseなので、avgH≈0は「この面がちょうど
+          // 基準面上にある=この面が寄与する柱体積は実質0」を正しく表しており、
+          // 除外の理屈はearthwork側と同じ。
+          if(avgH<=0.001) return;
 
           let hSeed=calcId*15485863;
           hSeed=(hSeed^(hSeed>>>13))*2654435761;
