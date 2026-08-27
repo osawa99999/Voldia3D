@@ -77,7 +77,7 @@ function loadManifold(){
 <style>
 :root{
   --bg:#1a1a1a;--text:#e0e0e0;--panel:#242424;--btn:#333;
-  --blue:#2196f3;--cv:#111;--bdr:#3a3a3a;
+  --blue:#2196f3;--blue-hov:#1565c0;--btn-hov:#4a4a4a;--cv:#111;--bdr:#3a3a3a;
   --accent:#e8a020;--accent2:#4fc3f7;--success:#66bb6a;--danger:#ef5350;--warn:#ffa726;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -251,8 +251,9 @@ input[type=text]{flex:1;padding:5px 8px;background:#333;color:var(--text);
 button{background:var(--btn);color:var(--text);border:1px solid #555;
        padding:5px 10px;border-radius:4px;cursor:pointer;font-size:.78em;
        transition:background .15s,border-color .15s;white-space:nowrap;}
-button:hover{background:var(--blue);border-color:var(--blue);}
+button:hover{background:var(--btn-hov);border-color:var(--btn-hov);}
 button.on{background:var(--blue);border-color:var(--blue);}
+button.on:hover{background:var(--blue-hov);border-color:var(--blue-hov);}
 .bgrp{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px;}
 .bgrp button{width:100%;}
 .sc-disp{display:flex;align-items:center;gap:8px;margin-top:5px;}
@@ -434,6 +435,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 </style>
 </head>
 <body>
+<noscript>
+  <div style="position:fixed;inset:0;z-index:999999;background:#1a1a2e;color:#ff6b6b;
+              display:flex;flex-direction:column;align-items:center;justify-content:center;
+              text-align:center;padding:20px;font-family:sans-serif;">
+    <h2 style="font-size:1.4em;margin-bottom:12px;">⚠️ JavaScriptが無効になっています</h2>
+    <p style="color:#e0e8ff;font-size:0.95em;line-height:1.6;">
+      Voldiaを利用するには、ブラウザの設定でJavaScriptを<br>
+      有効にしてから、ページを再読み込みしてください。
+    </p>
+  </div>
+</noscript>
 <div class="app">
   <div id="ui-block-left" class="ui-block-overlay show"></div>
   <div id="ui-block-right" class="ui-block-overlay show"></div>
@@ -452,12 +464,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
         <img src="data:image/png;base64,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" alt="OSAKI Tech Lab" style="height:34px;display:block;flex-shrink:0;">
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <span class="logo-text">Voldia<span id="app-version-label">v0098</span></span>
+        <span class="logo-text">Voldia<span id="app-version-label">v0100</span></span>
       </div>
       <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
-    </div>
-    <div style="background:#1a1a1a;border-bottom:1px solid var(--bdr);padding:5px 10px;font-size:.7em;color:#e8a020;line-height:1.5;flex-shrink:0;">
-      ※ 躯体下端はGL±0基準
     </div>
     <div id="list-area">
       <ul id="sh-list"></ul>
@@ -835,7 +844,7 @@ D&D or クリックでロードしてください</p>
             <!-- v0.0024: 基準高さ(GL=y0)メッシュ表示ON/OFFトグル。JS側関数は3D-r035から実装済み -->
             <!-- r072マスター指示: 「基準メッシュ」→「メッシュ」に短縮、デフォルトOFFに変更。
                  文字が短くなった分、幅を132px→76pxに縮小してスクショボタンのはみ出しを解消 -->
-            <button id="btn-base-grid-toggle" onclick="toggleBaseGridVisibility()" style="background:#444;border:1px solid #666;color:#ccc;border-radius:4px;padding:4px 4px;font-size:.75em;cursor:pointer;width:92px;flex-shrink:0;text-align:center;white-space:nowrap;opacity:.5;">▦ メッシュ OFF</button>
+            <button id="btn-base-grid-toggle" onclick="toggleBaseGridVisibility()" style="background:#444;border:1px solid #666;color:#ccc;border-radius:4px;padding:4px 10px;font-size:.75em;cursor:pointer;min-width:92px;flex-shrink:0;text-align:center;white-space:nowrap;opacity:.5;">▦ メッシュ OFF</button>
             <!-- r059: 3Dプレビューのスクリーンショット保存ボタン -->
             <!-- r062: SHIFT+CTRL+クリックでGLB保存を行う隠しデバッグ機能を追加(判定はJS側handleCalc3DScreenshotClickで実施) -->
             <button id="btn-calc-screenshot" onclick="handleCalc3DScreenshotClick(event)" style="background:#444;border:1px solid #666;color:#ccc;border-radius:4px;padding:4px 12px;font-size:.75em;cursor:pointer;flex-shrink:0;">📷 スクショ</button>
@@ -883,9 +892,9 @@ D&D or クリックでロードしてください</p>
           </div>
         </div>
         <button class="btn-glb" id="btn-glb" onclick="voldiaConfirmGLB()">📦 GLB 保存</button>
-        <!-- Voldia版: オブジェクト配置モード（開発中）。土量計算の結果画面でのみ表示 -->
+        <!-- Voldia版: オブジェクト配置モード。土量計算の結果画面でのみ表示 -->
         <button class="btn-glb" id="btn-placement" onclick="openPlacementMode()"
-          style="border-color:#ffb74d;color:#ffb74d;">🏗 配置モード（開発中）</button>
+          style="border-color:#ffb74d;color:#ffb74d;">🏗 3D配置モード</button>
         <!-- r070: エビル(Evidence Builder)統合 — 通常計算の結果画面でのみ表示 -->
         <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')"
           style="border-color:#4fc3f7;color:#4fc3f7;">📊 躯体解析（データ出力）</button>
@@ -995,6 +1004,45 @@ window._vertexQuantMm = 10; // v0.0024: 頂点量子化(mm) デフォルトを10
 // 45° → ratio=1.0, 60° → ratio=0.577, 35° → ratio=1.428, 73° → ratio=0.325
 function getSlopeRatio(){ return 1 / Math.tan(slopeAngleDeg * Math.PI / 180); }
 
+// (24回目)(24回目・追加修正・項目9): 既存ロゴ(横長画像)をファビコンとして設定。
+// 単純に<link rel="icon">へ直接そのままセットすると、ブラウザによっては
+// 正方形に引き伸ばされて歪むため、64x64の透明キャンバスへアスペクト比を
+// 維持したまま中央配置してから使う。ロゴのBase64データは既にヘッダー/
+// スプラッシュ画面のimgタグに埋め込み済みのものをそのまま流用し、二重に
+// 埋め込まない。
+(function setupFavicon(){
+  const logoImg = document.querySelector('img[alt="OSAKI Tech Lab"]');
+  if(!logoImg || !logoImg.src) return;
+  const iconImg = new Image();
+  iconImg.onload = function(){
+    const canvas = document.createElement('canvas');
+    const size = 64;
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    let drawWidth, drawHeight;
+    if(iconImg.width > iconImg.height){
+      drawWidth = size;
+      drawHeight = (iconImg.height / iconImg.width) * size;
+    } else {
+      drawHeight = size;
+      drawWidth = (iconImg.width / iconImg.height) * size;
+    }
+    const scale = 1.3;
+    drawWidth *= scale; drawHeight *= scale;
+    const x = (size - drawWidth) / 2;
+    const y = (size - drawHeight) / 2;
+    ctx.drawImage(iconImg, x, y, drawWidth, drawHeight);
+    let favicon = document.querySelector('link[rel="icon"]');
+    if(!favicon){
+      favicon = document.createElement('link');
+      favicon.rel = 'icon';
+      document.head.appendChild(favicon);
+    }
+    favicon.href = canvas.toDataURL('image/png');
+  };
+  iconImg.src = logoImg.src;
+})();
+
 // ─── 色定義 ───
 const SHAPE_COLORS={
   blue:  {fill:'rgba(0,200,255,.38)',  stroke:'rgba(0,200,255,.9)',   badge:'#0080c0', label:'青'},
@@ -1028,6 +1076,17 @@ let shapes=[],cur=null,drawing=false,tool=null,rectLoop=false,polyLoop=false;
 let _toolEndCooldownUntil = 0;
 function _startToolEndCooldown(){ _toolEndCooldownUntil = Date.now() + 1000; }
 let _lastDrawToolForRepeat=null; // r075: Enterキーでのリピート機能。構台(kotai)・保存系は対象外。
+// (24回目)(24回目・追加修正・項目7): 図形作図の完了とEnterキーでの再開の「間」に、
+// 距離測定・測点設置・選択合成・部分削除・undo/redo等の別アクションを挟んだ
+// 場合はリピートを無効化するための共通関数。各アクションの開始点から呼ぶ。
+function _invalidateRepeat(){
+  if(_lastDrawToolForRepeat){
+    _lastDrawToolForRepeat=null;
+    // ステータスバーがリピート案内を表示中だった場合はクリアする
+    const tn=document.getElementById('tool-name');
+    if(tn && tn.textContent==='⏎ Enterでツールを繰り返し') setToolBar('');
+  }
+}
 let surveyMode=false,surveyPts=[]; // r024(AreCal移植): 測点設置
 // r060: ノースアロー（方位角）。画面上=0°、時計回りが正（測量の方位角方式）。
 // LandXML出力時の回転・原点(0,0,0)決定にのみ使用。作図・3D表示・配置モードには一切影響しない。
@@ -1228,6 +1287,7 @@ function pushUndo(){
 }
 function undo(){
   if(!undoStack.length)return;
+  _invalidateRepeat();
   // 取消し前の現在状態をredo用に退避
   redoStack.push(JSON.stringify({shapes, yamadome, surveyPts}));
   document.getElementById('redo-btn').disabled=false;
@@ -1243,6 +1303,7 @@ function undo(){
 }
 function redo(){
   if(!redoStack.length)return;
+  _invalidateRepeat();
   // 取消し前(=redo適用前)の現在状態をundoスタックへ戻す
   undoStack.push(JSON.stringify({shapes, yamadome, surveyPts}));
   if(undoStack.length>UNDO_MAX)undoStack.shift();
@@ -1400,14 +1461,18 @@ document.addEventListener('DOMContentLoaded',()=>{
       hideUiBlockOverlays();
     }
   };
-  function closeIoPanel(){
+  // (24回目)(24回目・追加修正・項目4): これまでDOMContentLoadedコールバック内の
+  // ローカル関数のままで、外部JS(voldia3d)側からtypeof判定すると常に
+  // 'undefined'になり、Vold/DXF出力完了時の自動クローズが無反応だった真因。
+  // toggleIoPanelと同じくwindow.に明示公開してグローバルから呼べるようにする。
+  window.closeIoPanel = function(){
     const floatPanel = document.getElementById('io-float-panel');
     if(floatPanel.style.display === 'block'){
       floatPanel.style.display = 'none';
       setToolBar('');
       hideUiBlockOverlays();
     }
-  }
+  };
   // r067(マスター指摘): 右クリックキャンセルが左右パネルのオーバーレイ上でしか
   // 効かず、中央の作図キャンバス上で右クリックしても閉じなかった。画面のどこで
   // 右クリックしても閉じるよう、window全体で拾う1つのリスナーに統一する。
@@ -1748,6 +1813,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 
 document.getElementById('calc-btn').addEventListener('click',()=>{
+    cancelAllTools(); // (24回目)(24回目・追加修正・項目8): Voldia→3Dイメージ遷移時に全ツールキャンセル
     console.log("--- 体積計算 起動チェック ---");
     console.log("図形数:", shapes.length);
     
@@ -1842,6 +1908,14 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       if(!anyBlocking){
         e.preventDefault();
         startTool(_lastDrawToolForRepeat);
+        // (24回目)(24回目・追加修正・項目4): finishShape側でリピート案内をステータス
+        // バーに常設表示するようにしたのに対応し、再開時は通常の「作図中」表示に
+        // 戻す(手動でボタンを押した時と同じ文言に統一)。
+        if(_lastDrawToolForRepeat==='rect'){
+          setToolBar('⬛ 四角形作図中（右クリックで終了）');
+        } else {
+          setToolBar('🔵 多角形作図中（始点クリック or Enter で確定・Shiftで直交）');
+        }
         toast(`↩ リピート: ${_lastDrawToolForRepeat==='rect'?'四角形':'多角形'}作図を再開`);
       }
     }
@@ -1867,8 +1941,8 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       const tag=document.activeElement&&document.activeElement.tagName;
       if(tag==='INPUT'||tag==='TEXTAREA')return;
       e.preventDefault();
+      _invalidateRepeat();
       pushUndo();
-      shapes=shapes.filter((_,i)=>!selectedSet.has(i));
       selectedSet.clear();
       updSidebar();redraw();
       toast('🗑 削除 — Ctrl+Zで元に戻せます');
@@ -2305,7 +2379,7 @@ function getSnap(lx,ly){
   }
   if(snapOn.online){for(const{a,b}of segs){const p=nearestOnSeg(lx,ly,a,b);if(p)chk(p.x,p.y,'online',TOL_ONLINE);}}
   if(snapOn.intersect){
-    // r087(動作軽量化・24回目): 交点探索の総当たりO(E²)がオブジェクト数に対して
+    // (動作軽量化・24回目): 交点探索の総当たりO(E²)がオブジェクト数に対して
     // 重すぎたため、事前にカーソル近傍の線分だけへ絞り込んでから総当たりする。
     // 「交点PがカーソルからTOL_INTERSECT以内」ならば、Pはその線分上の点である以上、
     // 線分自体とカーソルの最短距離もTOL_INTERSECT以内のはず(線分上の最近点は
@@ -2336,7 +2410,7 @@ function getSnap(lx,ly){
   return best;
 }
 
-// r087(動作軽量化・24回目): 点と線分の「正確な」最短距離。nearestOnSeg()は
+// (動作軽量化・24回目): 点と線分の「正確な」最短距離。nearestOnSeg()は
 // スナップ表示位置の都合でtを[0.05,0.95]にクランプしており、getSnap()の
 // intersect絞り込み用途にはそのままだと端点付近でわずかに距離が狂うため、
 // クランプ無し(t∈[0,1]のみ)の専用版を用意する。
@@ -2404,6 +2478,7 @@ function startTool(t){
   document.getElementById('poly-btn').classList.toggle('on',t==='poly');
   // r075: リピート機能(Enterキー)用に直前使用ツールを記録。構台(kotai)は対象外のためここには来ない。
   if(t==='rect'||t==='poly') _lastDrawToolForRepeat = t;
+  else _invalidateRepeat(); // 追加修正・項目7: rect/poly以外のツールに切り替えたらリピート無効化
   // r025(マスター指示④): 連続入力機能を廃止。以前はここでrectLoop/polyLoopを
   // trueにして1つ描き終えても自動的に次の作図に入れていたが、今後は1つ描く
   // 毎に必ずツールボタンを押し直す運用にする（rectLoop/polyLoopは常にfalseの
@@ -2418,6 +2493,21 @@ function cancelDraw(){
   });
   setToolBar('');showSnap(null);redraw();
 }
+// (24回目)(24回目・追加修正・項目8): Voldia本体⇔3Dイメージ⇔配置モードの画面遷移時に、
+// 前の画面で使いかけだったツール/モードを全キャンセルする共通関数。
+// window.に明示公開(closeIoPanelがDOMContentLoaded内ローカル関数のままだった
+// せいで外部JSから呼べていなかった教訓を反映し、同じ轍を踏まないようにする)。
+window.cancelAllTools = function(){
+  _invalidateRepeat();
+  if(drawing) cancelDraw();
+  if(distMode) setDistMode(false);
+  if(surveyMode) setSurveyMode(false);
+  if(selUnionMode) setSelUnionMode(false);
+  if(subMode) setSubMode(false);
+  if(typeof yamadomeEditMode!=='undefined' && yamadomeEditMode){ yamadomeEditMode=false; yamadomeEditVtx=-1; }
+  if(selectedSet && selectedSet.size>0) clearSelection();
+  setToolBar('');
+};
 
 function onMouseDown(e){
   if(isToolsLocked())return;
@@ -2751,7 +2841,6 @@ function finishShape(){
       updSidebar();
       let msg = `⚠️ 自己交差を検出。${addedCount}個に分割しました`;
       if(skippedCount > 0) msg += `（${skippedCount}個は面積が小さすぎるため除外）`;
-      msg += '　⏎ Enterでリピート可';
       toast(msg);
       if(rectLoop && prevTool2==='rect'){cur={pts:[]};redraw();return;}
       if(polyLoop && prevTool2==='poly'){cur={pts:[]};redraw();return;}
@@ -2759,6 +2848,13 @@ function finishShape(){
       _startToolEndCooldown();
       document.getElementById('rect-btn').classList.remove('on');
       document.getElementById('poly-btn').classList.remove('on');
+      // (24回目)(24回目・追加修正・項目4): 通常完了パスと同様、ステータスバーの
+      // 残留を修正しリピート可の常設表示に統一
+      if(_lastDrawToolForRepeat){
+        setToolBar(`⏎ Enterでツールを繰り返し`);
+      } else {
+        setToolBar('');
+      }
       redraw();
       return; // 分割ルートはここで終了
     }
@@ -2773,13 +2869,21 @@ function finishShape(){
   shapes.push(sh);
   const prevTool=tool;cur=null;
   updSidebar();
-  toast(`✅ 図形${shapes.length} — ${sh.area.toFixed(4)} m²　⏎ Enterでリピート可`);
+  toast(`✅ 図形${shapes.length} — ${sh.area.toFixed(4)} m²`);
   if(rectLoop&&prevTool==='rect'){cur={pts:[]};redraw();return;}
   if(polyLoop&&prevTool==='poly'){cur={pts:[]};redraw();return;}
   drawing=false;tool=null;polyLoop=false;
   _startToolEndCooldown();
   document.getElementById('rect-btn').classList.remove('on');
   document.getElementById('poly-btn').classList.remove('on');
+  // (24回目)(24回目・追加修正・項目4): 完成後も上部に「◯◯作図中」の文言が残る
+  // バグを修正。マスター案の通り、リピート可能な旨をここ(ステータスバー)に
+  // 常設表示する形に変更(トースト側の同文言は削除)。
+  if(_lastDrawToolForRepeat){
+    setToolBar(`⏎ Enterでツールを繰り返し`);
+  } else {
+    setToolBar('');
+  }
   redraw();
 }
 
@@ -3152,7 +3256,11 @@ function updSidebar(){
       if(shapes[i].area<=0){pushUndo();shapes.splice(i,1);updSidebar();redraw();toast('⚠ 面積0のオブジェクトを削除しました');return;}
     };
     inp.addEventListener('change',commit);
-    inp.addEventListener('keydown',e=>{if(e.key==='Enter'){inp.blur();}});
+    // (24回目・項目5): テキスト確定のEnterがdocumentまで伝播すると、
+    // inp.blur()でactiveElementが変わった「後」にグローバルkeydownリスナーの
+    // isFormFocusチェックが走ってしまい(blur済みなのでinputと判定されない)、
+    // リピート機能が誤発動するバグがあった。stopPropagation()で伝播自体を止める。
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.stopPropagation();inp.blur();}});
   });
   // ── noslope 1ボタントグル
   list.querySelectorAll('.noslope-btn').forEach(btn=>{
@@ -3396,6 +3504,7 @@ function setDistMode(on){
     if(surveyMode)setSurveyMode(false); // r024(AreCal移植)
   }
   distMode=on;distPts=[];
+  if(on) _invalidateRepeat();
   if(!on) _startToolEndCooldown();
   document.getElementById('dist-btn').classList.toggle('on',on);
   // B2(2026-08-25引継ぎ19回目マスター報告): distPtsをクリアしただけではキャンバスの
@@ -3423,6 +3532,7 @@ function setDistMode(on){
 // ================================================================
 function setSurveyMode(on){
   if(on){
+    _invalidateRepeat();
     if(drawing)cancelDraw();
     if(distMode)setDistMode(false);
     if(selUnionMode)setSelUnionMode(false);
@@ -3523,6 +3633,7 @@ function updSelUnionToolbar(){
 
 function setSelUnionMode(on){
   selUnionMode=on;selUnionSet.clear();
+  if(on) _invalidateRepeat();
   document.getElementById('sel-union-btn').classList.toggle('on',on);
   // do-sel-union removed from right panel (Fix12)
   if(on){
@@ -3662,6 +3773,7 @@ function updSubToolbar(){
 
 function setSubMode(on){
   subMode=on;subBase=-1;subTargets.clear();
+  if(on) _invalidateRepeat();
   document.getElementById('sub-btn').classList.toggle('on',on);
   // do-sub removed from right panel - handled by updSubToolbar()
   if(on){
@@ -4366,7 +4478,7 @@ function cleanPolygonPoints(pts){
 
 </script>
 
-<script src="voldia3d_voldia_r087.js"></script>
+<script src="voldia3d_voldia_r089.js"></script>
 
 <!-- ClipperLib は冒頭の inline scriptに含まれています -->
 

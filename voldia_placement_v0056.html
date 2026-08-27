@@ -2224,6 +2224,10 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   // ★ 地形に沿う作業半径・線描画ロジック
   // ==========================================
   const fallRaycaster = new THREE.Raycaster();
+  // (動作軽量化・23回目): 吹き出し/矢印の支持判定の間引き間隔(フレーム数)。
+  // 6フレームに1回(60fps環境で約100ms間隔)でも体感の遅延は無視できるレベル。
+  const FALL_CHECK_INTERVAL_FRAMES = 6;
+  let _animFrameCount = 0;
   
   function getSnappedLinePoints(p1, p2) {
     const points = [];
@@ -3958,25 +3962,39 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       });
     }
 
-    placedObjects.forEach(obj => {
-      if ((obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow') && obj.userData.isPlaced) {
-        fallRaycaster.set(new THREE.Vector3(obj.position.x, 100, obj.position.z), new THREE.Vector3(0, -1, 0));
-        const targets = [...terrainMeshes, ...placedObjects.filter(o => o !== obj && o.userData.type !== 'text_balloon' && o.userData.type !== 'arrow')];
-        const hits = fallRaycaster.intersectObjects(targets, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
-        if (hits.length > 0) {
-          const targetY = hits[0].point.y;
-          if (obj.position.y > targetY + 0.2) { 
-            obj.userData.isPlaced = false;
-            fallingObjects.push({ mesh: obj, targetY: targetY, normal: new THREE.Vector3(0,1,0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+    // (動作軽量化・23回目): 吹き出し/矢印の「地面が消えて落下すべきか」判定を軽量化。
+    // ①元コードは対象オブジェクトごとに毎フレームtargets配列を再構築していたが、
+    //   `o !== obj`によるobj自身の除外は、typeフィルタ(text_balloon/arrow除外)が
+    //   objの型と一致するため既に成立しており冗長だった → targetsをループの外で
+    //   1回だけ構築するよう変更(結果は従来と同一)。
+    // ②この判定は「地形/他オブジェクトの支持状況」という低頻度にしか変化しない
+    //   状態の監視なので、間引いても体感の遅延は実質ゼロ。毎フレーム→
+    //   FALL_CHECK_INTERVAL_FRAMESフレームに1回に変更。
+    if ((_animFrameCount % FALL_CHECK_INTERVAL_FRAMES) === 0) {
+      let supportTargetsCache = null;
+      placedObjects.forEach(obj => {
+        if ((obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow') && obj.userData.isPlaced) {
+          if (!supportTargetsCache) {
+            supportTargetsCache = [...terrainMeshes, ...placedObjects.filter(o => o.userData.type !== 'text_balloon' && o.userData.type !== 'arrow')];
           }
-        } else {
-           if (obj.position.y > -50) {
-             obj.userData.isPlaced = false;
-             fallingObjects.push({ mesh: obj, targetY: -Infinity, normal: new THREE.Vector3(0,1,0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
-           }
+          fallRaycaster.set(new THREE.Vector3(obj.position.x, 100, obj.position.z), new THREE.Vector3(0, -1, 0));
+          const hits = fallRaycaster.intersectObjects(supportTargetsCache, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
+          if (hits.length > 0) {
+            const targetY = hits[0].point.y;
+            if (obj.position.y > targetY + 0.2) { 
+              obj.userData.isPlaced = false;
+              fallingObjects.push({ mesh: obj, targetY: targetY, normal: new THREE.Vector3(0,1,0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+            }
+          } else {
+             if (obj.position.y > -50) {
+               obj.userData.isPlaced = false;
+               fallingObjects.push({ mesh: obj, targetY: -Infinity, normal: new THREE.Vector3(0,1,0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+             }
+          }
         }
-      }
-    });
+      });
+    }
+    _animFrameCount++;
 
     if (fallingObjects.length > 0) {
       renderer.shadowMap.needsUpdate = true; 

@@ -1298,6 +1298,8 @@ function showCalcModal(){
 function closeCalcModal(){
   document.getElementById('calc-modal').classList.remove('show');
   disposeThree();
+  // r089(24回目・追加修正・項目8): 3Dイメージ→Voldia本体へ戻る際も全ツールキャンセル
+  if(typeof cancelAllTools==='function') cancelAllTools();
 }
 
 let _lastGeoms=null; // 計算済み水密ジオメトリ（GLB出力用）
@@ -1455,6 +1457,9 @@ function resetCalcToSelect(){
   window._lastCalcModeForPlacement=null;
   const _ba1=document.getElementById('btn-analyze-structure');if(_ba1)_ba1.classList.remove('show');
   const _be1=document.getElementById('btn-analyze-earthwork');if(_be1)_be1.classList.remove('show');
+  // r088(24回目・項目2): 透過スライダー/ソリッド-グラデ切替UIは計算結果表示中だけ
+  // 出るのが正解なのに、「戻る」を押しても消えずに残っていたバグを修正。
+  const _opCtrl=document.getElementById('opacity-ctrl');if(_opCtrl)_opCtrl.style.display='none';
   // v0.0013: showCalcModalのsetTimeoutで既にinitThree_previewが呼ばれてる
   // 戻るボタン時は3Dをリセットして個別カラーに戻す
   initThree_preview();
@@ -1888,8 +1893,7 @@ async function runCalc(mode){
     tbody.innerHTML='';
     fs.forEach((f,i)=>{
       const tr = document.createElement('tr');
-      const typeStr = f.noSlope ? '[柱]' : '[錐台]';
-      tr.innerHTML = `<td>No.${i+1} ${typeStr}</td>
+      tr.innerHTML = `<td>No.${i+1}</td>
         <td>${f.area.toFixed(4)}</td>
         <td>${f.D.toFixed(0)}${mode==='doboku' ? `<span style="color:#4fc3f7"> (+${concVal})</span>` : ''}</td>
         <td class="rn">${mode==='doboku' ? '---' : singleVols[i].toFixed(3)}</td>`;
@@ -2473,7 +2477,10 @@ function _setupAreaPickOnDblClick(cv, camera, scene, mesh, pos, idx){
 
     const areaStr = totalArea.toFixed(3);
     _copyTextToClipboard(areaStr).then(()=>{
-      toast(`📐 面積: ${areaStr} m²（三角形${visited.size}枚を集約）／クリップボードにコピーしました`, 3000);
+      // r089(24回目・追加修正・項目6): 三角形の単純合計による近似値のため、
+      // 表示にのみ「≒」を付ける(1%程度の誤差があり得るため)。クリップボードに
+      // コピーする数値自体はExcel等への貼り付けを考慮しそのまま(無印)にする。
+      toast(`📐 面積: ≒${areaStr} m²（三角形${visited.size}枚を集約）／クリップボードにコピーしました`, 3000);
     });
   }
   cv._areaDblClickHandler = handler;
@@ -4092,6 +4099,13 @@ async function exportCSV(){
     yamadome: (yamadome && yamadome.pts && yamadome.pts.length>=3) ? {pts: yamadome.pts.map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)}))} : null, // r037: 山留もmm座標で保存(従来保存されていなかったバグを修正)
     northAngleDeg: (typeof northAngleDeg==='number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0, // r060: ノースアロー方位角（画面上=0°・時計回り正）
     originSurveyIdx: (typeof originSurveyIdx==='number' && surveyPts[originSurveyIdx]) ? originSurveyIdx : null, // r060: LandXML出力用の原点測点インデックス
+    // r089(24回目・追加修正・項目5): 元図(PDFベクター)スナップ用の線データをmm座標で
+    // 保存する。従来はvecSegsが未保存だったため、Vold読込後は「元図の線を読み取る」
+    // 機能で使ったPDFファイル自体が無いと元図スナップが復元できなかった
+    // (再度PDFを読み込み直す以外に手段が無く、実運用上ほぼ詰みだった)。
+    // 線データ自体(端点座標のみ、単純な配列)を保存しておけば、PDF再読込なしで
+    // そのまま復元できる。
+    vecSegsMm: (vecSegs||[]).map(s=>({a:{x:pxToMm(s.a.x),y:pxToMm(s.a.y)},b:{x:pxToMm(s.b.x),y:pxToMm(s.b.y)}})),
     shapes:shapes.map(sh=>({
       type:sh.type,
       ptsMm:sh.pts.map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)})), // mm座標で保存
@@ -4116,6 +4130,9 @@ async function exportCSV(){
   if(placementObjects && placementObjects.length){
     setTimeout(()=>toast('⚠ 配置オブジェクトは正確に再現されない場合もあります', 3600), 1600);
   }
+  // r088(24回目・項目4): 出力完了時点で「保存」ツールをキャンセルし、
+  // ツール無選択状態に戻す(マスター指示)。
+  if(typeof closeIoPanel==='function') closeIoPanel();
 }
 function loadBackgroundImageDataURL(dataURL){
   return new Promise((resolve)=>{
@@ -4246,6 +4263,26 @@ async function applyVoldData(data){
   northAngleDeg = (typeof data.northAngleDeg==='number' && !isNaN(data.northAngleDeg)) ? data.northAngleDeg : 0;
   originSurveyIdx = (typeof data.originSurveyIdx==='number' && surveyPts[data.originSurveyIdx]) ? data.originSurveyIdx : null;
   if(typeof updateNorthArrowUI==='function') updateNorthArrowUI();
+  // r089(24回目・追加修正・項目5): 保存されていた元図ベクター線データ(mm座標)を
+  // px座標に戻してvecSegs/vecPtsを復元し、buildVecGrid()で空間インデックスを
+  // 再構築する。旧形式のVoldファイル(vecSegsMm未保存)はvecSegs=[]のままになり、
+  // 元図スナップは単に効かない状態に留まる(壊れはしない)。
+  if(data.vecSegsMm && data.vecSegsMm.length){
+    vecSegs = data.vecSegsMm.map(s=>({
+      a:{x:mmToPx(s.a.x), y:mmToPx(s.a.y)},
+      b:{x:mmToPx(s.b.x), y:mmToPx(s.b.y)}
+    }));
+    const u=[];
+    for(const l of vecSegs){
+      for(const p of [l.a,l.b]){
+        if(!u.some(q=>Math.hypot(q.x-p.x,q.y-p.y)<2))u.push(p);
+      }
+    }
+    vecPts=u;
+    buildVecGrid();
+  } else {
+    vecPts=[];vecSegs=[];vecGrid=null;
+  }
   toolsLocked=false;
   updSidebar();redraw();fitScreen();
   toast('📥 Voldファイル読込完了 — '+shapes.length+'図形'+(data.backgroundImageDataURL?'・背景あり':''));
@@ -4318,6 +4355,8 @@ function exportDXF3D(){
   const fs=getAllFrustums();
   if(!fs.length){toast('⚠ 深さが入力された図形がありません','e');return;}
   const conc=getConcThick();
+  const DXF_LAYER_TOP='00_Tenba';
+  const DXF_LAYER_BOTTOM='00_Sitaba';
 
   function L(code,val){return code+'\r\n'+val+'\r\n';}
   let d='';
@@ -4325,11 +4364,17 @@ function exportDXF3D(){
   d+=L(9,'$ACADVER');d+=L(1,'AC1009');
   d+=L(0,'ENDSEC');
   d+=L(0,'SECTION');d+=L(2,'TABLES');
-  d+=L(0,'TABLE');d+=L(2,'LAYER');d+=L(70,'4');
-  d+=L(0,'LAYER');d+=L(2,'SHAPE');  d+=L(70,'64');d+=L(62,'7');d+=L(6,'CONTINUOUS'); // 白:躯体形状
-  d+=L(0,'LAYER');d+=L(2,'OUTLINE');d+=L(70,'64');d+=L(62,'5');d+=L(6,'CONTINUOUS'); // 青:余掘り底面
-  d+=L(0,'LAYER');d+=L(2,'SLOPE');  d+=L(70,'64');d+=L(62,'3');d+=L(6,'CONTINUOUS'); // 緑:法面上端
-  d+=L(0,'LAYER');d+=L(2,'SLOPELN');d+=L(70,'64');d+=L(62,'2');d+=L(6,'CONTINUOUS'); // 黄:法面稜線
+  // r088(24回目・DXF不具合修正): レイヤー構成を「天端」「下端」の2層のみに簡素化。
+  // 旧SLOPE(法面上端)・SLOPELN(法面稜線)は廃止(マスター指示)。
+  // レイヤー名はASCII固定(00_Tenba/00_Sitaba)。この書き出し関数は最後に
+  // charset=utf-8でエンコードしているが、R12(AC1009)のASCII DXFは本来
+  // システムコードページ前提の仕様で、UTF-8の日本語レイヤー名は読み込み側の
+  // CADソフトによって文字化けする実害リスクが高い(コードページ宣言$DWGCODEPAGEも
+  // このwriterには無い)。安全側としてASCII名をデフォルトにした。日本語名
+  // (00_天端/00_下端)に確実に対応させたい場合は別途相談。
+  d+=L(0,'TABLE');d+=L(2,'LAYER');d+=L(70,'2');
+  d+=L(0,'LAYER');d+=L(2,DXF_LAYER_TOP);   d+=L(70,'64');d+=L(62,'7');d+=L(6,'CONTINUOUS'); // 白:天端
+  d+=L(0,'LAYER');d+=L(2,DXF_LAYER_BOTTOM);d+=L(70,'64');d+=L(62,'5');d+=L(6,'CONTINUOUS'); // 青:下端
   d+=L(0,'ENDTAB');
   d+=L(0,'TABLE');d+=L(2,'LTYPE');d+=L(70,'1');
   d+=L(0,'LTYPE');d+=L(2,'CONTINUOUS');d+=L(70,'64');d+=L(3,'Solid line');d+=L(72,'65');d+=L(73,'0');d+=L(40,'0.0');
@@ -4341,50 +4386,38 @@ function exportDXF3D(){
   const M=0.001; // mm→m
 
   function writePoly2D(layer,aci,pts,z){
+    // r089(24回目・追加修正・項目1): ブラウザcanvas座標(Y下向き・原点左上)と
+    // CAD座標(Y上向き・原点左下)のY軸方向が逆なため、DXF書き出し時にY符号を
+    // 反転して合わせる。offsetPolygon等の輪郭計算はすべてこの反転より前の
+    // 元座標系で完結しているので、ここで反転しても計算結果自体には影響しない
+    // (ミラー変換は「内側/外側」の関係を保つため、オフセット方向も正しいまま)。
     d+=L(0,'POLYLINE');d+=L(8,layer);d+=L(62,aci);d+=L(6,'CONTINUOUS');
     d+=L(66,'1');d+=L(70,'1');
     d+=L(10,'0.0');d+=L(20,'0.0');d+=L(30,(z*M).toFixed(6));
     pts.forEach(p=>{
       d+=L(0,'VERTEX');d+=L(8,layer);
       d+=L(10,(p.x*M).toFixed(6));
-      d+=L(20,(p.y*M).toFixed(6));
+      d+=L(20,(-p.y*M).toFixed(6));
       d+=L(30,(z*M).toFixed(6));
     });
     d+=L(0,'SEQEND');
   }
 
-  function writeLine(layer,aci,x1,y1,z1,x2,y2,z2){
-    d+=L(0,'LINE');d+=L(8,layer);d+=L(62,aci);
-    d+=L(10,(x1*M).toFixed(6));d+=L(20,(y1*M).toFixed(6));d+=L(30,(z1*M).toFixed(6));
-    d+=L(11,(x2*M).toFixed(6));d+=L(21,(y2*M).toFixed(6));d+=L(31,(z2*M).toFixed(6));
-  }
-
   fs.forEach((f)=>{
     // f.D は体積計算・3D表示用の「捨てコン+砕石込みの掘削深さ」。
     // DXF出力は躯体の実高さ（捨てコン等を含まない）で出す必要があるため、
-    // ここだけ conc 厚みを差し引いた専用の深さを使う（底面Z・法面上端オフセット・
-    // 法面稜線の3箇所を必ずセットで揃えること。片方だけ直すと法面勾配が
-    // 設定角度からズレて出力されてしまう）。
+    // ここだけ conc 厚みを差し引いた専用の深さを使う。
     const D=Math.max(0, f.D - conc); // 深さmm（捨てコン+砕石を除いた実高さ）
-    // 躯体形状ライン（GL=0、SHAPE層）
-    writePoly2D('SHAPE',7,f.ptsMm,0);
-    // 底面外形ライン（余掘り込みオフセット、OUTLINE層、Z=-D）
+    // r088(24回目・DXF不具合修正): 天端Zが常に0固定になっていたバグを修正。
+    // f.tl(オブジェクトごとの天端レベル、GL基準mm)をそのまま使う。
+    // 下端Z = 天端 − 実高さ。
+    const topZ = f.tl || 0;
+    const bottomZ = topZ - D;
+    // 天端ライン(00_天端)
+    writePoly2D(DXF_LAYER_TOP,7,f.ptsMm,topZ);
+    // 下端ライン(余掘り込みオフセット、00_下端)
     const bottomPts=offsetPolygon(f.ptsMm,f.OD);
-    writePoly2D('OUTLINE',5,bottomPts,-D);
-    if(!f.noSlope){
-      // 法面上端ライン（余掘り+D分オフセット、GL=0、SLOPE層）
-      const topPts=offsetPolygon(f.ptsMm,f.OD+D);
-      writePoly2D('SLOPE',3,topPts,0);
-      // 法面稜線（底面外形→上端外形の対応頂点をつなぐ、SLOPELN層）
-      const nb=bottomPts.length,nt=topPts.length;
-      const step=nb===nt?1:Math.max(1,Math.round(nt/nb));
-      for(let i=0;i<nb;i++){
-        const j=Math.min(Math.round(i*nt/nb),nt-1);
-        writeLine('SLOPELN',2,
-          bottomPts[i].x,bottomPts[i].y,-D,
-          topPts[j].x,topPts[j].y,0);
-      }
-    }
+    writePoly2D(DXF_LAYER_BOTTOM,5,bottomPts,bottomZ);
   });
 
   d+=L(0,'ENDSEC');d+=L(0,'EOF');
@@ -4394,7 +4427,10 @@ function exportDXF3D(){
   a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(d);
   a.download='Voldia_'+ts+'.DXF';
   a.click();
-  toast('📐 DXF出力完了（R12互換・SHAPE/OUTLINE/SLOPE/SLOPELN層）');
+  toast('📐 DXF出力完了（R12互換・00_Tenba/00_Sitaba層）');
+  // r088(24回目・項目4): 出力完了時点で「保存」ツールをキャンセルし、
+  // ツール無選択状態に戻す(マスター指示)。
+  if(typeof closeIoPanel==='function') closeIoPanel();
 }
 
 // GLB（ポリゴン実形状フラスタム）
@@ -4998,14 +5034,16 @@ function _evRunAnalysis(mode, glbArrayBuffer){
             const subDisplayH=subAvgH/Math.abs(K);
             const subVol=subS*subDisplayH*K;
             const subNo=`${calcId}-${idx+1}`;
-            const dx=f.v1.x-f.v0.x, dz=f.v1.z-f.v0.z;
-            let base=Math.sqrt(dx*dx+dz*dz);
-            if(base<0.001){
-              const dx2=f.v2.x-f.v1.x, dz2=f.v2.z-f.v1.z;
-              base=Math.sqrt(dx2*dx2+dz2*dz2);
-            }
-            const height=base>0?(subS*2)/base:0;
-            const areaFormula=`${base.toFixed(3)} * ${height.toFixed(3)} / 2`;
+            // r089(24回目・追加修正・項目11): 従来の「底辺×高さ÷2」は、高さの方が
+            // 面積から逆算(2*area/base)された値だったため、検証者から見ると
+            // 循環参照(面積の根拠が面積そのもの)になっており「根拠が無い」との
+            // 指摘を受けた。実測可能な三角形の3辺の長さ(平面投影・XZ平面)に
+            // 差し替える。第三者がこの3辺からヘロンの公式で独立に面積を
+            // 検算できるようにするのが狙い。
+            const dx01=f.v1.x-f.v0.x, dz01=f.v1.z-f.v0.z, side01=Math.sqrt(dx01*dx01+dz01*dz01);
+            const dx12=f.v2.x-f.v1.x, dz12=f.v2.z-f.v1.z, side12=Math.sqrt(dx12*dx12+dz12*dz12);
+            const dx20=f.v0.x-f.v2.x, dz20=f.v0.z-f.v2.z, side20=Math.sqrt(dx20*dx20+dz20*dz20);
+            const areaFormula=`${side01.toFixed(3)}+${side12.toFixed(3)}+${side20.toFixed(3)}`;
             const h0=mode==='structure'?f.v0.y-yBase:z0-f.v0.y;
             const h1=mode==='structure'?f.v1.y-yBase:z0-f.v1.y;
             const h2=mode==='structure'?f.v2.y-yBase:z0-f.v2.y;
@@ -5125,7 +5163,7 @@ function _evGenerateExcelData(){
       sheetData.push([
         {v:`  ${sub.subNo}`,s:childStyle},
         {v:`  ${branchChar} ポリゴン #${sub.id}`,s:childStyle},
-        {v:`[S根拠] ${sub.areaFormula}`,s:childStyle},
+        {v:`[3辺] ${sub.areaFormula}`,s:childStyle},
         {t:'n',v:sub.S,z:"0.000",s:childNumStyle},
         {t:'n',v:sub.H,z:"0.000",s:childNumStyle},
         {t:'n',v:sub.K,z:"0.000",s:childNumStyle},
