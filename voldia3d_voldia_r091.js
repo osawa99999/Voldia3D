@@ -1337,7 +1337,23 @@ function onGlOffsetChange(){
     el.value = (window._glOffsetMm>=0?'+':'')+window._glOffsetMm;
     return;
   }
-  window._glOffsetMm = parseInt(v, 10);
+  const parsed = parseInt(v, 10);
+  // r091(24回目・追加チェック項目2): 描画済みオブジェクトの天端の最大値・下端の
+  // 最小値の範囲を超えるGLオフセットは、どのオブジェクトとも交わらない位置に
+  // 「現状地盤」を置くことになり物理的に無意味なため、入力を弾く。
+  const enabledShapes = (typeof shapes!=='undefined' ? shapes : []).filter(sh=>sh.enabled!==false);
+  if(enabledShapes.length){
+    const tops = enabledShapes.map(sh=>parseFloat(sh.topLevel)||0);
+    const bottoms = enabledShapes.map(sh=>parseFloat(sh.depthBeam)).filter(n=>!isNaN(n));
+    const maxTop = Math.max(...tops);
+    const minBottom = bottoms.length ? Math.min(...bottoms) : maxTop;
+    if(parsed > maxTop || parsed < minBottom){
+      toast(`⚠️ GLオフセットは ${minBottom}〜${maxTop}mm の範囲で入力してください（描画済みオブジェクトの天端最大値〜下端最小値）`);
+      el.value = (window._glOffsetMm>=0?'+':'')+window._glOffsetMm;
+      return;
+    }
+  }
+  window._glOffsetMm = parsed;
   el.value = (window._glOffsetMm>=0?'+':'')+window._glOffsetMm; // 常に符号を表示
 }
 function updMeshOpacity(val){
@@ -4734,7 +4750,7 @@ function epSet(pct,msg){
 // ════════════════════════════════════════════════════════════════
 
 let _evScene=null, _evRenderer=null, _evResultGroup=null, _evSubLabelGroup=null, _evFineLineGroup=null;
-let _evAnalysisData=[], _evTotalModelArea=0, _evModelScaleSize=1;
+let _evAnalysisData=[], _evTotalModelArea=0, _evModelScaleSize=1, _evPendingSubLabels=[];
 let _evGltfLoader=null;
 
 function _evHashVertex(v){
@@ -4790,6 +4806,50 @@ function _evCreateTinySubLabel(text, targetScale){
   sprite.renderOrder=1000;
   sprite.scale.set(targetScale*4,targetScale,1);
   return sprite;
+}
+
+// r091(24回目・追加チェック項目1): 平面図(真上から見たPDF/PNG)上でサブフェイス
+// 番号ラベルが重なる不具合の対策。柱が梁の真上にある等、異なる高さの要素でも
+// XZ座標(平面上の位置)が近いと、真上から見た投影では見分けが付かなくなる。
+// 全ラベル候補が出揃った時点で、既に配置済みのラベルとXZ平面上でAABB衝突判定を
+// 行い、衝突する場合は元の位置を中心に螺旋状に候補点を試して空いている場所へ
+// ずらす。ずらした場合は元の真の位置まで薄い引出線を引き、対応関係を保つ。
+function _evResolveAndPlaceSubLabels(){
+  const placed=[];
+  _evPendingSubLabels.forEach(cand=>{
+    // スプライト全体(targetScale*4 x targetScale)に対し、実際の文字幅は
+    // やや小さいため0.85倍を目安の当たり判定とする
+    const halfW=cand.tinyScale*4*0.5*0.85, halfH=cand.tinyScale*0.5*0.85;
+    const collides=(x,z)=>placed.some(p=>Math.abs(x-p.fcx)<(halfW+p.halfW) && Math.abs(z-p.fcz)<(halfH+p.halfH));
+    let px=cand.fcx, pz=cand.fcz, moved=false;
+    if(collides(px,pz)){
+      moved=true;
+      const baseStep=Math.max(halfW,halfH)*1.4;
+      outer:
+      for(let ring=1;ring<=6;ring++){
+        const radius=baseStep*ring, numAngles=8*ring;
+        for(let i=0;i<numAngles;i++){
+          const ang=(Math.PI*2*i)/numAngles;
+          const tx=cand.fcx+Math.cos(ang)*radius, tz=cand.fcz+Math.sin(ang)*radius;
+          if(!collides(tx,tz)){ px=tx; pz=tz; break outer; }
+        }
+      }
+      // 6リング試しても空きが見つからない場合は最後の候補(密集地の外周)のまま採用
+    }
+    placed.push({fcx:px, fcz:pz, halfW, halfH});
+    const tinyLabel=_evCreateTinySubLabel(cand.subNo, cand.tinyScale);
+    tinyLabel.position.set(px, cand.fcy+(_evModelScaleSize*0.005), pz);
+    _evSubLabelGroup.add(tinyLabel);
+    if(moved){
+      const lineGeom=new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(cand.fcx, cand.fcy+(_evModelScaleSize*0.003), cand.fcz),
+        new THREE.Vector3(px, cand.fcy+(_evModelScaleSize*0.003), pz)
+      ]);
+      const leaderLine=new THREE.Line(lineGeom, new THREE.LineBasicMaterial({color:0xc0392b, transparent:true, opacity:0.6}));
+      leaderLine.renderOrder=999;
+      _evSubLabelGroup.add(leaderLine);
+    }
+  });
 }
 
 // オフスクリーン解析用シーンを準備（Voldia本編の3Dビューとは完全に独立）
@@ -4937,6 +4997,7 @@ function _evRunAnalysis(mode, glbArrayBuffer){
         });
 
         _evAnalysisData=[];
+        _evPendingSubLabels=[];
         let calcId=1, totalVolume=0;
 
         Object.values(clusters).forEach(c=>{
@@ -5061,9 +5122,13 @@ function _evRunAnalysis(mode, glbArrayBuffer){
               let tinyScale=Math.sqrt(subS)*0.2;
               const minTinyScale=_evModelScaleSize*0.005, maxTinyScale=_evModelScaleSize*0.02;
               tinyScale=Math.max(minTinyScale, Math.min(maxTinyScale, tinyScale));
-              const tinyLabel=_evCreateTinySubLabel(subNo, tinyScale);
-              tinyLabel.position.set(fcx, fcy+(_evModelScaleSize*0.005), fcz);
-              _evSubLabelGroup.add(tinyLabel);
+              // r091(24回目・追加チェック項目1): ここで即座にスプライトを追加せず、
+              // 候補として一旦貯める。理由: 別クラスター(例: 柱)が別クラスター
+              // (例: その真下の梁)の真上/真下にあると、上から見た平面図(PDF/PNG)では
+              // XZ座標がほぼ一致し、ラベル同士が重なって読めなくなる不具合が
+              // 報告された。全候補が出揃ってから衝突検出→ずらし処理を行うため、
+              // ここでは位置とサイズの情報だけを記録する。
+              _evPendingSubLabels.push({fcx, fcy, fcz, subNo, tinyScale});
             }
 
             subFacesData.push({subNo, id:f.id, areaFormula, hFormula, S:subS, H:subDisplayH, K, V:subVol});
@@ -5072,6 +5137,10 @@ function _evRunAnalysis(mode, glbArrayBuffer){
           _evAnalysisData.push({no:calcId++, type:calcType, location:`自動抽出グループ (面数:${c.faceCount})`, S, H:displayH, K, volume, note, color:hexColor, subFaces:subFacesData});
           totalVolume+=volume;
         });
+
+        // r091(24回目・追加チェック項目1): 全サブラベル候補が出揃ったので、
+        // 平面図(XZ)上での重なりを検出してずらし、実際にスプライト/引出線を生成する。
+        _evResolveAndPlaceSubLabels();
 
         resolve({totalVolume, count:_evAnalysisData.length});
       }catch(err){ reject(err); }
