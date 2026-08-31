@@ -818,10 +818,14 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
 
             child.receiveShadow = true;
             child.castShadow = true;
-            child.material = new THREE.MeshLambertMaterial({
+            child.material = new THREE.MeshPhongMaterial({
               // r073マスター指摘対応(仮説③): FrontSideだと法線の向き次第で見えなくなる
               // 面が出てしまう可能性があったため、地形本体と同様DoubleSideに変更
-              color: dirtColor, side: THREE.DoubleSide 
+              // [FIX 19回目 2026-08-31 v2] MeshLambertMaterialにflatShadingを付けても
+              // (three.js r128では非対応のためコンソールに警告が出て無視されるだけで)
+              // 効果が無かった。本体側(voldia3d_voldia_r093.js)のcyanMatと同じ
+              // MeshPhongMaterialに変更し、flatShadingが実際に効くようにする。
+              color: dirtColor, side: THREE.DoubleSide, flatShading: true, shininess: 10
             });
 
             const line = buildFatEdgeLines(child.geometry, 25, 0x0a1a3a, 0.75, 0.035);
@@ -840,7 +844,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
             child.geometry.computeVertexNormals();
             child.receiveShadow = true;
             child.castShadow = true;
-            child.material = new THREE.MeshLambertMaterial({ color: 0x8a8f98, side: THREE.DoubleSide });
+            child.material = new THREE.MeshPhongMaterial({ color: 0x8a8f98, side: THREE.DoubleSide, flatShading: true, shininess: 10 }); // [FIX 19回目 v2] 同上理由
             child.userData.isFixedCalcObject = true;
             // r051マスター指摘対応: 通常計算オブジェクト(柱・擁壁等)にも地形と同じ輪郭線を追加
             const fixedLine = buildFatEdgeLines(child.geometry, 25, 0x0a1a3a, 0.75, 0.035);
@@ -917,7 +921,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
         }
         loopData.sort((a, b) => b.area - a.area);
 
-        const mat = new THREE.MeshLambertMaterial({ color: dirtColor, side: THREE.DoubleSide });
+        const mat = new THREE.MeshPhongMaterial({ color: dirtColor, side: THREE.DoubleSide, flatShading: true, shininess: 10 }); // [FIX 19回目 v2] 同上理由
 
         if (loopData.length > 0) {
           const outerLoop = loopData[0].loop;
@@ -1016,6 +1020,11 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
         // 到着順序に関わらず常に最新の地形と一致させる。
         if (_lastSurveyPoints.length > 0) placeSurveyFlags(_lastSurveyPoints);
         if (_lastYamadomeLine.length > 0) placeYamadomeMarker(_lastYamadomeLine, _lastYamadomeRealYTop, _lastYamadomeRealYBot, _lastYamadomeBatterDeg);
+        // [FIX 19回目 2026-08-30] グレー→青など、グレー壁面が無くなった時に
+        // ここで呼び出し自体をスキップすると、古いgrayWallMarkerGroupが
+        // 消えずに残ってしまうバグがあった(placeGrayWallMarkers自身は空データでも
+        // まず古いグループを消してくれるので、呼ぶこと自体は常に必要)。
+        placeGrayWallMarkers(_lastGrayWalls || { positions: [], uv: [] });
 
         document.getElementById('loading').style.display = 'none';
         document.getElementById('load-glb-btn').style.display = 'none';
@@ -1167,6 +1176,13 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       _lastYamadomeRealYBot = d.realYBot;
       _lastYamadomeBatterDeg = d.batterDeg;
       placeYamadomeMarker(d.points, d.realYTop, d.realYBot, d.batterDeg);
+    } else if (d.type === 'voldia-gray-walls' && d.positions) {
+      // 6D-6配置モード反映・根本修正版(2026-08-29 引継ぎ18回目マスター指示):
+      // 2Dヒューリスティックによる再計算をやめ、本体側でManifoldのID追跡により
+      // 実際に採用された壁面三角形(positions/uv)をそのまま受け取って描画するだけ。
+      // 座標は既に配置モードと同じ基準・スケールに変換済みなので変換不要。
+      _lastGrayWalls = { positions: d.positions, uv: d.uv };
+      placeGrayWallMarkers(_lastGrayWalls);
     } else if (d.type === 'voldia-save-done') {
       const btn = document.getElementById('voldia-save-btn');
       btn.textContent = d.ok ? '✓ 出力完了' : '⚠ 出力失敗';
@@ -1832,6 +1848,9 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   // 地形読込完了のたびに再配置し直す。
   // 追加2(2026-08-24 引継ぎ18回目): 本体側の実寸値も同様に保持(地形読込完了時の再配置で使う)
   let _lastYamadomeRealYTop = null, _lastYamadomeRealYBot = null, _lastYamadomeBatterDeg = 1;
+  // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示): グレー壁面マーカー
+  let grayWallMarkerGroup = null;
+  let _lastGrayWalls = null;
   function createSurveyFlag(no) {
     const g = new THREE.Group();
     g.userData = { isRoot: true, type: 'survey_flag', no, isFlag: true };
@@ -1982,6 +2001,37 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     }
     yamadomeMarker = group;
     scene.add(yamadomeMarker);
+  }
+
+  // 6D-6配置モード反映・根本修正版(2026-08-29 引継ぎ18回目マスター指示):
+  // 「グレー矩形で発生する垂直面と同じ形状の面(Manifoldが既に正しく計算済み)を
+  // 少し前に出してテクスチャを貼るだけ」というマスターの指摘の通り、本体側で
+  // ManifoldのoriginalID追跡により実際に採用された壁面三角形(positions/uv)を
+  // そのまま受け取ってメッシュ化するだけ。座標系変換・2Dヒューリスティックに
+  // よる再計算は一切不要になった(隣接オブジェクトがどれだけ複雑でも、Union
+  // 計算自体が正しく処理した結果をそのまま流用するため常に正しい)。
+  function placeGrayWallMarkers(wallData) {
+    if (grayWallMarkerGroup) { scene.remove(grayWallMarkerGroup); grayWallMarkerGroup = null; }
+    if (!wallData || !wallData.positions || !wallData.positions.length) return;
+    const hatchTex = _getYamadomeHatchTexture();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wallData.positions), 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(wallData.uv), 2));
+    geo.computeVertexNormals();
+    // 6D-10(2026-08-30 引継ぎ18回目マスター共有・検討書ベース): 入隅部分で
+    // 隣接する三角形が独立にオフセットされることで交差(突き抜け)しており、
+    // depthWrite:falseの半透明のため前後関係に関わらず両方描画されて色が
+    // 濃く(黒ずんで)見えていた。depthWrite:trueにして手前の面が奥の面を
+    // 隠すようにし、二重ブレンドを軽減する(暫定対応)。
+    const mat = new THREE.MeshBasicMaterial({
+      map: hatchTex, color: 0xffffff, transparent: true, opacity: 0.55,
+      side: THREE.DoubleSide, depthWrite: true, depthTest: true
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 10;
+    mesh.userData = { isRoot: true, type: 'gray_wall_marker' };
+    grayWallMarkerGroup = mesh;
+    scene.add(grayWallMarkerGroup);
   }
   window.addEventListener('pointermove', e => {
     if (surveyFlags.length === 0) return;
@@ -3662,9 +3712,19 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     }
   });
 
+  let _lastPointerClientX = 0, _lastPointerClientY = 0; // [FIX 19回目] clientX権限エラー対策の退避用
   window.addEventListener('pointermove', e => {
-    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    // [FIX 19回目 2026-08-30] file://運用時にFirefoxで稀に発生する
+    // 「Permission denied to access property "clientX"」への対策。
+    // 直前は無防備にe.clientXへアクセスしていたため、これがUncaughtで
+    // 投げられるとこのリスナーの残り処理(以降のドラッグ配置操作など)が
+    // 丸ごと止まっていた。取得に失敗したら直前の座標を使い回して継続する。
+    let cx, cy;
+    try { cx = e.clientX; cy = e.clientY; }
+    catch(permErr) { cx = _lastPointerClientX; cy = _lastPointerClientY; console.warn('[FIX] pointermoveでclientX/Y取得に失敗。直前座標で継続します。', permErr); }
+    _lastPointerClientX = cx; _lastPointerClientY = cy;
+    mouse.x = (cx / window.innerWidth) * 2 - 1;
+    mouse.y = -(cy / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
     const terrainHits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);

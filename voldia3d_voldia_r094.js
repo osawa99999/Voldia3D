@@ -8,6 +8,18 @@
 // 両方でこの値を使う(旧実装ではisPointInsideFrustumExcavation側だけ独自に
 // window._vertexQuantMm+1という別の固定値を使っており、値がズレる余地があったため統一)。
 const DOBOKU_VERTICAL_TAPER_FIXED_MM = 15;
+// 追加(2026-08-28 引継ぎ18回目マスター指示): 3Dイメージの体積表示に桁区切りを
+// 追加。数値が長くなってres-box幅(左パネル260px相当)からはみ出しそうな場合は
+// 自動的に1段階フォントサイズを縮小する(.vol-bigの基準は2.2em)。
+function _formatVolM3(v){
+  return v.toLocaleString('ja-JP',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function _setResVolBig(numText){
+  const el=document.getElementById('res-vol');
+  if(!el)return;
+  el.innerHTML = `${numText}<span>m³</span>`;
+  el.style.fontSize = numText.length>9 ? '1.55em' : '';
+}
 // 新2(2026-08-28 引継ぎ18回目マスター指示): 土量計算実行時、グレーオブジェクトが
 // 存在する場合の注意トーストを起動(ページ読み込み)毎に1回だけ出すためのフラグ
 let _grayCalcWarnShown = false;
@@ -1374,11 +1386,14 @@ function updMeshOpacity(val){
   // 不透明に近い時(op>=0.99)はdepthWrite:trueに戻して正しい隠面消去を行い、
   // 透過度を上げた時(op<0.99)のみdepthWrite:falseにして奥を見えるようにする。
   const wantDepthWrite = op >= 0.99;
-  // r045: _meshMaterials=[cyanMat, redMat]固定順。redMat(山留切断面ハッチ)は
-  // 「デフォルトで半透明(透過値-10くらい)」という要望に応じ、常にcyan側より
-  // 10ポイント低いopacityを保つ(スライダー操作時も相対的に維持される)。
+  // r045→6D改修(2026-08-28 引継ぎ18回目): 元はindex1固定決め打ちだったが、
+  // 6DでgrayWallMeshが加わり_meshMaterials/_meshObjsが3要素になり得るため、
+  // 対応する_meshObjsがハッチテクスチャを持つか(userData.hatchMap)で汎用判定する。
+  // ハッチ系メッシュ(山留/グレー壁面)は「デフォルトで半透明(透過値-10くらい)」の
+  // 要望に応じ、常にcyan側より10ポイント低いopacityを保つ。
   _meshMaterials.forEach((m,i)=>{
-    const opForThis = (i===1) ? Math.max(0, op-0.1) : op;
+    const isHatch = !!(_meshObjs[i] && _meshObjs[i].userData && _meshObjs[i].userData.hatchMap);
+    const opForThis = isHatch ? Math.max(0, op-0.1) : op;
     m.opacity=opForThis;
     if(m.depthWrite !== wantDepthWrite){ m.depthWrite = wantDepthWrite; }
     m.needsUpdate=true;
@@ -1431,13 +1446,16 @@ function toggleMeshSolid(){
 
   if(window._meshSolidMode){
     // ソリッドモード: MeshBasicMaterialに差し替え → 光源グラデーション完全無視のフラット単色
-    // r045: index1(redMesh)はソリッドモードでもハッチ柄+透過値-10%を維持する
-    const solidColors = [0x8899aa, 0xffffff];
+    // r045→6D改修(2026-08-28 引継ぎ18回目): 元はindex1=redMesh固定決め打ちだったが、
+    // 6DでgrayWallMeshが追加され_meshObjsが[cyan,red,gray]の3要素になり得るため、
+    // 「そのメッシュがハッチテクスチャを持つか(userData.hatchMap)」で汎用判定する
+    // 方式に変更。山留のみ/グレーのみ/両方どのケースでも正しく機能する。
+    const solidColors = [0x8899aa, 0xffffff, 0xffffff];
     const newMats = _meshObjs.map((mesh,i)=>{
-      const isRed = i===1;
+      const isRed = !!mesh.userData.hatchMap;
       const opForThis = isRed ? Math.max(0, curOp-0.1) : curOp;
       const bm = new THREE.MeshBasicMaterial({
-        color: solidColors[i]!==undefined?solidColors[i]:0x8899aa,
+        color: isRed ? 0xffffff : (solidColors[i]!==undefined?solidColors[i]:0x8899aa),
         map: isRed ? mesh.userData.hatchMap : null,
         opacity: opForThis, transparent: true, side: THREE.DoubleSide,
         depthWrite: opForThis >= 0.99, // r053: 不透明時は正しい隠面消去、透過時のみ奥を見せる
@@ -1451,13 +1469,13 @@ function toggleMeshSolid(){
     if(btn) btn.textContent='⬜ ソリッド → グラデ';
   } else {
     // グラデモード: 元のPhongマテリアル（ウォームゴールド系＋陰影）に戻す
-    // r045: index1(redMesh)は山留断面ハッチ用。色はテクスチャに任せ、白ベース+透過値-10%
-    const origColors=[0xffcc77,0xffffff];
+    // r045→6D改修: 同上の理由でhatchMap有無による汎用判定に変更
+    const origColors=[0xffcc77,0xffffff,0xffffff];
     const newMats = _meshObjs.map((mesh,i)=>{
-      const isRed = i===1;
+      const isRed = !!mesh.userData.hatchMap;
       const opForThis = isRed ? Math.max(0, curOp-0.1) : curOp;
       const pm = new THREE.MeshPhongMaterial({
-        color: origColors[i]!==undefined?origColors[i]:0xffcc77,
+        color: isRed ? 0xffffff : (origColors[i]!==undefined?origColors[i]:0xffcc77),
         map: isRed ? mesh.userData.hatchMap : null,
         emissive: isRed ? 0x3a1400 : 0x221100, shininess: isRed ? 12 : 40,
         opacity: opForThis, transparent: true, side: THREE.DoubleSide,
@@ -1476,7 +1494,7 @@ function toggleMeshSolid(){
 function resetCalcToSelect(){
   document.getElementById('calc-select-panel').style.display='';
   document.getElementById('calc-result-panel').style.display='none';
-  document.getElementById('res-box').innerHTML='<div class="vol-big" id="res-vol">—<span>m³</span></div><div class="vol-label" id="res-vol-label">切土量（ブール和）</div><div class="vol-detail" id="res-detail"></div>';
+  document.getElementById('res-box').innerHTML='<div class="vol-big" id="res-vol">—<span>m³</span></div><div class="vol-label" id="res-vol-label">切土量（ブール和）</div><div class="vol-caution">⚠ このアプリの値は参考値です<br>値を使用する際は必ず<br>自分で確認をしましょう</div><div class="vol-detail" id="res-detail"></div>';
   document.getElementById('rect-table-wrap').style.display='none';
   document.getElementById('btn-glb').classList.remove('show');
   const _bp=document.getElementById('btn-placement');if(_bp)_bp.classList.remove('show');
@@ -1900,7 +1918,7 @@ async function runCalc(mode){
     if(mode==='doboku'){
       // r072マスター指示追7: エビル(データ出力)側の値と厳密には一致しないため、
       // どちらも100%正解ではないことが伝わるよう先頭に「≒」を付ける
-      document.getElementById('res-vol').innerHTML = `≒${unionM3.toFixed(2)}<span>m³</span>`;
+      _setResVolBig(`≒${_formatVolM3(unionM3)}`);
       document.getElementById('res-vol-label').textContent = '切土量（ブール和）';
       document.getElementById('res-detail').innerHTML = `
         <div class="di"><span>単独合計</span><span class="dv">${sumM3.toFixed(3)} m³</span></div>
@@ -1910,7 +1928,7 @@ async function runCalc(mode){
         ${window._glOffsetMm ? `<div class="di"><span>現状地盤GL</span><span class="dv hi">${window._glOffsetMm>=0?'+':''}${window._glOffsetMm}mm 適用済</span></div>` : ''}`;
       document.getElementById('rect-table-wrap').style.display='none';
     }else{
-      document.getElementById('res-vol').innerHTML = `≒${unionM3.toFixed(2)}<span>m³</span>`;
+      _setResVolBig(`≒${_formatVolM3(unionM3)}`);
       document.getElementById('res-vol-label').textContent = '合成体積（ブール和）';
       document.getElementById('res-detail').innerHTML = `
         <div class="di"><span>単独合計</span><span class="dv">${sumM3.toFixed(3)} m³</span></div>
@@ -2244,6 +2262,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   window._lastYamadomeRealYTop = result.yamadomeRealYTop;
   window._lastYamadomeRealYBot = result.yamadomeRealYBot;
   window._lastYamadomeBatterDeg = result.yamadomeBatterDeg;
+  window._lastGrayWalls = result.grayWallsForPlacement || null; // 6D配置モード反映用
   let redMesh = null;
   if(_ydOv && _ydOv.positions.length > 0){
     const redGeo = new THREE.BufferGeometry();
@@ -2264,11 +2283,36 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   }
   console.log('[CP-14] redMesh 生成完了 (山留あり=', !!redMesh, ')');
 
+  // 6D(2026-08-28 引継ぎ18回目): グレー(強制垂直)オブジェクトの壁面ハッチ。
+  // 山留のredMeshと全く同じ構築パターン(同じハッチテクスチャ・同じ
+  // マテリアル設定)を流用し、result.grayWallOverlayからMeshを作る。
+  const _gwOv = result.grayWallOverlay;
+  let grayWallMesh = null;
+  if(_gwOv && _gwOv.positions.length > 0){
+    const gwGeo = new THREE.BufferGeometry();
+    gwGeo.setAttribute('position', new THREE.BufferAttribute(_gwOv.positions, 3));
+    gwGeo.setAttribute('uv', new THREE.BufferAttribute(_gwOv.uv, 2));
+    gwGeo.computeVertexNormals();
+    const _gwMat = new THREE.MeshPhongMaterial({
+      color: 0xffffff, map: _hatchTex, vertexColors: false, flatShading: true,
+      emissive: 0x3a1400, shininess: 12,
+      opacity: Math.max(0, _sldrVal - 0.1), transparent: true, side: THREE.DoubleSide,
+      depthWrite: _sldrVal >= 0.99,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+    });
+    grayWallMesh = new THREE.Mesh(gwGeo, _gwMat);
+    grayWallMesh.userData.hatchMap = _hatchTex;
+  }
+  console.log('[CP-14b] grayWallMesh 生成完了 (グレーあり=', !!grayWallMesh, ')');
+
 
 
   // 透過スライダー用にマテリアル参照を更新、スライダー表示
-  _meshMaterials = redMesh ? [_cyanMat, redMesh.material] : [_cyanMat];
-  _meshObjs = redMesh ? [cyanMesh, redMesh] : [cyanMesh]; // r038: ソリッド⇔グラデ切替時のマテリアル差し替え用
+  // 6D: grayWallMeshも山留redMeshと同様に配列へ追加し、透過スライダー/
+  // ソリッド⇔グラデ切替が同じように効くようにする。
+  const _extraMeshes = [redMesh, grayWallMesh].filter(Boolean);
+  _meshMaterials = [_cyanMat, ..._extraMeshes.map(m=>m.material)];
+  _meshObjs = [cyanMesh, ..._extraMeshes]; // r038: ソリッド⇔グラデ切替時のマテリアル差し替え用
   window._meshSolidMode = false; // グラデがデフォルト
   const _opCtrl = document.getElementById('opacity-ctrl');
   if(_opCtrl) _opCtrl.style.display='';
@@ -2324,6 +2368,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   const group = new THREE.Group();
   group.add(cyanMesh);
   if(redMesh) group.add(redMesh);
+  if(grayWallMesh) group.add(grayWallMesh);
   group.add(edgeGroup);
   threeS.add(group);
   console.log('[CP-18] threeS.add(group) 完了');
@@ -3363,30 +3408,39 @@ function _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC)
   let cenX = 0, cenZ = 0;
   pts.forEach(p => { cenX += p.x; cenZ += p.z; });
   cenX /= n; cenZ /= n;
-  const h = Math.max(0.01, realYTop - realYBot);
-  // 本体壁と同一式(tan(BATTER_DEG)×高さ)。実プリズムと同一のrealYTop/realYBot/
-  // BATTER_DEGを使用のため近似ではなく厳密一致。
-  const battOut = Math.tan(BATTER_DEG * Math.PI / 180) * h;
+  // 6D-2(2026-08-28 引継ぎ18回目マスター指摘): 従来はrealYTopが常に単一値(全周
+  // 一律)だったため、法面等で実際の壁が低い区間でも山留ハッチがGL付近の高さまで
+  // 一律に伸び、壁が存在しない場所に浮いて見える不具合があった。realYTopに配列
+  // (頂点ごとの実際の壁高さ)を渡せる後方互換の拡張を追加し、頂点ごとに天端高さを
+  // 変えられるようにする(従来通り数値1個で呼べば全周一律のまま動作)。
+  const topArr = Array.isArray(realYTop) ? realYTop : null;
+  const topAt = i => topArr ? topArr[i] : realYTop;
   const positions = [];
   const uvs = [];
   let cum = 0;
   for(let i=0;i<n;i++){
     const a = pts[i], b = pts[(i+1)%n];
+    const aTopY = topAt(i), bTopY = topAt((i+1)%n);
     const segLen = Math.hypot(b.x-a.x, b.z-a.z);
     const midX = (a.x+b.x)/2, midZ = (a.z+b.z)/2;
     const outDx = midX-cenX, outDz = midZ-cenZ;
     const outLen = Math.hypot(outDx,outDz) || 1;
     const odx = outDx/outLen, odz = outDz/outLen; // このエッジの外向き単位法線
+    // 本体壁と同一式(tan(BATTER_DEG)×高さ)。頂点ごとに実高さが変わる場合は
+    // そのエッジの高さで個別に算出する。
+    const aH = Math.max(0.01, aTopY - realYBot), bH = Math.max(0.01, bTopY - realYBot);
+    const aBattOut = Math.tan(BATTER_DEG * Math.PI / 180) * aH;
+    const bBattOut = Math.tan(BATTER_DEG * Math.PI / 180) * bH;
     // 実体(土)は壁の外側・空洞(見える側)は内側(配置モードr055で確定)。常に内側にCLEARぶん確保。
-    const botOut = -CLEAR, topOut = battOut - CLEAR;
+    const botOut = -CLEAR, aTopOut = aBattOut - CLEAR, bTopOut = bBattOut - CLEAR;
     const aBot=[a.x+odx*botOut, realYBot, a.z+odz*botOut];
     const bBot=[b.x+odx*botOut, realYBot, b.z+odz*botOut];
-    const bTop=[b.x+odx*topOut, realYTop, b.z+odz*topOut];
-    const aTop=[a.x+odx*topOut, realYTop, a.z+odz*topOut];
+    const bTop=[b.x+odx*bTopOut, bTopY, b.z+odz*bTopOut];
+    const aTop=[a.x+odx*aTopOut, aTopY, a.z+odz*aTopOut];
     positions.push(...aBot, ...bBot, ...bTop,  ...aBot, ...bTop, ...aTop);
     const u0=cum/STRIPE_W, u1=(cum+segLen)/STRIPE_W;
-    const v0=realYBot/STRIPE_W, v1=realYTop/STRIPE_W;
-    uvs.push(u0,v0, u1,v0, u1,v1,  u0,v0, u1,v1, u0,v1);
+    const v0=realYBot/STRIPE_W, v1a=aTopY/STRIPE_W, v1b=bTopY/STRIPE_W;
+    uvs.push(u0,v0, u1,v0, u1,v1b,  u0,v0, u1,v1b, u0,v1a);
     cum += segLen;
   }
   return { positions: new Float32Array(positions), uv: new Float32Array(uvs) };
@@ -3588,6 +3642,16 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   const { Manifold, Mesh } = wasm;
 
   const manifoldObjs = [];
+  // 6D-6(2026-08-29 引継ぎ18回目マスター指示・根本修正): 2Dヒューリスティック
+  // (隣接オブジェクトの生外形までの距離を推測して隠れる高さを逆算する方式)は
+  // オブジェクトが増えると破綻する対症療法だったため全廃。Manifoldの
+  // originalID()追跡機能(既存の山留クリップで実績あり)を流用し、「union後の
+  // どの三角形がグレーfrustum由来か」を幾何的推測なしに直接判定する方式に変更。
+  // これにより、Union計算自体が正しく処理した「隣接オブジェクトに隠れて消える
+  // 面」の判定をそのまま流用でき、新しい面を計算し直す必要が無くなる。
+  const grayOriginalIDs = new Set();
+  const grayTriPos = []; // 6D-6: try/finally境界をまたいで後段(_ret構築)から参照するため外側で宣言
+  const grayTriUv = [];
   try {
     frustums.forEach((f, i) => {
       const meshDatas = buildCappedFrustumMesh(f); // r068: 配列(通常は要素数1)
@@ -3598,11 +3662,26 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           const tv = meshData.triVerts;
           for(let t=0;t<tv.length;t+=3){ const tmp=tv[t]; tv[t]=tv[t+1]; tv[t+1]=tmp; }
         }
+        // 6D-7(2026-08-29 引継ぎ18回目マスター指摘・再修正): 実際にnpm install
+        // manifold-3d@3.5.1してWASMを直接動かし検証した結果、new Manifold(new
+        // Mesh(meshData))のように生メッシュから直接構築した場合、man.originalID()
+        // は常に-1を返す(まだ内部的に「original」として確定していない扱いになる)
+        // ことが判明した。これでは6D-6のgrayOriginalIDs追跡が機能しない
+        // (実際、これが「山留テクスチャが表示されなくなった」不具合の直接原因)。
+        // 正しい方法はManifold.reserveIDs()で事前にIDを予約し、meshDataの
+        // runOriginalID/runIndexとして明示的に埋め込んでから構築すること。
+        // このIDはunion→intersectionを経た後もgetMesh().runOriginalIDに
+        // 正しく残ることをNode上で実証済み(union後: [1,2]、さらにintersection
+        // 後も[1,3]のように元IDが保持されることを確認)。
+        const reservedID = Manifold.reserveIDs(1);
+        meshData.runOriginalID = new Uint32Array([reservedID]);
+        meshData.runIndex = new Uint32Array([0, meshData.triVerts.length]);
         const man = new Manifold(new Mesh(meshData));
         if(man.status && man.status() !== 'NoError'){
           const label = meshDatas.length>1 ? ('frustum'+i+'-slice'+j) : ('frustum'+i);
           console.warn('[MANIFOLD] ' + label + 'の単体メッシュがwatertightでない可能性: status=' + man.status());
         }
+        if(f.color==='gray') grayOriginalIDs.add(reservedID);
         manifoldObjs.push(man);
       });
     });
@@ -3629,6 +3708,13 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           // ため、完全な垂直だった従来のプリズムをテーパー形状に変更する。
           const BATTER_DEG = 1; // バッチ角1度
           const realYTop = maxTop, realYBot = minBot; // 実際の掘削範囲(安全マージン抜き)
+          // 6D-2は撤回(2026-08-29 引継ぎ18回目マスター指摘): 「山留を壁面のある
+          // 所で止めてほしい」という要望は、本物の山留オブジェクトの話ではなく
+          // グレー垂直面に貼る山留ハッチテクスチャ(6D)の高さの話だった。本物の
+          // 山留オブジェクトはGL(realYTop=全frustum中の最大値)まで一律に伸びるのが
+          // 正しい挙動(安全のため、実際の掘削が浅い区間があってもシートは地表まで
+          // 連続しているべき)。頂点ごとに最寄りの壁の高さへ短縮する変更は誤った
+          // 前提に基づく修正だったため撤回し、元の全周一律realYTopに戻す。
           const battHeightM = Math.max(0, realYTop - realYBot);
           const battOffsetMm = Math.tan(BATTER_DEG*Math.PI/180) * battHeightM * 1000;
           window._yamadomeBattOffsetMm = battOffsetMm; // r047: 後段の断面判定の許容誤差計算にも使う
@@ -3699,6 +3785,20 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     // ここでの三角形分類(距離/法線ヒューリスティック・ID追跡)は不要になった。
     // 山留クリップ自体(実際の形状のカット)は上のManifold.intersectionで
     // 完了済みなので、以降は単純に全三角形をcyanIdxへ積むだけでよい。
+    //
+    // 6D-6(2026-08-29 引継ぎ18回目マスター指示): グレー壁面ハッチ用に、
+    // resultMesh.runIndex/runOriginalIDから「三角形i番目はどのoriginalID由来か」
+    // を引けるテーブルを作る。union/intersectionを経てもManifoldがこの対応を
+    // 保持してくれるため、幾何的な再推測は一切不要。
+    const triOriginalID = new Int32Array(tv.length/3).fill(-1);
+    if(resultMesh.runIndex && resultMesh.runOriginalID){
+      const ri = resultMesh.runIndex, roid = resultMesh.runOriginalID;
+      for(let r=0;r<roid.length;r++){
+        const triStart = ri[r]/3, triEnd = ri[r+1]/3;
+        for(let t=triStart;t<triEnd;t++) triOriginalID[t]=roid[r];
+      }
+    }
+    // (grayTriPos/grayTriUvは関数スコープ側で宣言済み。ここではpushのみ行う)
     for(let i=0;i<tv.length;i+=3){
       const i0=tv[i], i1=tv[i+1], i2=tv[i+2];
       const y0=pos[i0*3+1], y1=pos[i1*3+1], y2=pos[i2*3+1];
@@ -3710,8 +3810,58 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       // 土量計算は「上蓋を撤去して上から覗き込む」表示なので、内側が表面に
       // なる向きがそもそも正しい(理屈より実機確認を優先すること)。
       cyanIdx.push(gi0, gi1, gi2);
+
+      // 6D-6: この三角形がグレーfrustum由来か判定。由来かつ「垂直」(=法線が
+      // ほぼ水平、Y成分が小さい)なら、実際にUnionが計算した本物の壁面として
+      // ハッチオーバーレイの元データに採用する。
+      if(grayOriginalIDs.has(triOriginalID[i/3])){
+        const ax=pos[i0*3],ay=pos[i0*3+1],az=pos[i0*3+2];
+        const bx=pos[i1*3],by=pos[i1*3+1],bz=pos[i1*3+2];
+        const cx=pos[i2*3],cy=pos[i2*3+1],cz=pos[i2*3+2];
+        const ux=bx-ax,uy=by-ay,uz=bz-az;
+        const vx=cx-ax,vy=cy-ay,vz=cz-az;
+        // 法線 = u×v
+        let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+        const nlen=Math.hypot(nx,ny,nz)||1;
+        // 6D-9(2026-08-29 引継ぎ18回目マスター指摘・配置モードでの床面上の
+        // 「細い三角形の濃い色」報告への対応): Union計算結果には、frustum同士の
+        // 境界付近で面積がほぼゼロの縮退三角形(スリバー面)が含まれることがある。
+        // このような三角形は法線(u×v)の大きさが元々小さく、正規化すると向きが
+        // 不安定になり、本来は床面(水平)のはずが「垂直」と誤判定されて
+        // ハッチ付きで採用されてしまうことがある。面積とY方向の広がりの
+        // 両方に最小しきい値を設け、縮退三角形を確実に除外する。
+        const triArea = nlen * 0.5; // |u×v|/2 = 三角形の面積(m²)
+        const yMin=Math.min(ay,by,cy), yMax=Math.max(ay,by,cy);
+        const ySpan = yMax - yMin; // この三角形が実際にまたぐ高さ方向の広がり(m)
+        if(triArea < 1e-6 || ySpan < 0.02) continue; // 面積1mm²未満 or 高さ方向2cm未満はスリバー扱いで除外
+        nx/=nlen; ny/=nlen; nz/=nlen;
+        if(Math.abs(ny) < 0.35){ // ほぼ垂直な面のみ(水平な天端/床は除外)
+          // 6D-8(2026-08-29 引継ぎ18回目マスター指摘): オフセット方向が逆で、
+          // すり鉢の外側(実体/裏面)に貼られていた。cyanMesh側は「上蓋を撤去して
+          // 上から覗き込む」表示のため面の向きが直感と逆になっており、この三角形
+          // の法線(u×v)は実体側を向いている。空洞側(すり鉢の内側、見える面)に
+          // 貼るには符号を反転させる必要がある。
+          const GRAY_HATCH_CLEAR = -0.01; // 1cm。空洞側(内側)へ少し前に出してZファイティング回避
+          const ax2=ax+nx*GRAY_HATCH_CLEAR, ay2=ay+ny*GRAY_HATCH_CLEAR, az2=az+nz*GRAY_HATCH_CLEAR;
+          const bx2=bx+nx*GRAY_HATCH_CLEAR, by2=by+ny*GRAY_HATCH_CLEAR, bz2=bz+nz*GRAY_HATCH_CLEAR;
+          const cx2=cx+nx*GRAY_HATCH_CLEAR, cy2=cy+ny*GRAY_HATCH_CLEAR, cz2=cz+nz*GRAY_HATCH_CLEAR;
+          // UV: 法線と鉛直(0,1,0)から水平方向の接線を作り、それに沿った距離をUに、
+          // 高さYをVにする(縦縞ハッチと同じ0.4m周期)。
+          let tx=-nz, tz=nx; // (0,1,0)×normalの水平成分 = (-nz,0,nx)
+          const tlen=Math.hypot(tx,tz)||1;
+          tx/=tlen; tz/=tlen;
+          const STRIPE_W=0.4;
+          grayTriPos.push(ax2,ay2,az2, bx2,by2,bz2, cx2,cy2,cz2);
+          grayTriUv.push(
+            (ax*tx+az*tz)/STRIPE_W, ay/STRIPE_W,
+            (bx*tx+bz*tz)/STRIPE_W, by/STRIPE_W,
+            (cx*tx+cz*tz)/STRIPE_W, cy/STRIPE_W
+          );
+        }
+      }
     }
     console.log(`[MANIFOLD] union後三角形=${tv.length/3} 蓋除去=${removedCap} 最終三角形=${cyanIdx.length/3}`);
+    console.log(`[GRAY-WALL] Manifold ID追跡による実面採用: ${grayTriPos.length/9}三角形`);
 
     // r066: GL面の内部の穴（ドーナツ状にオブジェクトを配置した際、外周とは
     // 繋がっていない未着手ゾーンとして残る開口）を、基準高さ±0(GL)で自動的に
@@ -3851,16 +4001,37 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   }
   console.log('[CP-3] buildManifoldUnionGeom finally 完了');
 
+  // 6D-6(2026-08-29 引継ぎ18回目マスター指示・根本修正): グレー壁面ハッチは
+  // 上のcap除去ループで既にManifoldのID追跡により実際に収集済み(grayTriPos/
+  // grayTriUv)。ここでは単純にFloat32Arrayへ変換するだけでよい。2Dヒューリス
+  // ティックによる「隠れる高さ」の再計算は一切行わない(実際にUnionが計算した
+  // 本物の面をそのまま採用しているため、隣接オブジェクトの形状がどれだけ複雑
+  // でも常に正しい)。
+  let _grayWallOverlay = null;
+  let _grayWallsForPlacement = null; // 配置モード反映用(2026-08-29 引継ぎ18回目マスター指示)
+  if(grayTriPos.length > 0){
+    const positions = new Float32Array(grayTriPos);
+    const uv = new Float32Array(grayTriUv);
+    _grayWallOverlay = { positions, uv };
+    // 配置モード送信用データ: 頂点座標は既にSC(mm→m)適用済み・frustum正規化
+    // 座標系(=山留のoffsetX/offsetYと同じ基準)なので、そのまま送るだけでよい。
+    _grayWallsForPlacement = { positions, uv };
+    console.log(`[GRAY-WALL] Manifold ID追跡により ${positions.length/9} 三角形を採用`);
+  }
+
+
   const _ret = {
     positions: new Float32Array(positions),
     cyanIndices: new Uint32Array(cyanIdx),
     redIndices:  new Uint32Array(redIdx),
     yamadomeOverlay: _ydOverlayData, // r057: 断面ハッチ用の独立オーバーレイ(位置+UV)。無ければnull
+    grayWallOverlay: _grayWallOverlay, // 6D: グレーオブジェクトの垂直壁ハッチオーバーレイ。無ければnull
     // 追加2(2026-08-24 引継ぎ18回目): 配置モードへ山留の実寸を送るための値。
     // yamadome無しなら全てnull。
     yamadomeRealYTop: _ydRealYTop,
     yamadomeRealYBot: _ydRealYBot,
-    yamadomeBatterDeg: _ydBatterDegForMsg
+    yamadomeBatterDeg: _ydBatterDegForMsg,
+    grayWallsForPlacement: _grayWallsForPlacement // 6D配置モード反映用(2026-08-29 引継ぎ18回目)
   };
   console.log('[CP-4] buildManifoldUnionGeom return直前 positions=', _ret.positions.length, 'cyan=', _ret.cyanIndices.length, 'red=', _ret.redIndices.length);
   return _ret;
@@ -4660,7 +4831,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0056.html';
+      iframe.src='voldia_placement_v0059.html';
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);
@@ -4695,6 +4866,15 @@ async function openPlacementMode(){
           realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
           batterDeg: window._lastYamadomeBatterDeg}, '*');
       }
+      // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示): グレー壁面ハッチも
+      // 山留と同じ考え方で配置モードへ送る。座標は既にfrustum正規化mm(=山留と同じ
+      // 基準)なのでSを掛けるだけで良い(SC*p.x等、送信側で変換済み)。
+      // [FIX 19回目 2026-08-30 マスター報告] グレー→青など、グレーオブジェクトが
+      // 無くなった(=positions.lengthが0になった)場合にここで送信自体をスキップして
+      // いたため、配置モード側に「もう無い」という情報が届かず、古いハッチが
+      // 消えずに残る不具合があった。空でも必ず送って、配置モード側で確実に
+      // クリアできるようにする(以前は再計算時のみ更新される山留の反省を活かす)。
+      iframeEl.contentWindow.postMessage({type:'voldia-gray-walls', positions: (window._lastGrayWalls&&window._lastGrayWalls.positions)||[], uv: (window._lastGrayWalls&&window._lastGrayWalls.uv)||[]}, '*');
       if(_pendingPlacementRestore){
         iframeEl.contentWindow.postMessage({type:'voldia-restore-placement-state', objects:_pendingPlacementRestore}, '*');
         _pendingPlacementRestore = null;
@@ -4720,6 +4900,9 @@ async function openPlacementMode(){
             realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
             batterDeg: window._lastYamadomeBatterDeg}, '*');
         }
+        // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示)
+        // [FIX 19回目] 上と同じ理由で、空でも必ず送る。
+        iframeEl.contentWindow.postMessage({type:'voldia-gray-walls', positions: (window._lastGrayWalls&&window._lastGrayWalls.positions)||[], uv: (window._lastGrayWalls&&window._lastGrayWalls.uv)||[]}, '*');
         // r013: プロジェクト読込直後の初回オープンなら、保存されていた
         // 配置オブジェクトも一緒に復元する(一度使ったらクリアして、以後の
         // 再オープンでは上書きしないようにする＝配置モード内での続きの
