@@ -3799,6 +3799,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       }
     }
     // (grayTriPos/grayTriUvは関数スコープ側で宣言済み。ここではpushのみ行う)
+    let removedDegenerate = 0; // r095(item12): 量子化で潰れた縮退三角形の除外カウント
     for(let i=0;i<tv.length;i+=3){
       const i0=tv[i], i1=tv[i+1], i2=tv[i+2];
       const y0=pos[i0*3+1], y1=pos[i1*3+1], y2=pos[i2*3+1];
@@ -3806,6 +3807,14 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       const gi0 = regV(pos[i0*3], pos[i0*3+1], pos[i0*3+2]);
       const gi1 = regV(pos[i1*3], pos[i1*3+1], pos[i1*3+2]);
       const gi2 = regV(pos[i2*3], pos[i2*3+1], pos[i2*3+2]);
+      // r095(item12根本修正): regV()による量子化(mm丸め)で複数頂点が同一座標に
+      // 吸着すると、頂点IDが重複した面積ゼロの縮退三角形が生まれることがある。
+      // これがcyanIdxに混入すると、直後のfillInteriorHolesAtGLの境界エッジ抽出
+      // (一筆書きループ構築)がT字路・行き止まりを起こし、無限ループ防止ガードに
+      // 引っかかって穴埋め漏れが発生する(「現状地盤GL」を深くするほど頂点間の
+      // 相対位置が量子化の丸め境界に近づきやすくなるため、GLの値によって不規則に
+      // 再現する)。ここで縮退三角形をcyanIdx登録前に弾く。
+      if(gi0===gi1 || gi1===gi2 || gi2===gi0){ removedDegenerate++; continue; }
       // r027で外向きへ反転する変更を試したが誤りだったためrevert。
       // 土量計算は「上蓋を撤去して上から覗き込む」表示なので、内側が表面に
       // なる向きがそもそも正しい(理屈より実機確認を優先すること)。
@@ -3860,7 +3869,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
         }
       }
     }
-    console.log(`[MANIFOLD] union後三角形=${tv.length/3} 蓋除去=${removedCap} 最終三角形=${cyanIdx.length/3}`);
+    console.log(`[MANIFOLD] union後三角形=${tv.length/3} 蓋除去=${removedCap} 縮退除去=${removedDegenerate} 最終三角形=${cyanIdx.length/3}`);
     console.log(`[GRAY-WALL] Manifold ID追跡による実面採用: ${grayTriPos.length/9}三角形`);
 
     // r066: GL面の内部の穴（ドーナツ状にオブジェクトを配置した際、外周とは
@@ -4831,7 +4840,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0059.html';
+      iframe.src='voldia_placement_v0064.html';
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);

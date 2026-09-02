@@ -1435,7 +1435,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     return group;
   }
 
-  function createBackhoe(scale = 1) {
+  function createBackhoe(targetW, targetH, offsetCab = true) {
     const group = new THREE.Group();
     const trackGeo = new THREE.BoxGeometry(0.7, 0.8, 3.5);
     const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(1.1, 0.4, 0); setShadows(tL);
@@ -1446,14 +1446,36 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     upperGroup.position.set(0, 0.8, 0);
     upperGroup.userData.isUpper = true;
 
-    const engine = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 2.4), matYellow); engine.position.set(0, 0.6, -0.2); setShadows(engine);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.5, 1.2), matGlass); cabin.position.set(0.7, 0.75, 0.4); setShadows(cabin);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.1, 1.3), matDark); roof.position.set(0.7, 1.55, 0.4); setShadows(roof);
-    upperGroup.add(engine, cabin, roof);
+    // r063(20回目引継ぎ・マスター実機スクショ提供その2):
+    // ①小型: ブーム基部(pivot y=2.0,z=1.5を45度回転した箱)の後端(下端)が
+    // ワールド座標でおよそ(y≈0.76, z≈0.26)まで下がってきており、旧cabin位置
+    // (y=0.85, z=0.3)とほぼ同じ場所だったため運転席にアームが刺さって見えていた。
+    // 本体を薄く(高さ0.9→0.6)し、運転席を後方(z:0.3→-0.5)かつ高い位置
+    // (y:0.85→1.1、本体の上に乗る形)へ移動してこの干渉点から完全に離した。
+    // ②非ミニ側: 旧boomX=-0.05は運転席(x=0.65)から見るとほぼセンターで、
+    // 「運転席の反対側」には見えなかった。運転席と同じ距離だけ反対側(x=-0.65)へ
+    // 大きく離した。
+    let boomX;
+    if (!offsetCab) {
+      // 小型(bh_mini): 左右対称。機械部分・運転席・アーム全て中心線上
+      const engine = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.6, 2.2), matYellow); engine.position.set(0, 0.3, -0.3); setShadows(engine);
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.9), matGlass); cabin.position.set(0, 1.1, -0.5); setShadows(cabin);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.3), matDark); roof.position.set(0, 1.65, -0.5); setShadows(roof);
+      upperGroup.add(engine, cabin, roof);
+      boomX = 0;
+    } else {
+      // 中型/大型(bh_025以上): 機械部分(エンジン/カウンターウェイト)は後方に
+      // フルワイドで配置し、運転席は前方右寄せ、アームは運転席と反対側(左側)へ
+      const engine = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 1.7), matYellow); engine.position.set(0, 0.6, -0.75); setShadows(engine);
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.5, 1.2), matGlass); cabin.position.set(0.65, 0.75, 0.75); setShadows(cabin);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.1, 1.35), matDark); roof.position.set(0.65, 1.55, 0.75); setShadows(roof);
+      upperGroup.add(engine, cabin, roof);
+      boomX = -0.65; // 運転席(x=0.65)の反対側
+    }
 
-    const boom = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.5, 0.4), matYellow); boom.position.set(-0.4, 2.0, 1.5); boom.rotation.x = Math.PI / 4; setShadows(boom);
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 0.3), matYellow); arm.position.set(-0.4, 2.3, 2.8); arm.rotation.x = -Math.PI / 4; setShadows(arm);
-    const bucket = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.6), matDark); bucket.position.set(-0.4, 1.2, 3.5); bucket.rotation.x = Math.PI / 4; setShadows(bucket);
+    const boom = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.5, 0.4), matYellow); boom.position.set(boomX, 2.0, 1.5); boom.rotation.x = Math.PI / 4; setShadows(boom);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 0.3), matYellow); arm.position.set(boomX, 2.3, 2.8); arm.rotation.x = -Math.PI / 4; setShadows(arm);
+    const bucket = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.6), matDark); bucket.position.set(boomX, 1.2, 3.5); bucket.rotation.x = Math.PI / 4; setShadows(bucket);
     boom.userData.isBoom = true; arm.userData.isBoom = true; bucket.userData.isBoom = true;
 
     const marker = createDragMarker(0.25);
@@ -1462,11 +1484,26 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
 
     upperGroup.add(boom, arm, bucket);
     group.add(tL, tR, base, upperGroup);
-    group.scale.set(scale, scale, scale);
+
+    // r064(20回目引継ぎ・マスター指摘「サイズが実機とかけ離れてないか」):
+    // 従来は1つのscale倍率だけで全5クラスを拡大縮小しており、実機カタログの
+    // 全幅・全高(コマツPC60/PC120/PC200/PC350の値)と比べて0.7クラスで全幅+126cm、
+    // 1.2クラスで全幅+203cm・全高+104cmという大きなズレがあった(実機は運送車両
+    // 制限令の幅規制でクラスが上がっても全幅がそこまで伸びないため、単純倍率とは
+    // 合わない)。scale一律の代わりにtargetW(全幅)・targetH(全高)を実機カタログ値[m]
+    // で直接指定し、非一様スケールに変更。幅はX軸のみ、高さ・奥行きはY軸・Z軸を
+    // 連動させてスケールする(ブーム類はX軸回転のみなので、Y=Zスケールにしておけば
+    // せん断歪みが出ないことを確認済み。奥行きはクラス別の実測値が無いため、
+    // 全高と同じ比率で近似している)。
+    const BASE_W = 2.9;               // 現行形状のトラック外側〜外側の全幅[m](scale=1相当)
+    const BASE_H = offsetCab ? 2.4 : 2.49; // 現行形状の屋根までの全高[m](分岐ごとに実測)
+    const scaleX = targetW / BASE_W;
+    const scaleYZ = targetH / BASE_H;
+    group.scale.set(scaleX, scaleYZ, scaleYZ);
     return group;
   }
 
-  function createBulldozer(scale = 1) {
+  function createBulldozer(targetW, targetH) {
     const group = new THREE.Group();
     const trackGeo = new THREE.BoxGeometry(0.6, 0.8, 3.0);
     const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(0.9, 0.4, 0); setShadows(tL);
@@ -1485,7 +1522,15 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     const armR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.5), matYellow); armR.position.set(-1.0, 0.5, 1.2); setShadows(armR);
 
     group.add(tL, tR, base, cab, roof, pipe, blade, armL, armR);
-    group.scale.set(scale, scale, scale);
+    // r064(20回目引継ぎ・マスター指摘): ブルドーザーも同様に一律scaleでズレていた
+    // (8t全高-60cm、13t全幅-59cm)。実機カタログ全幅・全高[m]をtargetW/targetHで
+    // 直接指定する非一様スケールに変更(blade.rotation.xもY-Z平面の回転なので
+    // scaleY=scaleZならせん断歪みは出ない)。
+    const BASE_W = 2.4;  // 現行形状のトラック外側〜外側の全幅[m](旧scale=1.0=13t相当)
+    const BASE_H = 2.75; // 現行形状の屋根までの全高[m]
+    const scaleX = targetW / BASE_W;
+    const scaleYZ = targetH / BASE_H;
+    group.scale.set(scaleX, scaleYZ, scaleYZ);
     return group;
   }
 
@@ -1493,15 +1538,24 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     const group = new THREE.Group();
     const bedLength = isLarge ? 5.5 : 3.5;
     const zOffset = isLarge ? -1.0 : 0;
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matYellow); cab.position.set(0, 1.5, 2.0); setShadows(cab);
-    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, 1.8, 2.0); setShadows(wnd);
-    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, bedLength), matSilver); bed.position.set(0, 1.8, -0.8 + zOffset); setShadows(bed);
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, 0.8, -0.2 + zOffset/2); setShadows(chassis);
-    const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
+    // r064(20回目引継ぎ・マスター指摘): 実機カタログ(4tダンプ全高2.5m/10tダンプ全高3.3m)
+    // と比較したところ、4tは元々ほぼ一致していたが10tは車体高さがisLarge時も
+    // 変わらず全高が実機より約80cm低かった。10t側はタイヤをやや大径化(半径0.5→0.6)
+    // しつつ、車体一式(cab/wnd/bed/chassis)を目標の全高3.3mに合うよう底上げする。
+    const tireR = isLarge ? 0.6 : 0.5;
+    const cabY = isLarge ? 2.3 : 1.5; // isLarge時: cab.top=cabY+1.0=3.3m(実機全高)に一致
+    const wndY = cabY + 0.3;
+    const bedY = cabY + 0.3;
+    const chassisY = cabY - 0.7;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matYellow); cab.position.set(0, cabY, 2.0); setShadows(cab);
+    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, wndY, 2.0); setShadows(wnd);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, bedLength), matSilver); bed.position.set(0, bedY, -0.8 + zOffset); setShadows(bed);
+    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, chassisY, -0.2 + zOffset/2); setShadows(chassis);
+    const tireGeo = new THREE.CylinderGeometry(tireR, tireR, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
     const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset] ];
     if (isLarge) { positions.push([1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset]); }
     positions.forEach(p => {
-      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], 0.5, p[1]); setShadows(tire); group.add(tire);
+      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], tireR, p[1]); setShadows(tire); group.add(tire);
     });
     group.add(cab, wnd, bed, chassis);
     group.rotation.y = Math.PI;
@@ -2949,14 +3003,20 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
 
   function spawnObject(wx, wz) {
     let mesh;
-    if (currentType === 'bh_mini') mesh = createBackhoe(0.6);
-    else if (currentType === 'bh_025') mesh = createBackhoe(0.8);
-    else if (currentType === 'bh_045') mesh = createBackhoe(1.0);
-    else if (currentType === 'bh_07') mesh = createBackhoe(1.4);
-    else if (currentType === 'bh_12') mesh = createBackhoe(1.8);
-    else if (currentType === 'bd_08t') mesh = createBulldozer(0.8);
-    else if (currentType === 'bd_13t') mesh = createBulldozer(1.0);
-    else if (currentType === 'bd_20t') mesh = createBulldozer(1.3);
+    // r064: 実機カタログ全幅/全高[m](コマツPC60=0.25/PC120=0.45/PC200=0.7/PC350=1.2)
+    // r065(20回目引継ぎ・マスター提供の実寸図面): ミニBHはマスターが提示した
+    // 寸法図(全幅1450mm/全高2343mm)の実測値に直接合わせる。前回の推定値(0.9m/2.2m)
+    // より全幅がだいぶ広い(1t未満級ではなく、1.5〜2t級相当の図面と思われる)。
+    if (currentType === 'bh_mini') mesh = createBackhoe(1.45, 2.343, false);
+    else if (currentType === 'bh_025') mesh = createBackhoe(2.225, 2.59);
+    else if (currentType === 'bh_045') mesh = createBackhoe(2.49, 2.715);
+    else if (currentType === 'bh_07') mesh = createBackhoe(2.80, 3.04);
+    else if (currentType === 'bh_12') mesh = createBackhoe(3.19, 3.28);
+    // r064: 実機カタログ全幅/全高[m](コマツD31PX=8t、D51PX=13t、D65PX=20t相当。
+    // 13t→20tクラスは実機でも全幅がほぼ変わらない(輸送幅規制で頭打ち)ためそのまま反映)
+    else if (currentType === 'bd_08t') mesh = createBulldozer(2.25, 2.80);
+    else if (currentType === 'bd_13t') mesh = createBulldozer(2.99, 3.03);
+    else if (currentType === 'bd_20t') mesh = createBulldozer(2.99, 3.19);
     else if (currentType === 'dump_4t') mesh = createDump(false);
     else if (currentType === 'dump_10t') mesh = createDump(true);
     else if (currentType === 'mx_10t') mesh = createMixerTruck();
@@ -3334,7 +3394,20 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   }
 
   function _kotaiOnKeyDown(e) {
-    if (e.key === 'Escape') { exitPlacementMode(); }
+    if (e.key === 'Escape') {
+      // r060(20回目引継ぎ③B修正): 確認ダイアログ表示中にEscを押すと、ダイアログは
+      // 開いたままなのにexitPlacementMode()だけ実行されてしまい、その後Y/Nどちらを
+      // 押しても構台作図がすでに終了済みという不具合があった。ダイアログ表示中は
+      // 「いいえ」ボタンと同じ扱い(ダイアログを閉じてコールバックを破棄するのみ)にし、
+      // exitPlacementMode()は呼ばない。
+      const overlay = document.getElementById('kotai-confirm-overlay');
+      if (overlay && overlay.style.display !== 'none') {
+        overlay.style.display = 'none';
+        _kotaiConfirmCallback = null;
+        return;
+      }
+      exitPlacementMode();
+    }
   }
 
   let _kotaiConfirmCallback = null;
@@ -4190,7 +4263,12 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       }
     }
 
-    controls.update();
+    // r060(20回目引継ぎ③A修正): controls.update()はcontrols.enabled=falseでも
+    // OrbitControls内部が保持するスファリカル座標からcamera.positionを毎フレーム
+    // 再計算してしまうため、enterKotaiMode()で真上視点に手動セットしたカメラ姿勢が
+    // 直後のこの呼び出しで上書きされ、「平面ではない変な角度」になっていた。
+    // 構台モード中(_kotaiSavedCamが非null)はこの再計算をスキップする。
+    if (!_kotaiSavedCam) controls.update();
     renderer.render(scene, camera);
   }
 
