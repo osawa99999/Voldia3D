@@ -282,6 +282,18 @@
   <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷(A3 PDF)</button>
   <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
 
+  <!-- r071(20回目引継ぎ・マスター要望): 影の精度(shadow.mapSize)を軽量/標準/高画質の
+       3段階から選べるUI。4096は綺麗だが重い可能性があるため選択式にし、デフォルトは
+       標準(2048)。 -->
+  <div id="shadow-quality-group" style="margin-top:6px;padding:6px;background:#1a1a1a;border-radius:4px;">
+    <div style="font-size:.68em;color:#888;margin-bottom:4px;">影の精度</div>
+    <div style="display:flex;gap:3px;">
+      <button class="shadow-q-btn" data-size="1024" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">軽量</button>
+      <button class="shadow-q-btn active" data-size="2048" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:var(--accent);color:#000;border:1px solid var(--accent);font-weight:bold;cursor:pointer;">標準</button>
+      <button class="shadow-q-btn" data-size="4096" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">高画質</button>
+    </div>
+  </div>
+
   <!-- r064: PLANビュー(レーダー)は表示から除外。内部の描画/クリック処理には
        他の箇所からまだ参照があるため、要素自体は残しdisplay:noneのみで隠す
        (丸ごと削除すると radarCtx 参照エラーで壊れる箇所が多数あるため安全策)。 -->
@@ -524,12 +536,65 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
   dirLight.position.set(30, 50, -20);
   dirLight.castShadow = true;
-  dirLight.shadow.mapSize.width = 1024; 
-  dirLight.shadow.mapSize.height = 1024;
+  dirLight.shadow.mapSize.width = 2048;
+  dirLight.shadow.mapSize.height = 2048;
   dirLight.shadow.camera.left = -50; dirLight.shadow.camera.right = 50;
   dirLight.shadow.camera.top = 50; dirLight.shadow.camera.bottom = -50;
-  dirLight.shadow.bias = -0.001; 
-  scene.add(dirLight);
+  // r068(20回目引継ぎ・マスター指摘「影が浮いて見える」=peter panning対策):
+  // bias/normalBiasは固定値ではなく、シャドウカメラのフラスタムサイズ(mapRange)に
+  // 応じて動的に再計算する(1030行目付近updateShadowBias()参照)。ここでの初期値は
+  // 起動直後の描画1フレーム分の仮値で、直後にupdateShadowBias()で上書きされる。
+  dirLight.shadow.bias = -0.0005;
+  dirLight.shadow.normalBias = 0.02;
+  // r068(20回目引継ぎ・マスター指摘「影が浮いて見える」対策): shadow.bias/normalBiasを
+  // シャドウマップの「テクセル1個あたりの実距離(texelSize)」に比例させて動的計算する。
+  // 固定値だとmapRange(=描画対象敷地の実サイズ、スケール1/30と1/100で数十倍違う)が
+  // 変わるたびに最適値がズレる(マスター実測: 1/100で最適だった値が1/30だと縞模様の
+  // shadow acneに変わる)。normalBiasは法線方向のオフセットで、特に垂直面(掘削壁面)
+  // のような光源に対して浅い角度の面でのpeter panning(影が壁際から離れて浮く)対策に
+  // bias(深度方向オフセット)より効果的なので、normalBiasを主役・biasは補助に留める。
+  // 全オブジェクト共通のdirLight.shadow設定なので、ボックス・作業員等も含め
+  // castShadow=trueの全メッシュに一括で効く。
+  function updateShadowBias() {
+    // r071(20回目引継ぎ・マスター実機調整結果): normalBiasを使うと(値が大きすぎたため)
+    // 影が縮んで台形状に切れる不具合が出た。マスターが実際に色々な値を試した結果、
+    // normalBias=0にして、bias側だけをtexelSize比例のごく小さい値(×0.003)にするのが
+    // 一番きれいに出ることを確認済み。この値をそのまま採用する。
+    const texelSize = (dirLight.shadow.camera.right - dirLight.shadow.camera.left) / dirLight.shadow.mapSize.width;
+    dirLight.shadow.normalBias = 0;
+    dirLight.shadow.bias = -texelSize * 0.003;
+    // r070(20回目引継ぎ・マスター指摘「影が消えた/暗くなった」の原因究明):
+    // このアプリはrenderer.shadowMap.autoUpdate=false(510行目付近)で、影は
+    // needsUpdate=trueを明示的に立てた時だけ再計算される設計。bias/normalBiasを
+    // 変更しても、このフラグを立てないと古いシャドウマップのまま反映されず、
+    // さらにmapSizeを1024→2048に変更した際に既存のシャドウマップ用レンダー
+    // ターゲットが不整合を起こしていた可能性が高い(マスター指摘「太陽が沈んだ」
+    // ような暗転はこれが原因と推定)。mapSize変更に対応するため既存のshadow.map
+    // を明示的に破棄して確実に再生成させ、needsUpdate=trueで再描画をトリガーする。
+    if (dirLight.shadow.map) { dirLight.shadow.map.dispose(); dirLight.shadow.map = null; }
+    if (typeof renderer !== 'undefined' && renderer.shadowMap) renderer.shadowMap.needsUpdate = true;
+  }
+  updateShadowBias();
+  scene.add(dirLight); // r071: 私の前回編集(r068)でこの行を誤って消してしまっていた。復元。
+
+  // r071: 影の精度セレクタ(軽量1024/標準2048/高画質4096)。切替時はmapSizeを
+  // 変更してからupdateShadowBias()を呼ぶ(内部でmap破棄+needsUpdateも行う)。
+  document.querySelectorAll('.shadow-q-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const size = parseInt(btn.dataset.size);
+      dirLight.shadow.mapSize.width = size;
+      dirLight.shadow.mapSize.height = size;
+      document.querySelectorAll('.shadow-q-btn').forEach(b => {
+        const on = b === btn;
+        b.style.background = on ? 'var(--accent)' : '#2a2a2a';
+        b.style.color = on ? '#000' : '#aaa';
+        b.style.borderColor = on ? 'var(--accent)' : '#3a3a3a';
+        b.style.fontWeight = on ? 'bold' : 'normal';
+        b.classList.toggle('active', on);
+      });
+      updateShadowBias();
+    });
+  });
 
   const dirtColor = 0x79553d;
 
@@ -923,10 +988,37 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
 
         const mat = new THREE.MeshPhongMaterial({ color: dirtColor, side: THREE.DoubleSide, flatShading: true, shininess: 10 }); // [FIX 19回目 v2] 同上理由
 
-        if (loopData.length > 0) {
-          const outerLoop = loopData[0].loop;
-          const innerLoops = loopData.slice(1).map(d => d.loop);
+        // r067(20回目引継ぎ⑤・マスター指摘対応): customGroundの穴あけは従来
+        // 「最大面積の1ループ(outerLoop)だけ」を穴にしており、innerLoopsは
+        // ミニマップ用の輪郭線(terrainEdges2D)にしか使われていなかった。
+        // このため四角形1・2・3のように複数の独立した掘削形状がある場合、
+        // 最大面積以外の形状(今回は四角形2)には穴が開かず蓋がされてしまっていた。
+        // 各ループの代表点についてPoint-in-Polygon判定を行い、他の何個のループに
+        // 包含されているか(depth)を数える。depthが偶数(0,2,4...)=独立した外周
+        // または「島の中の穴」は穴として扱い、depthが奇数(1,3...)=他の外周の
+        // 内側にある「島」は穴として扱わない(地形メッシュ自身のキャップが
+        // そのまま見えるべき箇所のため)。
+        function pointInPolygon(pt, poly) {
+          let inside = false;
+          for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const xi = poly[i].x, zi = poly[i].z, xj = poly[j].x, zj = poly[j].z;
+            if (((zi > pt.z) !== (zj > pt.z)) && (pt.x < (xj - xi) * (pt.z - zi) / (zj - zi) + xi)) inside = !inside;
+          }
+          return inside;
+        }
+        loopData.forEach(d => {
+          const testPt = d.loop[0];
+          let depth = 0;
+          loopData.forEach(other => {
+            if (other === d) return;
+            if (pointInPolygon(testPt, other.loop)) depth++;
+          });
+          d.depth = depth;
+        });
+        const outerLoops = loopData.filter(d => d.depth % 2 === 0).map(d => d.loop);
+        const islandLoops = loopData.filter(d => d.depth % 2 === 1).map(d => d.loop);
 
+        if (loopData.length > 0) {
           const shape = new THREE.Shape();
           shape.moveTo(minX - range, minZ - range);
           shape.lineTo(minX - range, maxZ + range);
@@ -934,21 +1026,21 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
           shape.lineTo(maxX + range, minZ - range);
           shape.lineTo(minX - range, minZ - range);
 
-          const hole = new THREE.Path();
-          hole.moveTo(outerLoop[0].x, outerLoop[0].z);
-          for (let i = 1; i < outerLoop.length; i++) {
-            hole.lineTo(outerLoop[i].x, outerLoop[i].z);
-          }
-          hole.lineTo(outerLoop[0].x, outerLoop[0].z);
-          shape.holes.push(hole);
+          outerLoops.forEach(loop => {
+            const hole = new THREE.Path();
+            hole.moveTo(loop[0].x, loop[0].z);
+            for (let i = 1; i < loop.length; i++) {
+              hole.lineTo(loop[i].x, loop[i].z);
+            }
+            hole.lineTo(loop[0].x, loop[0].z);
+            shape.holes.push(hole);
 
-          for (let i = 0; i < outerLoop.length; i++) {
-            const p1 = outerLoop[i];
-            const p2 = outerLoop[(i + 1) % outerLoop.length];
-            terrainEdges2D.push({ x1: p1.x, z1: p1.z, x2: p2.x, z2: p2.z });
-          }
-
-          // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
+            for (let i = 0; i < loop.length; i++) {
+              const p1 = loop[i];
+              const p2 = loop[(i + 1) % loop.length];
+              terrainEdges2D.push({ x1: p1.x, z1: p1.z, x2: p2.x, z2: p2.z });
+            }
+          });
 
           const geo = new THREE.ShapeGeometry(shape);
           geo.rotateX(Math.PI / 2);
@@ -980,7 +1072,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
           // ドーナツ穴埋めが配置モードだけ塞がって見える」原因だった(上の三角形間引き
           // 廃止と対で、地形自身の正しい形状に任せるよう変更)。ミニマップ用の輪郭線
           // (terrainEdges2D)だけは表示価値があるので引き続き登録する。
-          for (const inner of innerLoops) {
+          for (const inner of islandLoops) {
             for (let i = 0; i < inner.length; i++) {
               const p1 = inner[i];
               const p2 = inner[(i + 1) % inner.length];
@@ -1008,6 +1100,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
         dirLight.shadow.camera.near = 0.1;
         dirLight.shadow.camera.far = 500;
         dirLight.shadow.camera.updateProjectionMatrix();
+        updateShadowBias(); // r068: mapRangeが変わるたびbias/normalBiasを追従させる
 
         controls.target.set(cx, 0, cz);
         camera.position.set(cx, 30, cz + 60);
@@ -1436,101 +1529,102 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   }
 
   function createBackhoe(targetW, targetH, offsetCab = true) {
+    // r066(20回目引継ぎ・マスター指摘「旋回させると歪む」): 従来はgroup.scale.set()で
+    // 非一様スケール(scaleX≠scaleYZ)をグループに持たせていたが、配置モードで
+    // オブジェクトを旋回させる処理(1127行目 mesh.rotation.y=d.rotY)がこの同じ
+    // groupに対して直接Y軸回転を適用するため、Y軸回転(X/Z軸を混ぜる)と
+    // 非一様スケールが合成されてせん断(歪み)が発生していた。気のせいではなく
+    // 実際のバグ。対策として、非一様スケールをgroup.scaleではなく各メッシュの
+    // geometry(頂点データ)に直接焼き込む方式に変更。こうするとgroup自身は
+    // スケール1のままになり、以降どれだけ回転(旋回・ブーム角度等)を重ねても
+    // 剛体変換の合成にしかならないため、原理的に二度と歪まない。
+    const BASE_W = 2.9, BASE_H = offsetCab ? 2.4 : 2.39; // r069: 小型側の形状変更に伴いBASE_H再実測(2.49→2.39)
+    const sx = targetW / BASE_W, sy = targetH / BASE_H;
+    const P = (x, y, z) => [x * sx, y * sy, z * sy]; // 位置座標の補正(非一様スケール分)
+    const G = (w, h, d) => new THREE.BoxGeometry(w * sx, h * sy, d * sy); // ボックス寸法の補正
+
     const group = new THREE.Group();
-    const trackGeo = new THREE.BoxGeometry(0.7, 0.8, 3.5);
-    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(1.1, 0.4, 0); setShadows(tL);
-    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(-1.1, 0.4, 0); setShadows(tR);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.4, 2.0), matDark); base.position.set(0, 0.6, 0); setShadows(base);
+    const trackGeo = G(0.7, 0.8, 3.5);
+    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(...P(1.1, 0.4, 0)); setShadows(tL);
+    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(...P(-1.1, 0.4, 0)); setShadows(tR);
+    const base = new THREE.Mesh(G(1.5, 0.4, 2.0), matDark); base.position.set(...P(0, 0.6, 0)); setShadows(base);
 
     const upperGroup = new THREE.Group();
-    upperGroup.position.set(0, 0.8, 0);
+    upperGroup.position.set(...P(0, 0.8, 0));
     upperGroup.userData.isUpper = true;
 
-    // r063(20回目引継ぎ・マスター実機スクショ提供その2):
-    // ①小型: ブーム基部(pivot y=2.0,z=1.5を45度回転した箱)の後端(下端)が
-    // ワールド座標でおよそ(y≈0.76, z≈0.26)まで下がってきており、旧cabin位置
-    // (y=0.85, z=0.3)とほぼ同じ場所だったため運転席にアームが刺さって見えていた。
-    // 本体を薄く(高さ0.9→0.6)し、運転席を後方(z:0.3→-0.5)かつ高い位置
-    // (y:0.85→1.1、本体の上に乗る形)へ移動してこの干渉点から完全に離した。
-    // ②非ミニ側: 旧boomX=-0.05は運転席(x=0.65)から見るとほぼセンターで、
-    // 「運転席の反対側」には見えなかった。運転席と同じ距離だけ反対側(x=-0.65)へ
-    // 大きく離した。
     let boomX;
     if (!offsetCab) {
-      // 小型(bh_mini): 左右対称。機械部分・運転席・アーム全て中心線上
-      const engine = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.6, 2.2), matYellow); engine.position.set(0, 0.3, -0.3); setShadows(engine);
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.9), matGlass); cabin.position.set(0, 1.1, -0.5); setShadows(cabin);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.3), matDark); roof.position.set(0, 1.65, -0.5); setShadows(roof);
+      // 小型(bh_mini): 左右対称。r069(20回目引継ぎ・マスター提供の参考GLB
+      // 「ローポリミニ.glb」実測比率を反映): 本体をより低く・コンパクトに、
+      // 運転席をブーム側からさらに離して後方へ(GLB実測では運転席はブーム側と
+      // 反対の本体最後端に位置していた)。ブーム+アームの張り出しも実機同様
+      // 長めに調整。
+      const engine = new THREE.Mesh(G(2.6, 0.5, 2.2), matYellow); engine.position.set(...P(0, 0.25, -0.35)); setShadows(engine);
+      const cabin = new THREE.Mesh(G(1.6, 1.0, 0.9), matGlass); cabin.position.set(...P(0, 1.0, -0.85)); setShadows(cabin);
+      const roof = new THREE.Mesh(G(2.9, 0.08, 1.3), matDark); roof.position.set(...P(0, 1.55, -0.85)); setShadows(roof);
       upperGroup.add(engine, cabin, roof);
       boomX = 0;
+      // r066(マスター指摘「排土板が無い」): ミニユンボは前部下部(トラック側、
+      // 旋回体には含まれない)に排土板(ブレード)が付くのが標準。ブームと同じ
+      // +z側(前方)、トラック前端(z≈1.75)のすぐ外側・地面近くに追加。
+      const blade = new THREE.Mesh(G(2.9, 0.45, 0.15), matDark); blade.position.set(...P(0, 0.22, 1.85)); setShadows(blade);
+      group.add(blade);
     } else {
       // 中型/大型(bh_025以上): 機械部分(エンジン/カウンターウェイト)は後方に
       // フルワイドで配置し、運転席は前方右寄せ、アームは運転席と反対側(左側)へ
-      const engine = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, 1.7), matYellow); engine.position.set(0, 0.6, -0.75); setShadows(engine);
-      const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.5, 1.2), matGlass); cabin.position.set(0.65, 0.75, 0.75); setShadows(cabin);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.1, 1.35), matDark); roof.position.set(0.65, 1.55, 0.75); setShadows(roof);
+      const engine = new THREE.Mesh(G(2.4, 1.2, 1.7), matYellow); engine.position.set(...P(0, 0.6, -0.75)); setShadows(engine);
+      const cabin = new THREE.Mesh(G(0.9, 1.5, 1.2), matGlass); cabin.position.set(...P(0.65, 0.75, 0.75)); setShadows(cabin);
+      const roof = new THREE.Mesh(G(1.05, 0.1, 1.35), matDark); roof.position.set(...P(0.65, 1.55, 0.75)); setShadows(roof);
       upperGroup.add(engine, cabin, roof);
       boomX = -0.65; // 運転席(x=0.65)の反対側
     }
 
-    const boom = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.5, 0.4), matYellow); boom.position.set(boomX, 2.0, 1.5); boom.rotation.x = Math.PI / 4; setShadows(boom);
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.5, 0.3), matYellow); arm.position.set(boomX, 2.3, 2.8); arm.rotation.x = -Math.PI / 4; setShadows(arm);
-    const bucket = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.6), matDark); bucket.position.set(boomX, 1.2, 3.5); bucket.rotation.x = Math.PI / 4; setShadows(bucket);
+    // r069/r070: GLB実測(ブーム+アームの張り出しが全長の6割程度)を踏まえ張り出しを
+    // 延長(3.5→3.8/2.5→2.9)。太さも幅方向の圧縮(ミニはsx=0.5)で細くなりすぎない
+    // よう底上げ(0.4→0.55/0.3→0.45/0.6→0.75)
+    const boom = new THREE.Mesh(G(0.55, 3.8, 0.4), matYellow); boom.position.set(...P(boomX, 2.0, 1.6)); boom.rotation.x = Math.PI / 4; setShadows(boom);
+    const arm = new THREE.Mesh(G(0.45, 2.9, 0.3), matYellow); arm.position.set(...P(boomX, 2.35, 3.05)); arm.rotation.x = -Math.PI / 4; setShadows(arm);
+    const bucket = new THREE.Mesh(G(0.75, 0.8, 0.6), matDark); bucket.position.set(...P(boomX, 1.2, 3.9)); bucket.rotation.x = Math.PI / 4; setShadows(bucket);
     boom.userData.isBoom = true; arm.userData.isBoom = true; bucket.userData.isBoom = true;
 
-    const marker = createDragMarker(0.25);
-    marker.position.set(0, -0.2, 0.4);
+    const marker = createDragMarker(0.25 * sy);
+    marker.position.set(...P(0, -0.2, 0.4));
     bucket.add(marker);
 
     upperGroup.add(boom, arm, bucket);
     group.add(tL, tR, base, upperGroup);
-
-    // r064(20回目引継ぎ・マスター指摘「サイズが実機とかけ離れてないか」):
-    // 従来は1つのscale倍率だけで全5クラスを拡大縮小しており、実機カタログの
-    // 全幅・全高(コマツPC60/PC120/PC200/PC350の値)と比べて0.7クラスで全幅+126cm、
-    // 1.2クラスで全幅+203cm・全高+104cmという大きなズレがあった(実機は運送車両
-    // 制限令の幅規制でクラスが上がっても全幅がそこまで伸びないため、単純倍率とは
-    // 合わない)。scale一律の代わりにtargetW(全幅)・targetH(全高)を実機カタログ値[m]
-    // で直接指定し、非一様スケールに変更。幅はX軸のみ、高さ・奥行きはY軸・Z軸を
-    // 連動させてスケールする(ブーム類はX軸回転のみなので、Y=Zスケールにしておけば
-    // せん断歪みが出ないことを確認済み。奥行きはクラス別の実測値が無いため、
-    // 全高と同じ比率で近似している)。
-    const BASE_W = 2.9;               // 現行形状のトラック外側〜外側の全幅[m](scale=1相当)
-    const BASE_H = offsetCab ? 2.4 : 2.49; // 現行形状の屋根までの全高[m](分岐ごとに実測)
-    const scaleX = targetW / BASE_W;
-    const scaleYZ = targetH / BASE_H;
-    group.scale.set(scaleX, scaleYZ, scaleYZ);
     return group;
   }
 
   function createBulldozer(targetW, targetH) {
-    const group = new THREE.Group();
-    const trackGeo = new THREE.BoxGeometry(0.6, 0.8, 3.0);
-    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(0.9, 0.4, 0); setShadows(tL);
-    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(-0.9, 0.4, 0); setShadows(tR);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 2.5), matYellow); base.position.set(0, 0.7, 0); setShadows(base);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.5, 1.4), matGlass); cab.position.set(0, 1.95, -0.2); setShadows(cab);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 1.5), matYellow); roof.position.set(0, 2.7, -0.2); setShadows(roof);
-    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.8), matDark); pipe.position.set(0.6, 1.6, 0.8); setShadows(pipe);
+    // r066(20回目引継ぎ・マスター指摘「旋回させると歪む」): バックホーと同じ理由
+    // (group.scaleの非一様スケールが配置モードの旋回Y軸回転と合成されせん断が
+    // 発生する)で、こちらもgeometry.scale()による焼き込み方式に変更。
+    const BASE_W = 2.4, BASE_H = 2.75;
+    const sx = targetW / BASE_W, sy = targetH / BASE_H;
+    const P = (x, y, z) => [x * sx, y * sy, z * sy];
+    const G = (w, h, d) => new THREE.BoxGeometry(w * sx, h * sy, d * sy);
 
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.0, 0.2), matSilver);
-    blade.position.set(0, 0.5, 1.8);
+    const group = new THREE.Group();
+    const trackGeo = G(0.6, 0.8, 3.0);
+    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(...P(0.9, 0.4, 0)); setShadows(tL);
+    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(...P(-0.9, 0.4, 0)); setShadows(tR);
+    const base = new THREE.Mesh(G(1.6, 1.0, 2.5), matYellow); base.position.set(...P(0, 0.7, 0)); setShadows(base);
+    const cab = new THREE.Mesh(G(1.4, 1.5, 1.4), matGlass); cab.position.set(...P(0, 1.95, -0.2)); setShadows(cab);
+    const roof = new THREE.Mesh(G(1.5, 0.1, 1.5), matYellow); roof.position.set(...P(0, 2.7, -0.2)); setShadows(roof);
+    const pipeGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.8); pipeGeo.scale(sx, sy, sx);
+    const pipe = new THREE.Mesh(pipeGeo, matDark); pipe.position.set(...P(0.6, 1.6, 0.8)); setShadows(pipe);
+
+    const blade = new THREE.Mesh(G(3.0, 1.0, 0.2), matSilver);
+    blade.position.set(...P(0, 0.5, 1.8));
     blade.rotation.x = Math.PI / 12;
     setShadows(blade);
 
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.5), matYellow); armL.position.set(1.0, 0.5, 1.2); setShadows(armL);
-    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 1.5), matYellow); armR.position.set(-1.0, 0.5, 1.2); setShadows(armR);
+    const armL = new THREE.Mesh(G(0.2, 0.2, 1.5), matYellow); armL.position.set(...P(1.0, 0.5, 1.2)); setShadows(armL);
+    const armR = new THREE.Mesh(G(0.2, 0.2, 1.5), matYellow); armR.position.set(...P(-1.0, 0.5, 1.2)); setShadows(armR);
 
     group.add(tL, tR, base, cab, roof, pipe, blade, armL, armR);
-    // r064(20回目引継ぎ・マスター指摘): ブルドーザーも同様に一律scaleでズレていた
-    // (8t全高-60cm、13t全幅-59cm)。実機カタログ全幅・全高[m]をtargetW/targetHで
-    // 直接指定する非一様スケールに変更(blade.rotation.xもY-Z平面の回転なので
-    // scaleY=scaleZならせん断歪みは出ない)。
-    const BASE_W = 2.4;  // 現行形状のトラック外側〜外側の全幅[m](旧scale=1.0=13t相当)
-    const BASE_H = 2.75; // 現行形状の屋根までの全高[m]
-    const scaleX = targetW / BASE_W;
-    const scaleYZ = targetH / BASE_H;
-    group.scale.set(scaleX, scaleYZ, scaleYZ);
     return group;
   }
 
