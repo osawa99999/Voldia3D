@@ -4883,7 +4883,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0070.html';
+      iframe.src='voldia_placement_v0071.html';
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);
