@@ -1,3 +1,7 @@
+// ============================================================
+// voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
+// ============================================================
+
 // 3D高さ逆算用：2D平面上での点Pから線分ABへの最短距離を求める
 // 【問題B対応・2026-08-24マスター指示】LandXMLの垂直面回避ハック(noSlopeオブジェクトの
 // 天端側だけ角度ベースの極小テーパーを持たせていた仕組み)を、深さに比例して天端のズレが
@@ -20,30 +24,10 @@ function _setResVolBig(numText){
   el.innerHTML = `${numText}<span>m³</span>`;
   el.style.fontSize = numText.length>9 ? '1.55em' : '';
 }
-// 新2(2026-08-28 引継ぎ18回目マスター指示): 土量計算実行時、グレーオブジェクトが
-// 存在する場合の注意トーストを起動(ページ読み込み)毎に1回だけ出すためのフラグ
-let _grayCalcWarnShown = false;
-function getPointToLineSegmentDistance2D(p, a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 < 1e-9) return Math.hypot(p.x - a.x, p.y - a.y);
-  
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-  t = Math.max(0, Math.min(1, t)); // 線分内側にクリップ
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
-}
-
-// 頂点Pの高さを、底面エッジ[b1-b2]と天端エッジ[t1-t2]への距離比率から線形補間で逆算
-function getSlopeHeight(p, b1, b2, t1, t2, botY, tlY) {
-  const dB = getPointToLineSegmentDistance2D(p, b1, b2);
-  const dT = getPointToLineSegmentDistance2D(p, t1, t2);
-  const sum = dB + dT;
-  if (sum < 1e-9) return botY;
-  // 距離比率による線形補間のため、浮動小数点誤差を吸収できる
-  return botY + (tlY - botY) * (dB / sum);
-}
-
+// 新2(2026-08-28 引継ぎ18回目マスター指示→26回目セッションで紫に移設): 土量計算
+// 実行時、紫(強制垂直)オブジェクトが存在する場合の注意トーストを起動(ページ読み込み)
+// 毎に1回だけ出すためのフラグ
+let _purpleCalcWarnShown = false;
 // 3D空間上の点pt(m単位)がフラスタムfの3D掘削範囲(中空空間)内部にあるか判定
 function isPointInsideFrustumExcavation(pt, f) {
   const S_CONV = 0.001;
@@ -120,38 +104,6 @@ function getPolygonIntersections(poly1, poly2) {
     }
   }
   return intersections;
-}
-
-// Möller-Trumboreアルゴリズムによる3D空間上の線分S(p1->p2)と三角形T(v0,v1,v2)の交差判定
-function getLineTriangleIntersection3D(p1, p2, v0, v1, v2) {
-  const eps = 1e-6;
-  const dir = new THREE.Vector3().subVectors(p2, p1);
-  const edge1 = new THREE.Vector3().subVectors(v1, v0);
-  const edge2 = new THREE.Vector3().subVectors(v2, v0);
-  
-  const h = new THREE.Vector3().crossVectors(dir, edge2);
-  const a = edge1.dot(h);
-  
-  if (Math.abs(a) < eps) return null; // 線分と三角形が平行な場合は交差なし
-
-  const f = 1.0 / a;
-  const s = new THREE.Vector3().subVectors(p1, v0);
-  const u = f * s.dot(h);
-  
-  if (u < 0.0 || u > 1.0) return null;
-
-  const q = new THREE.Vector3().crossVectors(s, edge1);
-  const v = f * dir.dot(q);
-  
-  if (v < 0.0 || u + v > 1.0) return null;
-
-  const t = f * edge2.dot(q);
-  
-  if (t >= 0.0 && t <= 1.0) {
-    // 3D交点座標を計算して返す
-    return new THREE.Vector3().addVectors(p1, dir.multiplyScalar(t));
-  }
-  return null;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -541,75 +493,6 @@ function buildFrustumGeometry(f){
   return {positions: pos, indices: new Uint32Array(idx)};
 }
 
-// ────────────────────────────────────────────────────────────────
-//  ダイバージェンス定理で体積計算
-// ────────────────────────────────────────────────────────────────
-function divergenceVolume(pos, idx){
-  let vol = 0;
-  for(let i=0;i<idx.length;i+=3){
-    const i0=idx[i]*3, i1=idx[i+1]*3, i2=idx[i+2]*3;
-    const ax=pos[i0],ay=pos[i0+1],az=pos[i0+2];
-    const bx=pos[i1],by=pos[i1+1],bz=pos[i1+2];
-    const cx=pos[i2],cy=pos[i2+1],cz=pos[i2+2];
-    vol += ax*(by*cz-bz*cy)+ay*(bz*cx-bx*cz)+az*(bx*cy-by*cx);
-  }
-  return Math.abs(vol)/6.0;
-}
-
-// ────────────────────────────────────────────────────────────────
-//  2Dポリゴン重複面積（交差面積）の計算
-//  Sutherland-Hodgmanアルゴリズムで2ポリゴンの交差を求める
-// ────────────────────────────────────────────────────────────────
-function clipPolygon(subj, clip){
-  // clip辺でsubjを切り取る（Sutherland-Hodgman）
-  let output = subj.slice();
-  const cn = clip.length;
-  for(let i=0;i<cn;i++){
-    if(!output.length) return [];
-    const input = output;
-    output = [];
-    const A=clip[i], B=clip[(i+1)%cn];
-    const dx=B.x-A.x, dy=B.y-A.y;
-    // 辺ABの左側（内側）判定: cross>0
-    function inside(p){ return (B.x-A.x)*(p.y-A.y)-(B.y-A.y)*(p.x-A.x) >= 0; }
-    function intersect(P,Q){
-      const d1x=Q.x-P.x,d1y=Q.y-P.y;
-      const d2x=B.x-A.x,d2y=B.y-A.y;
-      const denom=d1x*d2y-d1y*d2x;
-      if(Math.abs(denom)<1e-10) return P;
-      const t=((A.x-P.x)*d2y-(A.y-P.y)*d2x)/denom;
-      return {x:P.x+t*d1x, y:P.y+t*d1y};
-    }
-    const pn=input.length;
-    for(let j=0;j<pn;j++){
-      const S=input[j], E=input[(j+1)%pn];
-      if(inside(S)){
-        if(inside(E)) output.push(E);
-        else output.push(intersect(S,E));
-      } else if(inside(E)){
-        output.push(intersect(S,E));
-        output.push(E);
-      }
-    }
-  }
-  return output;
-}
-
-function poly2DArea(pts){
-  let a=0;const n=pts.length;
-  for(let i=0;i<n;i++){const j=(i+1)%n;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}
-  return Math.abs(a)/2;
-}
-
-// 2図形の交差面積（mm²）
-function intersectionArea2D(pts1, pts2){
-  // 両方をCCW（S-H内側判定用）に統一
-  const toCCW=pts=>{let a=0;const n=pts.length;for(let i=0;i<n;i++){const j=(i+1)%n;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}return a<0?pts.slice():pts.slice().reverse();};
-  const s=toCCW(pts1), c=toCCW(pts2);
-  const inter=clipPolygon(s,c);
-  return poly2DArea(inter);
-}
-
 
 // ████████████████████████████████████████████████████████████████
 // ██  SECTION 3: 3Dシェルメッシュ生成（体積計算・GLB出力専用）  ██
@@ -854,17 +737,35 @@ function buildShellMesh(frustums, offsetXmm, offsetYmm){
 //  3Dメッシュ本体は initThree_watertight → buildManifoldUnionGeom で生成。
 // ────────────────────────────────────────────────────────────────
 async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
+  // 26回目セッション新規: 「既存躯体」機能 ― グレー色のオブジェクトは掘削対象
+  // ではなく、既にそこにコンクリートがある扱い。個別ジオメトリ・体積計算からは
+  // 分離し、後段で掘削体積との重複分だけを差し引く。
+  const excavFrustums = frustums.filter(f => f.color !== 'gray');
+  const structFrustums = frustums.filter(f => f.color === 'gray');
+
   // 個別ジオメトリ（表示用・デバッグ用に保持）
   const geoms = frustums.map(f => buildFrustumGeometry(f));
 
   // 体積計算: 層別スライス法（Fix11）
   // r065(AIS修正案): 山留オフセットをバケツリレーで橋渡し(致命的バグ修正)
-  const totalVol = _calcVolumeFallback(frustums, offsetXmm, offsetYmm);
+  // ★_calcVolumeFallback自体は無改変(体積計算の正解関数)。既存躯体(グレー)は
+  // 掘削対象外のため、ここではexcavFrustumsのみを渡す。
+  let totalVol = _calcVolumeFallback(excavFrustums, offsetXmm, offsetYmm);
+
+  // 26回目セッション新規: 既存躯体が掘削形状と重なる分だけ、体積計算結果から
+  // 差し引く(「そこには既にコンクリートがあるから体積がその分減る」)
+  if(structFrustums.length){
+    const overlapVol = _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offsetXmm, offsetYmm);
+    totalVol = Math.max(0, totalVol - overlapVol);
+  }
 
   // 外皮シェルメッシュ生成
+  // 26回目セッション新規: 既存躯体(グレー)は掘削シェルの形成には参加させない
+  // (excavFrustumsのみ渡す)。既存躯体自体はこの下で別途、シェルとは独立した
+  // 「描いた形状そのまま」のジオメトリとしてunionGeomsに追加する。
   let shellGeom = null;
   try {
-    shellGeom = buildShellMesh(frustums, offsetXmm, offsetYmm);
+    shellGeom = buildShellMesh(excavFrustums, offsetXmm, offsetYmm);
   } catch(e) {
     console.warn('[buildShellMesh] Error:', e);
   }
@@ -887,7 +788,7 @@ async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
     console.warn('[buildUnionFrustumGeometry] Shell mesh failed, falling back to per-depth frustums');
     const SF2 = 10000;
     const depthGroups = new Map();
-    frustums.forEach(f => {
+    excavFrustums.forEach(f => {
       const key = Math.round(f.D);
       if(!depthGroups.has(key)) depthGroups.set(key, []);
       depthGroups.get(key).push(f);
@@ -916,9 +817,17 @@ async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
     });
   }
 
+  // 26回目セッション新規: 既存躯体(グレー)のジオメトリは、掘削シェル(unionGeoms)
+  // には混ぜない。r051の「Voldia_FixedObjectsをGL面境界ループ検出に混ぜると
+  // 誤動作する」と全く同じ理由(既存躯体は掘削シェルと接続しない独立ソリッドの
+  // ため、境界検出の辺カウントを狂わせる)。完全に別フィールドとして返す。
+  const existingStructGeoms = structFrustums.map(f => buildFrustumGeometry({...f, noSlope:true, OD:0}))
+    .filter(g => g.positions && g.positions.length);
+
   return {
     geoms,
     unionGeoms,
+    existingStructGeoms,
     unionVol: totalVol,
     error: null
   };
@@ -1057,6 +966,128 @@ function _calcVolumeFallback(frustums, offsetXmm, offsetYmm){
     totalVol += sliceArea * sliceH;
   }
   return totalVol;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  26回目セッション新規: 「既存躯体」機能 ― 掘削形状(excavFrustums)と
+//  既存躯体(structFrustums、色=purple移設後は"gray"のまま=既存躯体の意)が
+//  重なる分の体積を、_calcVolumeFallbackと全く同じスライス幅・深さレンジの
+//  考え方で算出する。★_calcVolumeFallback自体は一切改変しない(体積計算の
+//  正解関数のため)。この関数は完全に外付けのサイドカーとして動作する。
+//  既存躯体側はOD(余掘り)・法面を一切適用しない「描いた形状そのまま(天端・
+//  下端も含む)」の垂直押し出しとして扱う(マスター仕様: 余掘りや捨てコン+
+//  砕石は既存躯体には適用しない=無視)。
+//  掘削側と既存躯体側、それぞれの断面をスライスごとにunionしたうえで
+//  ctIntersection(交差)を取り、重なった面積だけを積算する。既存躯体が
+//  掘削範囲の外にはみ出ている部分は交差面積0になるので過剰減算にならない。
+// ────────────────────────────────────────────────────────────────
+function _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offsetXmm, offsetYmm){
+  if(!excavFrustums.length || !structFrustums.length) return 0;
+  const SF = 10000;
+  const SLICE_MM = 10;
+
+  const allF = excavFrustums.concat(structFrustums);
+  const minTop   = Math.min(0, ...allF.map(f => -(f.tl||0)));
+  const maxDepth = Math.max(...allF.map(f => f.D - (f.tl||0)));
+  if(maxDepth <= minTop) return 0;
+
+  let overlapVol = 0;
+
+  for(let z0 = minTop; z0 < maxDepth; z0 += SLICE_MM){
+    const z1 = Math.min(z0 + SLICE_MM, maxDepth);
+    const zMid = (z0 + z1) / 2;
+    const sliceH = z1 - z0;
+
+    // --- ①掘削側(excavFrustums)の断面をunion(_calcVolumeFallbackと同一ロジック) ---
+    const clEx = new ClipperLib.Clipper();
+    let addedEx = false;
+    excavFrustums.forEach(f => {
+      const topDepth = -(f.tl||0);
+      const botDepth = f.D - (f.tl||0);
+      if(zMid <= topDepth || zMid >= botDepth) return;
+      const fromTop = zMid - topDepth;
+      const ratio = 1.0 - fromTop / f.D;
+      let offsetDistOuter, offsetDistHole;
+      if(f.noSlope){
+        offsetDistOuter = f.OD;
+        offsetDistHole  = f.OD;
+      } else {
+        offsetDistOuter = f.OD + ratio * f.D * getSlopeRatio();
+        offsetDistHole  = f.OD + (1.0 - ratio) * f.D * getSlopeRatio();
+        if(offsetDistOuter < 0) offsetDistOuter = 0;
+        if(offsetDistHole  < 0) offsetDistHole  = 0;
+      }
+      let slicePts = offsetDistOuter > 0 ? offsetPolygon(f.ptsMm, offsetDistOuter) : f.ptsMm;
+      slicePts = clipContourToYamadome(slicePts, SF, offsetXmm, offsetYmm);
+      if(!slicePts || slicePts.length < 3) return;
+      const rawPath = slicePts.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+      let sa=0;
+      for(let i=0;i<rawPath.length;i++){ const j=(i+1)%rawPath.length; sa += rawPath[i].X*rawPath[j].Y - rawPath[j].X*rawPath[i].Y; }
+      if(sa<0) rawPath.reverse();
+      clEx.AddPath(rawPath, ClipperLib.PolyType.ptSubject, true);
+      addedEx = true;
+      if(f.holesMm && f.holesMm.length){
+        f.holesMm.forEach(h=>{
+          const hPts = offsetDistHole > 0 ? offsetPolygon(h, offsetDistHole, true) : h;
+          if(!hPts || hPts.length<3) return;
+          const rawHole = hPts.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+          let saH=0;
+          for(let i=0;i<rawHole.length;i++){ const j=(i+1)%rawHole.length; saH += rawHole[i].X*rawHole[j].Y - rawHole[j].X*rawHole[i].Y; }
+          if(saH>0) rawHole.reverse();
+          clEx.AddPath(rawHole, ClipperLib.PolyType.ptSubject, true);
+        });
+      }
+    });
+    if(!addedEx) continue;
+    const solEx = new ClipperLib.Paths();
+    clEx.Execute(ClipperLib.ClipType.ctUnion, solEx, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+    if(!solEx.length) continue;
+
+    // --- ②既存躯体側(structFrustums)の断面をunion(OD=0・法面無視、描いた形状そのまま) ---
+    const clSt = new ClipperLib.Clipper();
+    let addedSt = false;
+    structFrustums.forEach(f => {
+      const topDepth = -(f.tl||0);
+      const botDepth = f.D - (f.tl||0);
+      if(zMid <= topDepth || zMid >= botDepth) return;
+      const rawPath = f.ptsMm.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+      let sa=0;
+      for(let i=0;i<rawPath.length;i++){ const j=(i+1)%rawPath.length; sa += rawPath[i].X*rawPath[j].Y - rawPath[j].X*rawPath[i].Y; }
+      if(sa<0) rawPath.reverse();
+      clSt.AddPath(rawPath, ClipperLib.PolyType.ptSubject, true);
+      addedSt = true;
+      if(f.holesMm && f.holesMm.length){
+        f.holesMm.forEach(h=>{
+          const rawHole = h.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+          let saH=0;
+          for(let i=0;i<rawHole.length;i++){ const j=(i+1)%rawHole.length; saH += rawHole[i].X*rawHole[j].Y - rawHole[j].X*rawHole[i].Y; }
+          if(saH>0) rawHole.reverse();
+          clSt.AddPath(rawHole, ClipperLib.PolyType.ptSubject, true);
+        });
+      }
+    });
+    if(!addedSt) continue;
+    const solSt = new ClipperLib.Paths();
+    clSt.Execute(ClipperLib.ClipType.ctUnion, solSt, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+    if(!solSt.length) continue;
+
+    // --- ③①と②の交差(重複部分)だけを面積計算して積算 ---
+    const clInt = new ClipperLib.Clipper();
+    clInt.AddPaths(solEx, ClipperLib.PolyType.ptSubject, true);
+    clInt.AddPaths(solSt, ClipperLib.PolyType.ptClip, true);
+    const solInt = new ClipperLib.Paths();
+    clInt.Execute(ClipperLib.ClipType.ctIntersection, solInt, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+
+    let sliceArea = 0;
+    solInt.forEach(path=>{
+      let a=0;
+      for(let i=0;i<path.length;i++){ const j=(i+1)%path.length; a += path[i].X*path[j].Y - path[j].X*path[i].Y; }
+      sliceArea += Math.abs(a)/2/(SF*SF);
+    });
+
+    overlapVol += sliceArea * sliceH;
+  }
+  return overlapVol;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1296,7 +1327,7 @@ function showCalcModal(){
   });
   
   _lastGeoms = null;
-  // 開くたびに計算状態をリセット
+  _lastExistingStructGeoms = [];
   resetCalcToSelect();
   _hideCalcProgress(); // r072: モーダルを開き直す際、前回の計算中表示が残っていれば消す
 
@@ -1319,6 +1350,10 @@ function closeCalcModal(){
 }
 
 let _lastGeoms=null; // 計算済み水密ジオメトリ（GLB出力用）
+// 26回目セッション新規: 既存躯体(グレー)の「描いた形状そのまま」ジオメトリ。
+// _lastGeomsとは別枠で保持し、GLB出力時に専用ノード(Voldia_ExistingStructure)
+// として分離出力する(r051のVoldia_FixedObjects分離と同じ理由・同じ扱い)。
+let _lastExistingStructGeoms=[];
 let _meshMaterials=[]; // 透過スライダー制御用マテリアル参照（現在アクティブなもの＝グラデ時はPhong/ソリッド時はBasic）
 let _meshObjs=[]; // r038: ソリッド⇔グラデ切替時にマテリアルを丸ごと差し替えるためのメッシュ本体参照
 let _edgeMaterials=[]; // r038: 透過スライダー連動でエッジ輝度を上げるための参照 [navyEdges用, navyEdgesThick用]
@@ -1388,9 +1423,9 @@ function updMeshOpacity(val){
   // 透過度を上げた時(op<0.99)のみdepthWrite:falseにして奥を見えるようにする。
   const wantDepthWrite = op >= 0.99;
   // r045→6D改修(2026-08-28 引継ぎ18回目): 元はindex1固定決め打ちだったが、
-  // 6DでgrayWallMeshが加わり_meshMaterials/_meshObjsが3要素になり得るため、
+  // 6DでpurpleWallMeshが加わり_meshMaterials/_meshObjsが3要素になり得るため、
   // 対応する_meshObjsがハッチテクスチャを持つか(userData.hatchMap)で汎用判定する。
-  // ハッチ系メッシュ(山留/グレー壁面)は「デフォルトで半透明(透過値-10くらい)」の
+  // ハッチ系メッシュ(山留/紫壁面)は「デフォルトで半透明(透過値-10くらい)」の
   // 要望に応じ、常にcyan側より10ポイント低いopacityを保つ。
   _meshMaterials.forEach((m,i)=>{
     const isHatch = !!(_meshObjs[i] && _meshObjs[i].userData && _meshObjs[i].userData.hatchMap);
@@ -1423,19 +1458,6 @@ function updMeshOpacity(val){
 // v0.0015: 穴あきリスクが高いため、デフォルトを'precise'（クリーニングなし）に変更
 // スリバー対策はtriangle-levelフィルター（0.5mm最小高さ）に一本化
 window._vertexCleanMode = 'precise'; // 'normal' or 'precise'
-function toggleVertexCleanMode(){
-  window._vertexCleanMode = (window._vertexCleanMode === 'normal') ? 'precise' : 'normal';
-  const btn = document.getElementById('btn-vertex-clean-toggle');
-  if(window._vertexCleanMode === 'precise'){
-    if(btn) btn.textContent = '🔬 高精度（クリーニングなし）';
-    toast('🔬 高精度モード：近接頂点クリーニングOFF');
-  } else {
-    if(btn) btn.textContent = '🧹 普通（自動クリーニング）';
-    toast('🧹 普通モード：近接頂点(5mm)を自動クリーニング');
-  }
-  // 再計算が必要なので体積計算ボタンを再度押すよう促す
-  toast('⚠️ 再計算してください（戻る→計算ボタン）');
-}
 
 // r038 要望⑤: 「ソリッド」を名乗りつつ実際はPhongのshininess=120で光源グラデがかかったままだった問題を修正。
 // MeshBasicMaterialは光源計算を一切行わないため、これに丸ごと差し替えることで真のフラット単色表示にする。
@@ -1448,9 +1470,9 @@ function toggleMeshSolid(){
   if(window._meshSolidMode){
     // ソリッドモード: MeshBasicMaterialに差し替え → 光源グラデーション完全無視のフラット単色
     // r045→6D改修(2026-08-28 引継ぎ18回目): 元はindex1=redMesh固定決め打ちだったが、
-    // 6DでgrayWallMeshが追加され_meshObjsが[cyan,red,gray]の3要素になり得るため、
+    // 6DでpurpleWallMeshが追加され_meshObjsが[cyan,red,gray]の3要素になり得るため、
     // 「そのメッシュがハッチテクスチャを持つか(userData.hatchMap)」で汎用判定する
-    // 方式に変更。山留のみ/グレーのみ/両方どのケースでも正しく機能する。
+    // 方式に変更。山留のみ/紫のみ/両方どのケースでも正しく機能する。
     const solidColors = [0x8899aa, 0xffffff, 0xffffff];
     const newMats = _meshObjs.map((mesh,i)=>{
       const isRed = !!mesh.userData.hatchMap;
@@ -1677,10 +1699,10 @@ async function runCalc(mode){
     fs = fs.map(f=>({...f, noSlope:true}));
   } else if(mode==='doboku'){
     const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value));
-    // 6C(2026-08-28 引継ぎ18回目): 従来は全オブジェクト一律noSlope:falseで
-    // 個別の垂直指定が消し飛んでいた。グレー色のオブジェクトだけ垂直面
+    // 6C(2026-08-28 引継ぎ18回目→26回目セッションで紫に移設): 従来は全オブジェクト
+    // 一律noSlope:falseで個別の垂直指定が消し飛んでいた。紫色のオブジェクトだけ垂直面
     // (+DOBOKU_VERTICAL_TAPER_FIXED_MMの微勾配)にする条件分岐に変更。
-    fs = fs.map(f=>({...f, noSlope:(f.color==='gray'), OD:globalOD}));
+    fs = fs.map(f=>({...f, noSlope:(f.color==='purple'), OD:globalOD}));
   }
   if(!fs.length){alert('深さが入力された図形がありません');return;}
 
@@ -1824,6 +1846,22 @@ async function runCalc(mode){
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   document.getElementById('calc-select-panel').style.display='none';
   document.getElementById('calc-result-panel').style.display='';
+  // r003根治修正: 既存躯体(グレー)は「余掘り・法面・捨てコン+砕石は無視、
+  // 描いた形状そのまま(天端・下端含む)」の仕様のはずだったが、実際には
+  // このすぐ下のモード別調整(特に土量計算側の「天端をGL=0に強制正規化」処理)が
+  // 色に関係なく全フラスタムに一律適用されていたため、既存躯体の天端(topLevel)を
+  // 何mmに変更しても3D上は常にGL(0)基準にリセットされてしまう不具合があった
+  // (マスター実機報告: 「天端の数字を変えても3Dは全部天端がGLの値になる」)。
+  // 土量計算側の重複体積計算(_calcExistingStructureOverlapVolume)もこの正規化後の
+  // フラスタムを使っていたため、天端が0でない既存躯体では重複体積の計算自体も
+  // ズレていた可能性がある。ここで既存躯体だけを退避し、捨てコン加算分だけ
+  // (通常計算と同じ理屈で)相殺してモード非依存のD=tl-bに揃え、天端正規化・
+  // GLオフセット・地盤面より上の除外など、これ以降のモード別調整を一切
+  // 適用せずに末尾で無調整のまま合流させる。
+  const _grayFsUntouched = fs.filter(f=>f.color==='gray')
+    .map(f=>({...f, D: f.D - concVal}))
+    .filter(f=>f.D>0);
+  fs = fs.filter(f=>f.color!=='gray');
   // v0.0012: 通常計算は捨コン+砕石を深さに含めない
   // v0.0014: 通常計算は余掘り(OD)も含まない
   if(mode==='normal'){
@@ -1881,6 +1919,9 @@ async function runCalc(mode){
     // 各深さスライスの法面オフセット後の輪郭に対して行う(getYamadomeMmPolygon/
     // clipContourToYamadome 参照)。
   }
+  // r003: 上記モード別調整から除外しておいた既存躯体(グレー)をここで合流。
+  // 自己交差チェックなど、色を問わず必要な後続処理はここから先で通常通り適用される。
+  fs = fs.concat(_grayFsUntouched);
   // r013: 自己交差の事前検出（第二段：計算モード別の最終OD/D/noSlopeが
   // 確定した後の本判定）。ここまでのfsは、mode==='doboku'ならnoSlope強制
   // false・OD=globalOD、mode==='normal'ならOD=0等の上書きが全て適用済み。
@@ -1909,19 +1950,26 @@ async function runCalc(mode){
       return;
     }
   }
-  // 新3(2026-08-28 引継ぎ18回目マスター指示): 毎回出る「値は参考値です」トーストは
-  // res-box常設の.vol-cautionに一本化するため廃止。代わりに、土量計算でグレー
-  // (垂直面強制)オブジェクトが存在する場合のみ、起動(ページ読み込み)毎に1回だけ
-  // 目立つ横長トーストで注意喚起する。
-  if(mode==='doboku' && !_grayCalcWarnShown && fs.some(f=>f.color==='gray')){
-    _grayCalcWarnShown = true;
-    toast('グレー色に設定したオブジェクトは強制的に垂直面となります。', 4800, true);
+  // 新3(2026-08-28 引継ぎ18回目マスター指示→26回目セッションで紫に移設): 毎回出る
+  // 「値は参考値です」トーストはres-box常設の.vol-cautionに一本化するため廃止。
+  // 代わりに、土量計算で紫(垂直面強制)オブジェクトが存在する場合のみ、起動
+  // (ページ読み込み)毎に1回だけ目立つ横長トーストで注意喚起する。
+  if(mode==='doboku' && !_purpleCalcWarnShown && fs.some(f=>f.color==='purple')){
+    _purpleCalcWarnShown = true;
+    toast('紫色に設定したオブジェクトは強制的に垂直面となります。', 4800, 'large');
     await new Promise(r=>setTimeout(r,50));
   }
 
   try{
-    const singleVols=fs.map(f=>mm3ToM3(singleFrustumVolumeMm3(f)));
-    const sumM3=singleVols.reduce((s,v)=>s+v,0);
+    // 26回目セッション新規: 「単独合計」表は掘削オブジェクトの重複具合を見るための
+    // 指標。既存躯体(グレー)は掘削対象ではなく、余掘り・法面も適用されない
+    // (仕様: 描いた形状そのまま)ため、そのまま f.OD/f.noSlope を使うと
+    // (特に土量計算モードでは紫だけがnoSlope強制になったことで)グレーが
+    // 法面付き掘削体積として単独合計に混入し、重複削減率が歪む。行の表示自体は
+    // 「その既存躯体の実体積」として意味があるので残しつつ、OD:0・noSlope:true
+    // (=既存躯体の正しい体積規約)で計算し直し、単独合計・重複削減率の集計からは除外する。
+    const singleVols=fs.map(f=> mm3ToM3(singleFrustumVolumeMm3(f.color==='gray' ? {...f, noSlope:true, OD:0} : f)));
+    const sumM3=fs.reduce((s,f,i)=> f.color==='gray' ? s : s+singleVols[i], 0);
 
     const result=await buildUnionFrustumGeometry(fs, _yamadomeOffsetX, _yamadomeOffsetY);
     if(result.error) throw new Error(result.error);
@@ -1931,6 +1979,7 @@ async function runCalc(mode){
     const ratio   = sumM3 > 0 ? (overM3 / sumM3 * 100) : 0;
 
     _lastGeoms = result.unionGeoms;
+    _lastExistingStructGeoms = result.existingStructGeoms || [];
 
     // r010: VoldiaM側で見つかった体積計算バグ(Math.abs()による穴符号消失/
     // holesMm無視)の修正・移植を確認できたため、土量計算も実数値表示に復活。
@@ -2026,8 +2075,10 @@ let threeR=null,threeS=null,threeC=null,threeAnim=null;
 let threeGrid=null; // r035: 基準高さ(GL=y0)メッシュ表示ON/OFF用の参照保持
 let orTh=0.6,orPh=0.65,orR=50,orCX=0,orCY=0,orCZ=0;
 let drag3=null,pan3=null;
-const F_COLORS3=[0x00e5ff,0xff9100,0x69f0ae,0xff5252,0xe040fb,0x18ffff,0xffab40,0x82b1ff];
-const SHAPE_COLORS_3D={blue:0x00c8ff, green:0x00dc64, yellow:0xdcc800, purple:0xb43cff};
+// 26回目セッション新規: 従来grayは未定義でblueにフォールバックしていた(バグ)。
+// 「既存躯体」機能で3D表示に常時グレーを使うため新規追加。#909090は仮値、
+// マスター実機確認後に微調整の可能性あり。
+const SHAPE_COLORS_3D={blue:0x00c8ff, green:0x00dc64, yellow:0xdcc800, purple:0xb43cff, gray:0x909090};
 const S=0.001; // mm→m
 
   // ★ v0.0016 根治修正: THREE.EdgesGeometryは内部でエッジ配列をソートしており、
@@ -2163,16 +2214,30 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   // 1.【元オブジェクト消去】古い躯体形状(四角)を非表示化
   _initThreeBase([], frustums);
 
+  // 26回目セッション新規: 既存躯体(グレー)は掘削キャビティのunion/押し出し
+  // パイプラインには参加させず、常時グレーの独立ブロックとして別途表示する。
+  // (地雷回避: buildManifoldUnionGeom/buildSimpleExtrudeGeom内部の重複ヘルパー
+  // 群には一切手を入れず、こちらの呼び出し元側でfrustumsを絞るだけに留める)
+  const excavFrustumsForMesh = frustums.filter(f => f.color !== 'gray');
+  const structFrustumsForMesh = frustums.filter(f => f.color === 'gray');
+
   // 2. 新・法面外皮（TINメッシュデータ）を呼び出し
   // r035: 課題②対応 — 通常計算(isDoboku=false)は土量計算専用の
   // buildManifoldUnionGeomではなく、独立押し出しジオメトリの
   // buildSimpleExtrudeGeomに分岐させる（土量計算側は無改変）。
   console.log('[CP-5] buildManifoldUnionGeom 呼び出し直前');
-  let result = isDoboku
-    ? await buildManifoldUnionGeom(frustums, isDoboku, yamadomeOffsetX, yamadomeOffsetY)
-    : await buildSimpleExtrudeGeom(frustums);
+  let result = excavFrustumsForMesh.length
+    ? (isDoboku
+        ? await buildManifoldUnionGeom(excavFrustumsForMesh, isDoboku, yamadomeOffsetX, yamadomeOffsetY)
+        : await buildSimpleExtrudeGeom(excavFrustumsForMesh))
+    : null;
   console.log('[CP-6] buildManifoldUnionGeom/buildSimpleExtrudeGeom 呼び出し直後 result=', !!result);
-  if(!result) return;
+  // 26回目セッション新規: 掘削対象オブジェクトが1つも無く(全て既存躯体のみ)、
+  // resultがnullでも、既存躯体だけは表示できるよう空の器で処理を継続する。
+  if(!result){
+    if(!structFrustumsForMesh.length) return;
+    result = { positions: new Float32Array(0), cyanIndices: new Uint32Array(0), redIndices: new Uint32Array(0) };
+  }
 
   const pos = result.positions;
   let cyanIdxFinal = result.cyanIndices;
@@ -2232,6 +2297,30 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
     const posMm = new Float32Array(finalPos.length);
     for(let i = 0; i < finalPos.length; i++) posMm[i] = finalPos[i] / S_CONV; // m → mm
     _lastGeoms = [{ positions: posMm, indices: mergedIdx }];
+  }
+
+  // 26回目セッション新規: 既存躯体(グレー)は配置モードの地面/躯体GLBにも
+  // 含める(マスター指示: 体積とは無関係、通常の地面や躯体を表示するのと同じ
+  // 段階でオブジェクトを作るだけでよい)。ただし_lastGeoms(掘削シェル本体)には
+  // 混ぜない — r051のVoldia_FixedObjects分離と同じ理由(既存躯体は掘削シェルと
+  // 接続しない独立ソリッドのため、配置モード側の境界ループ検出の辺カウントを
+  // 狂わせる)。完全に別変数_lastExistingStructGeomsに保持し、GLB出力時に
+  // 専用ノード(Voldia_ExistingStructure)として分離出力する。
+  if(structFrustumsForMesh.length){
+    const esPositionsMm = [];
+    const esIndicesMm = [];
+    structFrustumsForMesh.forEach(f=>{
+      const {positions: p, indices: idx} = buildFrustumGeometry({...f, noSlope:true, OD:0});
+      if(!p || !p.length || !idx || !idx.length) return;
+      const base = esPositionsMm.length / 3;
+      for(let i=0;i<p.length;i++) esPositionsMm.push(p[i]);
+      for(let i=0;i<idx.length;i++) esIndicesMm.push(idx[i]+base);
+    });
+    _lastExistingStructGeoms = esPositionsMm.length
+      ? [{ positions: new Float32Array(esPositionsMm), indices: new Uint32Array(esIndicesMm) }]
+      : [];
+  } else {
+    _lastExistingStructGeoms = [];
   }
 
   // r065: cyanGeo/redGeoを別々にcomputeVertexNormals()すると、cyan/red境界にある
@@ -2305,7 +2394,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   window._lastYamadomeRealYTop = result.yamadomeRealYTop;
   window._lastYamadomeRealYBot = result.yamadomeRealYBot;
   window._lastYamadomeBatterDeg = result.yamadomeBatterDeg;
-  window._lastGrayWalls = result.grayWallsForPlacement || null; // 6D配置モード反映用
+  window._lastPurpleWalls = result.purpleWallsForPlacement || null; // 6D配置モード反映用
   let redMesh = null;
   if(_ydOv && _ydOv.positions.length > 0){
     const redGeo = new THREE.BufferGeometry();
@@ -2326,11 +2415,11 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   }
   console.log('[CP-14] redMesh 生成完了 (山留あり=', !!redMesh, ')');
 
-  // 6D(2026-08-28 引継ぎ18回目): グレー(強制垂直)オブジェクトの壁面ハッチ。
+  // 6D(2026-08-28 引継ぎ18回目): 紫(強制垂直)オブジェクトの壁面ハッチ。
   // 山留のredMeshと全く同じ構築パターン(同じハッチテクスチャ・同じ
-  // マテリアル設定)を流用し、result.grayWallOverlayからMeshを作る。
-  const _gwOv = result.grayWallOverlay;
-  let grayWallMesh = null;
+  // マテリアル設定)を流用し、result.purpleWallOverlayからMeshを作る。
+  const _gwOv = result.purpleWallOverlay;
+  let purpleWallMesh = null;
   if(_gwOv && _gwOv.positions.length > 0){
     const gwGeo = new THREE.BufferGeometry();
     gwGeo.setAttribute('position', new THREE.BufferAttribute(_gwOv.positions, 3));
@@ -2343,17 +2432,82 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
       depthWrite: _sldrVal >= 0.99,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
     });
-    grayWallMesh = new THREE.Mesh(gwGeo, _gwMat);
-    grayWallMesh.userData.hatchMap = _hatchTex;
+    purpleWallMesh = new THREE.Mesh(gwGeo, _gwMat);
+    purpleWallMesh.userData.hatchMap = _hatchTex;
   }
-  console.log('[CP-14b] grayWallMesh 生成完了 (グレーあり=', !!grayWallMesh, ')');
+  console.log('[CP-14b] purpleWallMesh 生成完了 (紫あり=', !!purpleWallMesh, ')');
 
-
+  // 26回目セッション新規: 既存躯体(グレー)ブロックを1つの結合メッシュとして生成。
+  // 「余掘り・法面・捨てコン+砕石は無視、描いた形状そのまま(天端・下端含む)」
+  // の仕様どおり、各フラスタムをnoSlope:true・OD:0で上書きしてから
+  // buildFrustumGeometry()に渡す(既存のフラスタム押し出しロジックをそのまま流用、
+  // 新規の3D生成コードは書かない=地雷回避)。
+  // 26回目セッション実機バグ修正: 初回実機確認でrender()が毎フレーム
+  // 「bufferData: src: Cannot be null」で落ちる不具合が発覚。redMesh/
+  // purpleWallMeshと違いuv属性を付けていなかった点、および空データ時の
+  // ガードが甘かった点を疑い、同じ防御(uv属性付与・try/catch)に揃えた。
+  let existingStructMesh = null;
+  if(structFrustumsForMesh.length){
+    try {
+      const esPositions = [];
+      const esIndices = [];
+      structFrustumsForMesh.forEach(f=>{
+        const {positions: p, indices: idx} = buildFrustumGeometry({...f, noSlope:true, OD:0});
+        if(!p || !p.length || !idx || !idx.length) return;
+        const base = esPositions.length / 3;
+        for(let i=0;i<p.length;i++) esPositions.push(p[i]*S_CONV);
+        for(let i=0;i<idx.length;i++) esIndices.push(idx[i]+base);
+      });
+      console.log('[CP-14c-pre] existingStructMesh用データ: 頂点数=', esPositions.length/3, ' index数=', esIndices.length);
+      if(esPositions.length > 0 && esIndices.length > 0){
+        const esGeo = new THREE.BufferGeometry();
+        esGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(esPositions), 3));
+        // redMesh/purpleWallMeshと同様、uv属性も明示的に付与しておく(ダミー値でよい。
+        // mapは使わないが、シェーダ側の#ifdef USE_UV分岐との整合を他メッシュに揃える)。
+        esGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array((esPositions.length/3)*2), 2));
+        // r002根治修正: setIndex()はJS配列(Array.isArray===true)しか自動でBufferAttribute化しない。
+        // Uint32Array等のTypedArrayを直接渡すとgeometry.indexが生配列のままになり、
+        // レンダラーがindex.onUploadCallback等のBufferAttribute専用プロパティを参照できず
+        // 「Uncaught TypeError: e.onUploadCallback is not a function」で毎フレーム描画に失敗する。
+        // (このファイル内の他のsetIndex呼び出し箇所は元からBufferAttributeでラップ済みだった)
+        esGeo.setIndex(new THREE.BufferAttribute(new Uint32Array(esIndices), 1));
+        esGeo.computeVertexNormals();
+        const esMat = new THREE.MeshPhongMaterial({
+          color: SHAPE_COLORS_3D.gray, opacity: 1, transparent: false, side: THREE.DoubleSide
+        });
+        existingStructMesh = new THREE.Mesh(esGeo, esMat);
+        // r005: マスター提案の対策。既存躯体の天端が掘削シェルの段差・法面頂部と
+        // 高さ方向で完全一致すると、掘削側の輪郭線(navyEdges)が既存躯体の面と
+        // 同一平面に来てしまい、あたかも躯体の上に線が乗っているように見える
+        // (候補①、山留の天端で実際に再現・確認済み)。ここは表示専用のThree.js
+        // Mesh位置(position)を1mmだけ持ち上げるだけで、esPositions/esIndices
+        // 自体(体積計算・GLB出力データ、_lastExistingStructGeomsは別途独立して
+        // structFrustumsForMeshから再計算されるため無関係)は一切変更しない。
+        // r008: マスターが実機で確認(カメラをどの角度に回しても常に張り付いて見える)、
+        // 掘削シェルの頂点が既存躯体の天端面と1点で座標一致していることによる本物の
+        // z-fighting(奥行き競合)だと確定した。1mm(0.001)では、このシーンの標準的な
+        // カメラ距離(orR≈50)における深度バッファの精度に対して不十分だったため、
+        // 20mm(0.02)まで増量。既存躯体1個のスケールに対しては誤差レベルで視認できない
+        // はずだが、深度バッファのz-fightingを確実に避けるには必要な量。
+        existingStructMesh.position.y += 0.02;
+      }
+    } catch(e) {
+      console.error('[既存躯体メッシュ生成エラー]', e);
+      existingStructMesh = null;
+    }
+  }
+  console.log('[CP-14c] existingStructMesh 生成完了 (既存躯体あり=', !!existingStructMesh, ')');
 
   // 透過スライダー用にマテリアル参照を更新、スライダー表示
-  // 6D: grayWallMeshも山留redMeshと同様に配列へ追加し、透過スライダー/
+  // 6D: purpleWallMeshも山留redMeshと同様に配列へ追加し、透過スライダー/
   // ソリッド⇔グラデ切替が同じように効くようにする。
-  const _extraMeshes = [redMesh, grayWallMesh].filter(Boolean);
+  // 26回目セッション新規: existingStructMeshは_extraMeshesに含めない。理由:
+  // toggleMeshSolid()のsolidColors/origColorsが3要素決め打ち配列で、4要素目
+  // (既存躯体)が来ると配列外参照でフォールバック色になったり、グラデモードは
+  // vertexColors:trueを前提とするが既存躯体側には頂点カラーを設定していない
+  // ため表示が壊れる(地雷)。既存躯体は「常にグレーの独立表示」という仕様通り、
+  // スライダー/ソリッド切替の対象外として扱う。
+  const _extraMeshes = [redMesh, purpleWallMesh].filter(Boolean);
   _meshMaterials = [_cyanMat, ..._extraMeshes.map(m=>m.material)];
   _meshObjs = [cyanMesh, ..._extraMeshes]; // r038: ソリッド⇔グラデ切替時のマテリアル差し替え用
   window._meshSolidMode = false; // グラデがデフォルト
@@ -2383,6 +2537,14 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   // そのまま維持されるため、万一超過してもクラッシュはせずエッジ線省略で済む)。
   const _edgeBaseGeo = computeEdgesGeometrySafeGuarded(edgesGeo, 20, 30000);
   console.log('[CP-16] computeEdgesGeometrySafeGuarded 完了 edge頂点数=', _edgeBaseGeo.attributes.position.count);
+
+  // r003で「既存躯体バウンディングボックス内部に収まる線分を間引く」対策を試みたが、
+  // 実座標ログ(r007診断)で検証した結果、掘削シェルの頂点が既存躯体の天端面と
+  // 1点だけで座標一致しており、線分がボックス内部に収まるケース自体が存在しない
+  // (＝この間引き方式では原理的に対応できない)ことが判明したため撤去。
+  // r008: マスターが実機で全方位から確認し、視点に依存しない本物のz-fighting
+  // (奥行き競合)と確定。対策は既存躯体メッシュ側の表示専用オフセット(下記
+  // existingStructMesh.position.y、20mm)に一本化。
   const _edgeMat = new THREE.LineBasicMaterial({
     color: 0x0a1a3a,   // ディープネイビー（暖色面との対比強化）
     transparent: true,
@@ -2400,8 +2562,21 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   // 擬似太線レイヤー（中心から法線方向に微小押し出し　＝　頂点法線を使わずスケールで近似）
   const _edgeMat2 = _edgeMat.clone();
   _edgeMat2.opacity = 0.6;
-  const navyEdgesThick = new THREE.LineSegments(_edgeBaseGeo, _edgeMat2);
-  navyEdgesThick.scale.set(1.0015, 1.0015, 1.0015); // ごく僅かに拡大して輪郭を太く見せる
+  // r002改修: 従来は navyEdgesThick.scale.set() をワールド原点(0,0,0)基準で適用していたため、
+  // 敷地の描画座標が原点から離れているほど(実案件では原点から数十m離れることが普通)、
+  // スケール分の位置ズレが大きくなり(距離×0.15%)、輪郭線が本来の位置から数cm単位で
+  // 浮いて見える不具合の一因になっていた(既存躯体オブジェクトの直近にズレた線が
+  // 「乗って見える」現象と一致する可能性が高い)。ジオメトリ自身の重心(センター)を
+  // 基準にスケールするよう、複製ジオメトリを重心分だけ原点へ寄せてからobject側の
+  // position.copy(center)で元の位置に戻す方式に変更。距離に依存しない正しい太線化になる。
+  const _edgeBox = new THREE.Box3().setFromBufferAttribute(_edgeBaseGeo.attributes.position);
+  const _edgeCenter = new THREE.Vector3();
+  _edgeBox.getCenter(_edgeCenter);
+  const _edgeThickGeo = _edgeBaseGeo.clone();
+  _edgeThickGeo.translate(-_edgeCenter.x, -_edgeCenter.y, -_edgeCenter.z);
+  const navyEdgesThick = new THREE.LineSegments(_edgeThickGeo, _edgeMat2);
+  navyEdgesThick.position.copy(_edgeCenter);
+  navyEdgesThick.scale.set(1.0015, 1.0015, 1.0015); // ごく僅かに拡大して輪郭を太く見せる(重心基準)
   navyEdgesThick.renderOrder = 1;
   edgeGroup.add(navyEdgesThick);
   _edgeMaterials = [_edgeMat, _edgeMat2]; // r038: 透過スライダー連動用に参照保持
@@ -2411,7 +2586,8 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   const group = new THREE.Group();
   group.add(cyanMesh);
   if(redMesh) group.add(redMesh);
-  if(grayWallMesh) group.add(grayWallMesh);
+  if(purpleWallMesh) group.add(purpleWallMesh);
+  if(existingStructMesh) group.add(existingStructMesh);
   group.add(edgeGroup);
   threeS.add(group);
   console.log('[CP-18] threeS.add(group) 完了');
@@ -2618,60 +2794,29 @@ function _setupAreaPickOnDblClick(cv, camera, scene, mesh, pos, idx){
   cv.addEventListener('mousedown', clearHandler);
 }
 
-// 法線角度変化が急峻（15度以上）な頂点を正しく仕分けるためのヘルパー関数よ
-function getSharpEdgeVertices(geo, thresholdAngleDeg = 15) {
-  const pos = geo.attributes.position.array;
-  const idx = geo.index.array;
-  const numTris = idx.length / 3;
-  const triNormals = [];
-  
-  for (let i = 0; i < numTris; i++) {
-    const a = idx[i * 3] * 3;
-    const b = idx[i * 3 + 1] * 3;
-    const c = idx[i * 3 + 2] * 3;
-    const ux = pos[b] - pos[a], uy = pos[b+1] - pos[a+1], uz = pos[b+2] - pos[a+2];
-    const vx = pos[c] - pos[a], vy = pos[c+1] - pos[a+1], vz = pos[c+2] - pos[a+2];
-    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    const len = Math.sqrt(nx*nx + ny*ny + nz*nz);
-    triNormals.push(len < 1e-8 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(nx/len, ny/len, nz/len));
-  }
-  
-  const edgeToTris = new Map();
-  for (let i = 0; i < numTris; i++) {
-    const v0 = idx[i * 3], v1 = idx[i * 3 + 1], v2 = idx[i * 3 + 2];
-    const addE = (va, vb, tIdx) => {
-      const key = va < vb ? `${va}_${vb}` : `${vb}_${va}`;
-      if (!edgeToTris.has(key)) edgeToTris.set(key, []);
-      edgeToTris.get(key).push(tIdx);
-    };
-    addE(v0, v1, i); addE(v1, v2, i); addE(v2, v0, i);
-  }
-  
-  const sharpVerts = new Set();
-  const cosThreshold = Math.cos(thresholdAngleDeg * Math.PI / 180);
-  
-  for (const [key, tris] of edgeToTris.entries()) {
-    const [v1Str, v2Str] = key.split('_');
-    const v1 = parseInt(v1Str), v2 = parseInt(v2Str);
-    if (tris.length === 1) {
-      sharpVerts.add(v1); sharpVerts.add(v2);
-    } else if (tris.length === 2) {
-      if (triNormals[tris[0]].dot(triNormals[tris[1]]) < cosThreshold) {
-        sharpVerts.add(v1); sharpVerts.add(v2);
-      }
-    }
-  }
-  return sharpVerts;
-}
-
 function _initThreeBase(objects,frustums){
   disposeThree();
   const pane=document.getElementById('c3d-pane');if(!pane||!window.THREE)return;
   const W=pane.clientWidth,H=pane.clientHeight;
-  threeR=new THREE.WebGLRenderer({antialias:true});
+  // r010根治修正: near/far比率の縮小(r009)だけでは、実際の敷地スケール(数十m)での
+  // 深度精度不足を解消しきれなかった(マスター実機確認: 中距離でもまだz-fighting発生)。
+  // near/farを数値でいじり続けるのは対症療法的なので、Three.js側が公式に提供している
+  // 「対数深度バッファ」に切り替える。これはnear/far比が大きいシーンでの深度精度不足を
+  // 解決するための標準機能で、通常の(線形/1÷z型の)深度バッファと違い、カメラからの
+  // 距離に対してより均等に精度を配分できる。z-fightingへの本質的な対策になるはず。
+  threeR=new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer:true});
   threeR.setPixelRatio(Math.min(devicePixelRatio,2));threeR.setSize(W,H);threeR.setClearColor(0x06080c);
   pane.appendChild(threeR.domElement);
-  threeS=new THREE.Scene();threeC=new THREE.PerspectiveCamera(45,W/H,.001,1e6);
+  // r009根治修正: マスターがカメラ距離依存(遠いと線が出る・近づくと消える)を実機確認、
+  // これは既存躯体との1点z-fighting(r008)そのものではなく、カメラのnear/far設定
+  // (near=0.001, far=1e6 → 比率10億:1)が原因の深度バッファ精度不足だったと判明。
+  // near/farの比率が大きいほど、特に遠距離でのZ値の実効精度が急激に悪化する
+  // (パースペクティブ投影の深度バッファは非線形で、遠いほど1刻みが粗くなる)。
+  // 実際の現場データは数十〜数百mスケールで収まるため、near=0.01(1cm)・
+  // far=100000(100km、通常ありえないレベルまで余裕を持たせた値)に縮小し、
+  // 比率を10億:1→1000万:1(約100倍改善)にした。ズームイン下限(orR最小0.001)
+  // は変更していないため、実用上ズームインし過ぎて近接クリップされることは無いはず。
+  threeS=new THREE.Scene();threeC=new THREE.PerspectiveCamera(45,W/H,.01,1e5);
   threeS.add(new THREE.AmbientLight(0xffffff,.45));
   const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(1,2,1).normalize();threeS.add(dl);
   objects.forEach(o=>threeS.add(o));
@@ -2717,7 +2862,42 @@ function _initThreeBase(objects,frustums){
     threeAnim = requestAnimationFrame(loop);
     if(threeR && document.getElementById('calc-modal').classList.contains('show')){
       _sortTransparentTriangles();
-      threeR.render(threeS, threeC);
+      try{
+        threeR.render(threeS, threeC);
+      }catch(renderErr){
+        // r002: render()内で予期しない例外が出た場合の安全装置(特定バグ用の対処療法ではなく、
+        // 「毎フレーム例外を吐き続けてブラウザがフリーズする」事態そのものを防ぐ汎用ガード)。
+        // 原因調査用に各メッシュのBufferAttributeが正規のインスタンスか診断ログを出し、
+        // それ以上render()を呼ばないようループを止める。
+        console.error('[RENDER-CRASH] threeR.render()で例外発生。ループを停止します:', renderErr);
+        if(threeS){
+          threeS.traverse(function(obj){
+            if(!obj.isMesh || !obj.geometry) return;
+            const geo = obj.geometry;
+            const info = {};
+            ['position','uv','normal'].forEach(function(name){
+              const attr = geo.getAttribute(name);
+              info[name] = attr ? {
+                isBufferAttribute: attr.isBufferAttribute===true,
+                arrayIsTypedArray: ArrayBuffer.isView(attr.array),
+                count: attr.count,
+                arrayLength: attr.array ? attr.array.length : null,
+                itemSize: attr.itemSize
+              } : '(なし)';
+            });
+            const idx = geo.index;
+            info.index = idx ? {
+              isBufferAttribute: idx.isBufferAttribute===true,
+              arrayIsTypedArray: ArrayBuffer.isView(idx.array || idx),
+              count: idx.count,
+              arrayLength: (idx.array || idx).length
+            } : '(なし)';
+            console.error('[RENDER-CRASH] mesh=', obj.name || '(no name)', info);
+          });
+        }
+        if(threeAnim){ cancelAnimationFrame(threeAnim); threeAnim=null; }
+        console.error('[RENDER-CRASH] アニメーションループを停止しました。上記ログを開発者に共有してください。');
+      }
     }
   })();
 }
@@ -2856,14 +3036,6 @@ function screenshotCalc3D(){
     toast('⚠️ スクリーンショットの保存に失敗しました');
   }
 }
-// ────────────────────────────────────────────────────────────────
-//  Manifold Union メッシュ生成
-// ────────────────────────────────────────────────────────────────
-async function getManifold(){
-  if(_manifoldModule) return _manifoldModule;
-  return await loadManifold();
-}
-
 // ────────────────────────────────────────────────────────────────
 //  buildManifoldUnionGeom v0.0010
 //  【Vertex-First Triangle Fill 方式】
@@ -3005,7 +3177,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r001(base:VoldiaM r069)";
+const VOLDIA3D_VER = "Voldia-3D-r010(base:VoldiaM r069)";
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -3689,12 +3861,12 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   // (隣接オブジェクトの生外形までの距離を推測して隠れる高さを逆算する方式)は
   // オブジェクトが増えると破綻する対症療法だったため全廃。Manifoldの
   // originalID()追跡機能(既存の山留クリップで実績あり)を流用し、「union後の
-  // どの三角形がグレーfrustum由来か」を幾何的推測なしに直接判定する方式に変更。
+  // どの三角形が紫frustum由来か」を幾何的推測なしに直接判定する方式に変更。
   // これにより、Union計算自体が正しく処理した「隣接オブジェクトに隠れて消える
   // 面」の判定をそのまま流用でき、新しい面を計算し直す必要が無くなる。
-  const grayOriginalIDs = new Set();
-  const grayTriPos = []; // 6D-6: try/finally境界をまたいで後段(_ret構築)から参照するため外側で宣言
-  const grayTriUv = [];
+  const purpleOriginalIDs = new Set();
+  const purpleTriPos = []; // 6D-6: try/finally境界をまたいで後段(_ret構築)から参照するため外側で宣言
+  const purpleTriUv = [];
   try {
     frustums.forEach((f, i) => {
       const meshDatas = buildCappedFrustumMesh(f); // r068: 配列(通常は要素数1)
@@ -3709,7 +3881,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
         // manifold-3d@3.5.1してWASMを直接動かし検証した結果、new Manifold(new
         // Mesh(meshData))のように生メッシュから直接構築した場合、man.originalID()
         // は常に-1を返す(まだ内部的に「original」として確定していない扱いになる)
-        // ことが判明した。これでは6D-6のgrayOriginalIDs追跡が機能しない
+        // ことが判明した。これでは6D-6のpurpleOriginalIDs追跡が機能しない
         // (実際、これが「山留テクスチャが表示されなくなった」不具合の直接原因)。
         // 正しい方法はManifold.reserveIDs()で事前にIDを予約し、meshDataの
         // runOriginalID/runIndexとして明示的に埋め込んでから構築すること。
@@ -3724,7 +3896,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           const label = meshDatas.length>1 ? ('frustum'+i+'-slice'+j) : ('frustum'+i);
           console.warn('[MANIFOLD] ' + label + 'の単体メッシュがwatertightでない可能性: status=' + man.status());
         }
-        if(f.color==='gray') grayOriginalIDs.add(reservedID);
+        if(f.color==='purple') purpleOriginalIDs.add(reservedID);
         manifoldObjs.push(man);
       });
     });
@@ -3753,7 +3925,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           const realYTop = maxTop, realYBot = minBot; // 実際の掘削範囲(安全マージン抜き)
           // 6D-2は撤回(2026-08-29 引継ぎ18回目マスター指摘): 「山留を壁面のある
           // 所で止めてほしい」という要望は、本物の山留オブジェクトの話ではなく
-          // グレー垂直面に貼る山留ハッチテクスチャ(6D)の高さの話だった。本物の
+          // 紫垂直面に貼る山留ハッチテクスチャ(6D)の高さの話だった。本物の
           // 山留オブジェクトはGL(realYTop=全frustum中の最大値)まで一律に伸びるのが
           // 正しい挙動(安全のため、実際の掘削が浅い区間があってもシートは地表まで
           // 連続しているべき)。頂点ごとに最寄りの壁の高さへ短縮する変更は誤った
@@ -3829,7 +4001,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     // 山留クリップ自体(実際の形状のカット)は上のManifold.intersectionで
     // 完了済みなので、以降は単純に全三角形をcyanIdxへ積むだけでよい。
     //
-    // 6D-6(2026-08-29 引継ぎ18回目マスター指示): グレー壁面ハッチ用に、
+    // 6D-6(2026-08-29 引継ぎ18回目マスター指示): 紫壁面ハッチ用に、
     // resultMesh.runIndex/runOriginalIDから「三角形i番目はどのoriginalID由来か」
     // を引けるテーブルを作る。union/intersectionを経てもManifoldがこの対応を
     // 保持してくれるため、幾何的な再推測は一切不要。
@@ -3841,7 +4013,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
         for(let t=triStart;t<triEnd;t++) triOriginalID[t]=roid[r];
       }
     }
-    // (grayTriPos/grayTriUvは関数スコープ側で宣言済み。ここではpushのみ行う)
+    // (purpleTriPos/purpleTriUvは関数スコープ側で宣言済み。ここではpushのみ行う)
     let removedDegenerate = 0; // r095(item12): 量子化で潰れた縮退三角形の除外カウント
     for(let i=0;i<tv.length;i+=3){
       const i0=tv[i], i1=tv[i+1], i2=tv[i+2];
@@ -3863,10 +4035,10 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       // なる向きがそもそも正しい(理屈より実機確認を優先すること)。
       cyanIdx.push(gi0, gi1, gi2);
 
-      // 6D-6: この三角形がグレーfrustum由来か判定。由来かつ「垂直」(=法線が
+      // 6D-6: この三角形が紫frustum由来か判定。由来かつ「垂直」(=法線が
       // ほぼ水平、Y成分が小さい)なら、実際にUnionが計算した本物の壁面として
       // ハッチオーバーレイの元データに採用する。
-      if(grayOriginalIDs.has(triOriginalID[i/3])){
+      if(purpleOriginalIDs.has(triOriginalID[i/3])){
         const ax=pos[i0*3],ay=pos[i0*3+1],az=pos[i0*3+2];
         const bx=pos[i1*3],by=pos[i1*3+1],bz=pos[i1*3+2];
         const cx=pos[i2*3],cy=pos[i2*3+1],cz=pos[i2*3+2];
@@ -3893,18 +4065,18 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           // 上から覗き込む」表示のため面の向きが直感と逆になっており、この三角形
           // の法線(u×v)は実体側を向いている。空洞側(すり鉢の内側、見える面)に
           // 貼るには符号を反転させる必要がある。
-          const GRAY_HATCH_CLEAR = -0.01; // 1cm。空洞側(内側)へ少し前に出してZファイティング回避
-          const ax2=ax+nx*GRAY_HATCH_CLEAR, ay2=ay+ny*GRAY_HATCH_CLEAR, az2=az+nz*GRAY_HATCH_CLEAR;
-          const bx2=bx+nx*GRAY_HATCH_CLEAR, by2=by+ny*GRAY_HATCH_CLEAR, bz2=bz+nz*GRAY_HATCH_CLEAR;
-          const cx2=cx+nx*GRAY_HATCH_CLEAR, cy2=cy+ny*GRAY_HATCH_CLEAR, cz2=cz+nz*GRAY_HATCH_CLEAR;
+          const PURPLE_HATCH_CLEAR = -0.01; // 1cm。空洞側(内側)へ少し前に出してZファイティング回避
+          const ax2=ax+nx*PURPLE_HATCH_CLEAR, ay2=ay+ny*PURPLE_HATCH_CLEAR, az2=az+nz*PURPLE_HATCH_CLEAR;
+          const bx2=bx+nx*PURPLE_HATCH_CLEAR, by2=by+ny*PURPLE_HATCH_CLEAR, bz2=bz+nz*PURPLE_HATCH_CLEAR;
+          const cx2=cx+nx*PURPLE_HATCH_CLEAR, cy2=cy+ny*PURPLE_HATCH_CLEAR, cz2=cz+nz*PURPLE_HATCH_CLEAR;
           // UV: 法線と鉛直(0,1,0)から水平方向の接線を作り、それに沿った距離をUに、
           // 高さYをVにする(縦縞ハッチと同じ0.4m周期)。
           let tx=-nz, tz=nx; // (0,1,0)×normalの水平成分 = (-nz,0,nx)
           const tlen=Math.hypot(tx,tz)||1;
           tx/=tlen; tz/=tlen;
           const STRIPE_W=0.4;
-          grayTriPos.push(ax2,ay2,az2, bx2,by2,bz2, cx2,cy2,cz2);
-          grayTriUv.push(
+          purpleTriPos.push(ax2,ay2,az2, bx2,by2,bz2, cx2,cy2,cz2);
+          purpleTriUv.push(
             (ax*tx+az*tz)/STRIPE_W, ay/STRIPE_W,
             (bx*tx+bz*tz)/STRIPE_W, by/STRIPE_W,
             (cx*tx+cz*tz)/STRIPE_W, cy/STRIPE_W
@@ -3913,7 +4085,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       }
     }
     console.log(`[MANIFOLD] union後三角形=${tv.length/3} 蓋除去=${removedCap} 縮退除去=${removedDegenerate} 最終三角形=${cyanIdx.length/3}`);
-    console.log(`[GRAY-WALL] Manifold ID追跡による実面採用: ${grayTriPos.length/9}三角形`);
+    console.log(`[PURPLE-WALL] Manifold ID追跡による実面採用: ${purpleTriPos.length/9}三角形`);
 
     // r066: GL面の内部の穴（ドーナツ状にオブジェクトを配置した際、外周とは
     // 繋がっていない未着手ゾーンとして残る開口）を、基準高さ±0(GL)で自動的に
@@ -4053,22 +4225,22 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   }
   console.log('[CP-3] buildManifoldUnionGeom finally 完了');
 
-  // 6D-6(2026-08-29 引継ぎ18回目マスター指示・根本修正): グレー壁面ハッチは
-  // 上のcap除去ループで既にManifoldのID追跡により実際に収集済み(grayTriPos/
-  // grayTriUv)。ここでは単純にFloat32Arrayへ変換するだけでよい。2Dヒューリス
+  // 6D-6(2026-08-29 引継ぎ18回目マスター指示・根本修正): 紫壁面ハッチは
+  // 上のcap除去ループで既にManifoldのID追跡により実際に収集済み(purpleTriPos/
+  // purpleTriUv)。ここでは単純にFloat32Arrayへ変換するだけでよい。2Dヒューリス
   // ティックによる「隠れる高さ」の再計算は一切行わない(実際にUnionが計算した
   // 本物の面をそのまま採用しているため、隣接オブジェクトの形状がどれだけ複雑
   // でも常に正しい)。
-  let _grayWallOverlay = null;
-  let _grayWallsForPlacement = null; // 配置モード反映用(2026-08-29 引継ぎ18回目マスター指示)
-  if(grayTriPos.length > 0){
-    const positions = new Float32Array(grayTriPos);
-    const uv = new Float32Array(grayTriUv);
-    _grayWallOverlay = { positions, uv };
+  let _purpleWallOverlay = null;
+  let _purpleWallsForPlacement = null; // 配置モード反映用(2026-08-29 引継ぎ18回目マスター指示)
+  if(purpleTriPos.length > 0){
+    const positions = new Float32Array(purpleTriPos);
+    const uv = new Float32Array(purpleTriUv);
+    _purpleWallOverlay = { positions, uv };
     // 配置モード送信用データ: 頂点座標は既にSC(mm→m)適用済み・frustum正規化
     // 座標系(=山留のoffsetX/offsetYと同じ基準)なので、そのまま送るだけでよい。
-    _grayWallsForPlacement = { positions, uv };
-    console.log(`[GRAY-WALL] Manifold ID追跡により ${positions.length/9} 三角形を採用`);
+    _purpleWallsForPlacement = { positions, uv };
+    console.log(`[PURPLE-WALL] Manifold ID追跡により ${positions.length/9} 三角形を採用`);
   }
 
 
@@ -4077,13 +4249,13 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     cyanIndices: new Uint32Array(cyanIdx),
     redIndices:  new Uint32Array(redIdx),
     yamadomeOverlay: _ydOverlayData, // r057: 断面ハッチ用の独立オーバーレイ(位置+UV)。無ければnull
-    grayWallOverlay: _grayWallOverlay, // 6D: グレーオブジェクトの垂直壁ハッチオーバーレイ。無ければnull
+    purpleWallOverlay: _purpleWallOverlay, // 6D: 紫オブジェクトの垂直壁ハッチオーバーレイ。無ければnull
     // 追加2(2026-08-24 引継ぎ18回目): 配置モードへ山留の実寸を送るための値。
     // yamadome無しなら全てnull。
     yamadomeRealYTop: _ydRealYTop,
     yamadomeRealYBot: _ydRealYBot,
     yamadomeBatterDeg: _ydBatterDegForMsg,
-    grayWallsForPlacement: _grayWallsForPlacement // 6D配置モード反映用(2026-08-29 引継ぎ18回目)
+    purpleWallsForPlacement: _purpleWallsForPlacement // 6D配置モード反映用(2026-08-29 引継ぎ18回目)
   };
   console.log('[CP-4] buildManifoldUnionGeom return直前 positions=', _ret.positions.length, 'cyan=', _ret.cyanIndices.length, 'red=', _ret.redIndices.length);
   return _ret;
@@ -4323,1326 +4495,3 @@ async function buildSimpleExtrudeGeom(frustums){
 }
 
 
-async function exportCSV(){
-  const sc=document.getElementById('sc-d').textContent||'未設定';
-  // v0.0013: pts をmm座標で保存（モード非依存）
-  // pxToMm(p.x) = p.x / RS / 72 * 25.4 * scaleDenom (通常)
-  // pxToMm(p.x) = p.x / 72 * 25.4 * scaleDenom (方眼紙)
-  // r013: 背景（PDF or 方眼紙）は、回転焼き込み後のpdfCvキャンバスをそのまま
-  // ラスター画像として保存する。回転(bakeRotation)は既にpdfCv自体に焼き込み
-  // 済みで元のPDFに戻って再描画する仕組みは無いため、「今キャンバスに
-  // 描画されているもの」を保存するのが最もシンプルかつ正確（PDF/方眼紙の
-  // 区別も、角度の別保存も不要になる）。
-  const bgDataURL = (pdfW && pdfH) ? pdfCv.toDataURL('image/jpeg', 0.85) : null;
-  // r013: 配置モードのオブジェクト状態も同梱する（iframeが開いていれば
-  // postMessageで取得。開いていなければ配置モードのオブジェクトは無し扱い）
-  const placementObjects = await requestPlacementState();
-  const data={
-    version:'VOLDIAM_v0.0018',
-    scale:sc,
-    scaleDenom:scaleDenom,
-    gridPaperMode: _gridPaperActive||false, // モードフラグを保存
-    concThick:( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value)),
-    // r074マスター指示: 土量計算のグローバル設定(勾配=法面角度・余掘り)もVoldファイルに保存する。
-    // concThick(捨てコン+砕石)は既にr013時点から保存済みだったが、この2つは未保存だった。
-    globalOverdig:( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value)),
-    slopeAngleDeg: (typeof slopeAngleDeg==='number' && !isNaN(slopeAngleDeg)) ? slopeAngleDeg : 45,
-    backgroundImageDataURL: bgDataURL,
-    placementObjects: placementObjects,
-    surveyPts: (surveyPts||[]).map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)})), // r024(AreCal移植): 測点もmm座標で保存
-    yamadome: (yamadome && yamadome.pts && yamadome.pts.length>=3) ? {pts: yamadome.pts.map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)}))} : null, // r037: 山留もmm座標で保存(従来保存されていなかったバグを修正)
-    northAngleDeg: (typeof northAngleDeg==='number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0, // r060: ノースアロー方位角（画面上=0°・時計回り正）
-    originSurveyIdx: (typeof originSurveyIdx==='number' && surveyPts[originSurveyIdx]) ? originSurveyIdx : null, // r060: LandXML出力用の原点測点インデックス
-    // r089(24回目・追加修正・項目5): 元図(PDFベクター)スナップ用の線データをmm座標で
-    // 保存する。従来はvecSegsが未保存だったため、Vold読込後は「元図の線を読み取る」
-    // 機能で使ったPDFファイル自体が無いと元図スナップが復元できなかった
-    // (再度PDFを読み込み直す以外に手段が無く、実運用上ほぼ詰みだった)。
-    // 線データ自体(端点座標のみ、単純な配列)を保存しておけば、PDF再読込なしで
-    // そのまま復元できる。
-    vecSegsMm: (vecSegs||[]).map(s=>({a:{x:pxToMm(s.a.x),y:pxToMm(s.a.y)},b:{x:pxToMm(s.b.x),y:pxToMm(s.b.y)}})),
-    shapes:shapes.map(sh=>({
-      type:sh.type,
-      ptsMm:sh.pts.map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)})), // mm座標で保存
-      pts:sh.pts, // 後方互換のためpx座標も保持
-      holesMm:sh.holesMm||[],
-      holes:sh.holes||[],
-      area:sh.area,
-      depthBeam:sh.depthBeam,
-      topLevel:sh.topLevel||'0',
-      overdig:sh.overdig,
-      noSlope:sh.noSlope,
-      color:sh.color||'blue',
-      enabled:sh.enabled!==false,
-      name:sh.name||''
-    }))
-  };
-  const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=Object.assign(document.createElement('a'),{href:url,download:'Voldia_'+getVoldiaTimestamp()+'.vold'});
-  a.click();URL.revokeObjectURL(url);
-  toast('📤 Voldファイル出力完了（背景・配置モードのオブジェクト含む）');
-  if(placementObjects && placementObjects.length){
-    setTimeout(()=>toast('⚠ 配置オブジェクトは正確に再現されない場合もあります', 3600), 1600);
-  }
-  // r088(24回目・項目4): 出力完了時点で「保存」ツールをキャンセルし、
-  // ツール無選択状態に戻す(マスター指示)。
-  if(typeof closeIoPanel==='function') closeIoPanel();
-}
-function loadBackgroundImageDataURL(dataURL){
-  return new Promise((resolve)=>{
-    if(!dataURL){ resolve(false); return; }
-    const img=new Image();
-    img.onload=()=>{
-      pdfCv.width=img.naturalWidth; pdfCv.height=img.naturalHeight;
-      pdfCtx.clearRect(0,0,pdfCv.width,pdfCv.height);
-      pdfCtx.drawImage(img,0,0);
-      pdfW=pdfCv.width; pdfH=pdfCv.height;
-      pdfCv.style.width=pdfW+'px'; pdfCv.style.height=pdfH+'px';
-      // r065: drawCv(図形描画オーバーレイ)のサイズをpdfCvにピッタリ合わせるだけの
-      // 修正(r022)では、PDF読込・方眼紙モード開始時に設定される「用紙外周への
-      // DRAW_MARGIN_RATIO(40%)ぶんの余白」が再現されず、Vold読込後だけ作図エリア外に
-      // 図形を置けない不具合の原因になっていた(マスター報告、山留や配置モードの
-      // 修正とは無関係の別バグと判明)。PDF読込・方眼紙モードと全く同じ計算式で
-      // dcOffX/dcOffY・drawCvサイズ・位置・transformOriginを再現する。
-      const DRAW_MARGIN_RATIO = 0.4;
-      const dcOffX = Math.round(pdfW * DRAW_MARGIN_RATIO);
-      const dcOffY = Math.round(pdfH * DRAW_MARGIN_RATIO);
-      window._dcOffX = dcOffX; window._dcOffY = dcOffY;
-      drawCv.width = pdfW + dcOffX * 2; drawCv.height = pdfH + dcOffY * 2;
-      drawCv.style.width = drawCv.width + 'px'; drawCv.style.height = drawCv.height + 'px';
-      drawCv.style.position = 'absolute';
-      drawCv.style.left = (-dcOffX) + 'px';
-      drawCv.style.top = (-dcOffY) + 'px';
-      drawCv.style.transformOrigin = dcOffX + 'px ' + dcOffY + 'px';
-      resolve(true);
-    };
-    img.onerror=()=>resolve(false);
-    img.src=dataURL;
-  });
-}
-
-// r013: importCSV(ボタン経由)とloadVoldFile(スタート画面ドロップ経由)の
-// 共通処理。旧実装は「保存時のscaleDenomでmm→px変換する前に、まだ現在の
-// (保存時と異なりうる)scaleDenomのままshapesを変換し、その後でapplyScale()
-// を呼んでscaleDenomだけ差し替える」という順序になっており、保存時と読込時で
-// スケールが異なる場合にshapesのpx座標がズレるバグがあった。ここでは
-// 「先にスケールを確定→その後にmm→pxへ変換」の順序に修正している。
-async function applyVoldData(data){
-  if(!data.shapes)throw new Error('shapes not found');
-  pushUndo();
-  await loadBackgroundImageDataURL(data.backgroundImageDataURL);
-  _gridPaperActive = !!data.gridPaperMode;
-  // r025(マスター指示): 従来はdata.scale(画面表示用の文字列、sc-dのtextContentを
-  // そのまま保存したもの)をapplyScale()でパースしていたが、縮尺未設定のまま
-  // 保存されると"未設定"という文字列が入り、パース失敗時にapplyScaleが警告のみ
-  // 出して無言で何もせず終わるため、読込前の古いscaleDenomが残ってしまう
-  // バグがあった(マスター報告「時々縮尺がおかしくなる」の原因と判明)。
-  // 常に信頼できる数値data.scaleDenomを直接復元し、表示文字列は補助的に使う。
-  if(data.scaleDenom && !isNaN(data.scaleDenom) && data.scaleDenom>0){
-    scaleDenom = Math.max(1, data.scaleDenom);
-    const dispStr = data.scale || ('1/'+Math.round(scaleDenom));
-    document.getElementById('sc-input').value = dispStr;
-    document.getElementById('sc-d').textContent = dispStr;
-    hlScBtn(dispStr);
-  } else if(data.scale){
-    applyScale(data.scale); // scaleDenom未保存の旧形式ファイル向けフォールバック
-  }
-  if(data.concThick)document.getElementById('conc-thick').value=data.concThick;
-  // r074マスター指示: 余掘り・法面角度(勾配)もVoldファイルから復元する。
-  // 旧バージョンのVoldファイル(これらのキーが無い)を読んでも壊れないよう、値が
-  // 無い場合はUIのデフォルト値(#global-overdigのvalue属性・45°)をそのまま維持する。
-  if(typeof data.globalOverdig==='number' && !isNaN(data.globalOverdig)){
-    document.getElementById('global-overdig').value = data.globalOverdig;
-  }
-  if(typeof data.slopeAngleDeg==='number' && !isNaN(data.slopeAngleDeg)){
-    slopeAngleDeg = data.slopeAngleDeg;
-    document.querySelectorAll('.slope-ang-btn').forEach(b=>{
-      const on = parseInt(b.dataset.ang)===slopeAngleDeg;
-      b.style.background = on ? 'var(--accent)' : '#2a2a2a';
-      b.style.color = on ? '#000' : '#aaa';
-      b.style.borderColor = on ? 'var(--accent)' : '#3a3a3a';
-      b.style.fontWeight = on ? 'bold' : 'normal';
-      b.classList.toggle('active', on);
-    });
-  }
-  // r020(至急修正): 読込後にスタート画面の「PDFをD&D」表示が消えず、作図画面に
-  // 進めなかったバグを修正。PDF読込(loadPDF)・方眼紙モード開始(startGridPaperMode)
-  // は成功時にdrop-hintを隠しているが、applyVoldDataだけ隠し忘れていた。
-  document.getElementById('drop-hint').style.display='none';
-  document.getElementById('grid-paper-btn').style.display='none';
-  if(typeof hideUiBlockOverlays==='function') hideUiBlockOverlays();
-
-  // v0.0013: mm座標から現在モードのpx座標に変換
-  const mmToPx=(mm)=>mm*RS*72/(25.4*scaleDenom);
-
-  shapes=data.shapes.map(sh=>{
-    let pts;
-    if(sh.ptsMm && sh.ptsMm.length >= 3){
-      pts = sh.ptsMm.map(p=>({x:mmToPx(p.x), y:mmToPx(p.y)}));
-    } else {
-      const savedDenom = data.scaleDenom||scaleDenom;
-      const savedRS = 4;
-      const ratio = (RS / savedRS) * (savedDenom / scaleDenom);
-      pts = (sh.pts||[]).map(p=>({x:p.x*ratio, y:p.y*ratio}));
-    }
-    return {
-      type:sh.type||'poly',
-      pts,
-      holesMm:sh.holesMm||[],
-      holes:(sh.holes||[]).map(h=>h.map(p=>({x:mmToPx(p.x||0), y:mmToPx(p.y||0)}))),
-      area:calcArea(pts),
-      depthBeam:sh.depthBeam||'1800',
-      topLevel:sh.topLevel||'0',
-      overdig:sh.overdig||'0',
-      noSlope:sh.noSlope!==undefined?sh.noSlope:true,
-      color:sh.color||'blue',
-      enabled:sh.enabled!==false,
-      name:sh.name||''
-    };
-  });
-  // r013: 同梱されていた配置モードのオブジェクトは、次に配置モードを
-  // 開いた時に一度だけ復元する（今開いていなくても保留しておく）
-  _pendingPlacementRestore = data.placementObjects || null;
-  // r024(AreCal移植): 測点もmm→px変換して復元
-  surveyPts = (data.surveyPts||[]).map(p=>({x:mmToPx(p.x), y:mmToPx(p.y)}));
-  // r037: 山留もmm→px変換して復元(従来復元されていなかったバグを修正)
-  yamadome = (data.yamadome && data.yamadome.pts && data.yamadome.pts.length>=3)
-    ? {pts: data.yamadome.pts.map(p=>({x:mmToPx(p.x), y:mmToPx(p.y)}))}
-    : null;
-  {
-    const yb=document.getElementById('yamadome-btn');
-    if(yb){yb.style.opacity=yamadome?'0.4':'';}
-  }
-  // r060: ノースアロー方位角・原点測点インデックスの復元（旧形式ファイルは0/nullにフォールバック）
-  northAngleDeg = (typeof data.northAngleDeg==='number' && !isNaN(data.northAngleDeg)) ? data.northAngleDeg : 0;
-  originSurveyIdx = (typeof data.originSurveyIdx==='number' && surveyPts[data.originSurveyIdx]) ? data.originSurveyIdx : null;
-  if(typeof updateNorthArrowUI==='function') updateNorthArrowUI();
-  // r089(24回目・追加修正・項目5): 保存されていた元図ベクター線データ(mm座標)を
-  // px座標に戻してvecSegs/vecPtsを復元し、buildVecGrid()で空間インデックスを
-  // 再構築する。旧形式のVoldファイル(vecSegsMm未保存)はvecSegs=[]のままになり、
-  // 元図スナップは単に効かない状態に留まる(壊れはしない)。
-  if(data.vecSegsMm && data.vecSegsMm.length){
-    vecSegs = data.vecSegsMm.map(s=>({
-      a:{x:mmToPx(s.a.x), y:mmToPx(s.a.y)},
-      b:{x:mmToPx(s.b.x), y:mmToPx(s.b.y)}
-    }));
-    const u=[];
-    for(const l of vecSegs){
-      for(const p of [l.a,l.b]){
-        if(!u.some(q=>Math.hypot(q.x-p.x,q.y-p.y)<2))u.push(p);
-      }
-    }
-    vecPts=u;
-    buildVecGrid();
-  } else {
-    vecPts=[];vecSegs=[];vecGrid=null;
-  }
-  toolsLocked=false;
-  updSidebar();redraw();fitScreen();
-  toast('📥 Voldファイル読込完了 — '+shapes.length+'図形'+(data.backgroundImageDataURL?'・背景あり':''));
-}
-
-function importCSV(){
-  const f=document.getElementById('imp-in').files[0];
-  if(!f)return;
-  const r=new FileReader();
-  r.onload=async e=>{
-    try{
-      const data=JSON.parse(e.target.result);
-      await applyVoldData(data);
-    }catch(ex){alert('読込エラー: '+ex.message);}
-  };
-  r.readAsText(f);
-  document.getElementById('imp-in').value='';
-}
-
-// r013: スタート画面のドラッグ&ドロップ／ファイル選択から.voldを読み込む
-function loadVoldFile(file){
-  const r=new FileReader();
-  r.onload=async e=>{
-    try{
-      const data=JSON.parse(e.target.result);
-      await applyVoldData(data);
-    }catch(ex){alert('読込エラー: '+ex.message);}
-  };
-  r.readAsText(file);
-}
-
-// ================================================================
-//  Fix11: Excel出力（SheetJS CSV形式で代替、xlsxライブラリなし）
-// ================================================================
-function exportXlsx(){
-  const sc=document.getElementById('sc-d').textContent||'未設定';
-  const conc=( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
-  const hdr=['オブジェクト名','色','面積(m2)','躯体下端GL-(mm)','余掘り(mm)','法面','実掘深さ(mm)','備考'];
-  const rowsArr=[
-    ['※ この表はオブジェクト単体の寸法です。Unionされた値ではありません。'],
-    [],
-    hdr
-  ];
-  shapes.forEach((sh,i)=>{
-    const colName=SHAPE_COLORS[sh.color||'blue']?.label||sh.color||'青';
-    const d=parseFloat(sh.depthBeam)||0;
-    rowsArr.push([
-      sh.name||('図形'+(i+1)),colName,sh.area.toFixed(4),
-      sh.depthBeam||'1800',sh.overdig||'200',
-      sh.noSlope?'なし（四角柱）':'あり（45°法面）',
-      (d+conc).toString(),sh.enabled===false?'非表示':''
-    ]);
-  });
-  rowsArr.push([]);
-  rowsArr.push(['スケール',sc,'捨コン+砕石(mm)',conc.toString()]);
-  rowsArr.push(['合計面積(m2)',calcSum().toFixed(4)]);
-  const csvLines=rowsArr.map(r=>r.map(v=>{
-    const s=String(v);
-    return '"'+s.split('"').join('""')+'"';
-  }).join(','));
-  const csv='\uFEFF'+csvLines.join('\r\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=Object.assign(document.createElement('a'),{href:url,download:'VOLDIA_'+getJSTDateStr()+'.csv'});
-  a.click();URL.revokeObjectURL(url);
-  toast('Excel用CSV出力完了（Excelで開けます）');
-}
-
-function exportDXF3D(){
-  const fs=getAllFrustums();
-  if(!fs.length){toast('⚠ 深さが入力された図形がありません','e');return;}
-  const conc=getConcThick();
-  const DXF_LAYER_TOP='00_Tenba';
-  const DXF_LAYER_BOTTOM='00_Sitaba';
-
-  function L(code,val){return code+'\r\n'+val+'\r\n';}
-  let d='';
-  d+=L(0,'SECTION');d+=L(2,'HEADER');
-  d+=L(9,'$ACADVER');d+=L(1,'AC1009');
-  d+=L(0,'ENDSEC');
-  d+=L(0,'SECTION');d+=L(2,'TABLES');
-  // r088(24回目・DXF不具合修正): レイヤー構成を「天端」「下端」の2層のみに簡素化。
-  // 旧SLOPE(法面上端)・SLOPELN(法面稜線)は廃止(マスター指示)。
-  // レイヤー名はASCII固定(00_Tenba/00_Sitaba)。この書き出し関数は最後に
-  // charset=utf-8でエンコードしているが、R12(AC1009)のASCII DXFは本来
-  // システムコードページ前提の仕様で、UTF-8の日本語レイヤー名は読み込み側の
-  // CADソフトによって文字化けする実害リスクが高い(コードページ宣言$DWGCODEPAGEも
-  // このwriterには無い)。安全側としてASCII名をデフォルトにした。日本語名
-  // (00_天端/00_下端)に確実に対応させたい場合は別途相談。
-  d+=L(0,'TABLE');d+=L(2,'LAYER');d+=L(70,'2');
-  d+=L(0,'LAYER');d+=L(2,DXF_LAYER_TOP);   d+=L(70,'64');d+=L(62,'7');d+=L(6,'CONTINUOUS'); // 白:天端
-  d+=L(0,'LAYER');d+=L(2,DXF_LAYER_BOTTOM);d+=L(70,'64');d+=L(62,'5');d+=L(6,'CONTINUOUS'); // 青:下端
-  d+=L(0,'ENDTAB');
-  d+=L(0,'TABLE');d+=L(2,'LTYPE');d+=L(70,'1');
-  d+=L(0,'LTYPE');d+=L(2,'CONTINUOUS');d+=L(70,'64');d+=L(3,'Solid line');d+=L(72,'65');d+=L(73,'0');d+=L(40,'0.0');
-  d+=L(0,'ENDTAB');
-  d+=L(0,'ENDSEC');
-  d+=L(0,'SECTION');d+=L(2,'BLOCKS');d+=L(0,'ENDSEC');
-  d+=L(0,'SECTION');d+=L(2,'ENTITIES');
-
-  const M=0.001; // mm→m
-
-  function writePoly2D(layer,aci,pts,z){
-    // r089(24回目・追加修正・項目1): ブラウザcanvas座標(Y下向き・原点左上)と
-    // CAD座標(Y上向き・原点左下)のY軸方向が逆なため、DXF書き出し時にY符号を
-    // 反転して合わせる。offsetPolygon等の輪郭計算はすべてこの反転より前の
-    // 元座標系で完結しているので、ここで反転しても計算結果自体には影響しない
-    // (ミラー変換は「内側/外側」の関係を保つため、オフセット方向も正しいまま)。
-    d+=L(0,'POLYLINE');d+=L(8,layer);d+=L(62,aci);d+=L(6,'CONTINUOUS');
-    d+=L(66,'1');d+=L(70,'1');
-    d+=L(10,'0.0');d+=L(20,'0.0');d+=L(30,(z*M).toFixed(6));
-    pts.forEach(p=>{
-      d+=L(0,'VERTEX');d+=L(8,layer);
-      d+=L(10,(p.x*M).toFixed(6));
-      d+=L(20,(-p.y*M).toFixed(6));
-      d+=L(30,(z*M).toFixed(6));
-    });
-    d+=L(0,'SEQEND');
-  }
-
-  fs.forEach((f)=>{
-    // f.D は体積計算・3D表示用の「捨てコン+砕石込みの掘削深さ」。
-    // DXF出力は躯体の実高さ（捨てコン等を含まない）で出す必要があるため、
-    // ここだけ conc 厚みを差し引いた専用の深さを使う。
-    const D=Math.max(0, f.D - conc); // 深さmm（捨てコン+砕石を除いた実高さ）
-    // r088(24回目・DXF不具合修正): 天端Zが常に0固定になっていたバグを修正。
-    // f.tl(オブジェクトごとの天端レベル、GL基準mm)をそのまま使う。
-    // 下端Z = 天端 − 実高さ。
-    const topZ = f.tl || 0;
-    const bottomZ = topZ - D;
-    // 天端ライン(00_天端)
-    writePoly2D(DXF_LAYER_TOP,7,f.ptsMm,topZ);
-    // 下端ライン(余掘り込みオフセット、00_下端)
-    const bottomPts=offsetPolygon(f.ptsMm,f.OD);
-    writePoly2D(DXF_LAYER_BOTTOM,5,bottomPts,bottomZ);
-  });
-
-  d+=L(0,'ENDSEC');d+=L(0,'EOF');
-
-  const a=document.createElement('a');
-  const ts=getVoldiaTimestamp();
-  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(d);
-  a.download='Voldia_'+ts+'.DXF';
-  a.click();
-  toast('📐 DXF出力完了（R12互換・00_Tenba/00_Sitaba層）');
-  // r088(24回目・項目4): 出力完了時点で「保存」ツールをキャンセルし、
-  // ツール無選択状態に戻す(マスター指示)。
-  if(typeof closeIoPanel==='function') closeIoPanel();
-}
-
-// GLB（ポリゴン実形状フラスタム）
-function encodeMultiGLB(meshes){
-  const enc=new TextEncoder();
-  let binOffset=0;
-  const bufViews=[],accessors=[],gltfMeshes=[],nodes=[],binParts=[];
-  meshes.forEach((m,i)=>{
-    const posB=m.positions.buffer.byteLength,idxB=m.indices.buffer.byteLength;
-    let mnX=Infinity,mnY=Infinity,mnZ=Infinity,mxX=-Infinity,mxY=-Infinity,mxZ=-Infinity;
-    for(let j=0;j<m.positions.length;j+=3){const x=m.positions[j],y=m.positions[j+1],z=m.positions[j+2];if(x<mnX)mnX=x;if(x>mxX)mxX=x;if(y<mnY)mnY=y;if(y>mxY)mxY=y;if(z<mnZ)mnZ=z;if(z>mxZ)mxZ=z;}
-    bufViews.push({buffer:0,byteOffset:binOffset,byteLength:posB,target:34962});
-    accessors.push({bufferView:bufViews.length-1,componentType:5126,count:m.positions.length/3,type:'VEC3',min:[mnX,mnY,mnZ],max:[mxX,mxY,mxZ]});
-    binOffset+=posB;binParts.push(new Uint8Array(m.positions.buffer));
-    // パディング（4バイトアライン）
-    const posPad=(4-posB%4)%4;
-    if(posPad>0){binOffset+=posPad;binParts.push(new Uint8Array(posPad));}
-    bufViews.push({buffer:0,byteOffset:binOffset,byteLength:idxB,target:34963});
-    // Uint32インデックス → componentType 5125
-    accessors.push({bufferView:bufViews.length-1,componentType:5125,count:m.indices.length,type:'SCALAR'});
-    binOffset+=idxB;binParts.push(new Uint8Array(m.indices.buffer));
-    const idxPad=(4-idxB%4)%4;
-    if(idxPad>0){binOffset+=idxPad;binParts.push(new Uint8Array(idxPad));}
-    const pA=accessors.length-2,iA=accessors.length-1;
-    gltfMeshes.push({name:m.name,primitives:[{attributes:{POSITION:pA},indices:iA,mode:4,material:0}]});
-    nodes.push({name:m.name,mesh:i});
-  });
-  // r022(追5): マテリアル未指定だとビューア側の既定色（多くは白系）で表示され
-  // 見えにくいという指摘への対応。濃い目のグレーのPBRマテリアルを付与する。
-  const materials=[{name:'VOLDIA_Gray',pbrMetallicRoughness:{baseColorFactor:[0.32,0.33,0.36,1.0],metallicFactor:0.05,roughnessFactor:0.85}}];
-  const json={asset:{version:'2.0',generator:'VOLDIAM v0.2.0'},scene:0,scenes:[{name:'VOLDIAM_Scene',nodes:nodes.map((_,i)=>i)}],nodes,meshes:gltfMeshes,materials,accessors,bufferViews:bufViews,buffers:[{byteLength:binOffset}]};
-  const jb=enc.encode(JSON.stringify(json)),jp=Math.ceil(jb.length/4)*4,bp=Math.ceil(binOffset/4)*4;
-  const tl=12+8+jp+8+bp,buf=new ArrayBuffer(tl),dv=new DataView(buf);let off=0;
-  dv.setUint32(off,0x46546C67,true);off+=4;dv.setUint32(off,2,true);off+=4;dv.setUint32(off,tl,true);off+=4;
-  dv.setUint32(off,jp,true);off+=4;dv.setUint32(off,0x4E4F534A,true);off+=4;
-  const jv=new Uint8Array(buf,off,jp);jv.set(jb);for(let i=jb.length;i<jp;i++)jv[i]=0x20;off+=jp;
-  dv.setUint32(off,bp,true);off+=4;dv.setUint32(off,0x004E4942,true);off+=4;
-  const bv=new Uint8Array(buf,off,bp);let bo=0;for(const p of binParts){bv.set(p,bo);bo+=p.byteLength;}
-  return buf;
-}
-
-// Voldia版: GLB生成ロジックを共通化（GLB保存ボタンと配置モード起動の両方から使う）
-async function buildVoldiaGLBBytes(progressCb){
-  const fs=getAllFrustums();if(!fs.length)throw new Error('図形がありません');
-  let exportGeoms=null;
-  if(_lastGeoms&&_lastGeoms.length>0){
-    exportGeoms=_lastGeoms;
-  }else{
-    if(progressCb)progressCb(20,'Unionを計算中...');
-    // r065(AIS修正案): GLB出力経路でも山留オフセットを渡す(fsは直前取得なので_offsetX/_offsetYが健在)
-    const res=await buildUnionFrustumGeometry(fs, fs._offsetX||0, fs._offsetY||0);
-    if(res.error)throw new Error(res.error);
-    exportGeoms=res.unionGeoms||(res.unionGeom?[res.unionGeom]:res.geoms);
-  }
-  if(!exportGeoms||!exportGeoms.length)throw new Error('先に「計算」ボタンを押してください');
-  if(progressCb)progressCb(40,'メッシュを結合中...');
-  let totalVerts=0,totalTris=0;
-  for(const g of exportGeoms){totalVerts+=g.positions.length/3;totalTris+=g.indices.length/3;}
-  const mergedPos=new Float32Array(totalVerts*3);
-  const mergedIdx=new Uint32Array(totalTris*3);
-  let vOff=0,iOff=0;
-  for(const g of exportGeoms){
-    const vc=g.positions.length/3;
-    for(let j=0;j<g.positions.length;j++) mergedPos[vOff*3+j]=g.positions[j]*S;
-    for(let j=0;j<g.indices.length;j++) mergedIdx[iOff+j]=g.indices[j]+vOff;
-    vOff+=vc; iOff+=g.indices.length;
-  }
-  if(progressCb)progressCb(70,'GLBエンコード中...');
-  const meshes=[{name:'Voldia_Union',positions:mergedPos,indices:mergedIdx}];
-  if(progressCb)progressCb(85,'バイナリ生成中...');
-  const glb=encodeMultiGLB(meshes);
-  return {glb, totalVerts, totalTris, offsetX: fs._offsetX||0, offsetY: fs._offsetY||0};
-}
-
-// r075: 通常計算後に配置モードを開く専用のGLB生成。
-// 土量計算(buildVoldiaGLBBytes)は「Union結合済みの地形そのもの」を配置モードの地面として渡すが、
-// 通常計算の_lastGeomsは各オブジェクトの押し出し立体そのものであり、これをそのまま地面として
-// 渡すとオブジェクトの数だけy=0付近に別々の輪郭が発生し、配置モード側のcustomGround境界検出
-// (面積最大ループ=外周とみなすヒューリスティック)が誤動作する。そこで
-//  ①全オブジェクトのXZ包絡矩形ぴったりの単純な平面(Voldia_GLPlane)を「地面」として別メッシュで用意し、
-//  ②押し出しオブジェクト自体(Voldia_FixedObjects)は別ノードとして同じGLBに含める
-// という2ノード構成にし、配置モード側で名前によって処理を分岐させる(loadTerrainFromArrayBuffer参照)。
-async function buildNormalCalcPlacementGLB(){
-  const fs=getAllFrustums();if(!fs.length)throw new Error('図形がありません');
-  let exportGeoms=null;
-  if(_lastGeoms&&_lastGeoms.length>0){
-    exportGeoms=_lastGeoms;
-  }else{
-    throw new Error('先に「計算」ボタンを押してください');
-  }
-  // 全オブジェクトのXZ包絡矩形を求める(生のmm座標系のまま)
-  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
-  for(const g of exportGeoms){
-    const pos=g.positions;
-    for(let j=0;j<pos.length;j+=3){
-      const x=pos[j], z=pos[j+2];
-      if(x<minX)minX=x; if(x>maxX)maxX=x;
-      if(z<minZ)minZ=z; if(z>maxZ)maxZ=z;
-    }
-  }
-  if(!isFinite(minX)) throw new Error('図形の範囲を取得できませんでした');
-
-  // ①GL平面(y=0、オブジェクト包絡矩形ぴったり。周辺拡張は配置モード側のcustomGroundに任せる)
-  const planePosRaw=new Float32Array([
-    minX,0,minZ,  maxX,0,minZ,  maxX,0,maxZ,  minX,0,maxZ
-  ]);
-  const planeIdx=new Uint32Array([0,1,2, 0,2,3]);
-  const planePos=new Float32Array(planePosRaw.length);
-  for(let j=0;j<planePosRaw.length;j++) planePos[j]=planePosRaw[j]*S;
-
-  // ②押し出しオブジェクト本体(既存のUnion結合ロジックをそのまま流用)
-  let totalVerts=0,totalTris=0;
-  for(const g of exportGeoms){totalVerts+=g.positions.length/3;totalTris+=g.indices.length/3;}
-  const objPos=new Float32Array(totalVerts*3);
-  const objIdx=new Uint32Array(totalTris*3);
-  let vOff=0,iOff=0;
-  for(const g of exportGeoms){
-    const vc=g.positions.length/3;
-    for(let j=0;j<g.positions.length;j++) objPos[vOff*3+j]=g.positions[j]*S;
-    for(let j=0;j<g.indices.length;j++) objIdx[iOff+j]=g.indices[j]+vOff;
-    vOff+=vc; iOff+=g.indices.length;
-  }
-
-  // 次の段階(2026-08-25引継ぎ18回目マスター確定仕様): 通常計算は形状(体積・押し出し形)
-  // 自体は変えない(mode==='normal'は非対象のまま)。その代わり、配置モードに設置される
-  // Voldia_FixedObjects本体の「高さ」だけをGLオフセット分ずらす。
-  //   GL+(地盤面が高い) → オブジェクトは相対的に下げる(Y減)
-  //   GL-(地盤面が低い) → オブジェクトは相対的に上げる(Y増)
-  // Y_new = Y_old − offsetMm。GLPlane(地面)側はy=0のまま動かさない。
-  if(window._glOffsetMm){
-    const offMmS = window._glOffsetMm * S;
-    for(let j=1;j<objPos.length;j+=3){ objPos[j] -= offMmS; }
-  }
-
-  const meshes=[
-    {name:'Voldia_GLPlane', positions:planePos, indices:planeIdx},
-    {name:'Voldia_FixedObjects', positions:objPos, indices:objIdx}
-  ];
-  const glb=encodeMultiGLB(meshes);
-  return {glb, offsetX: fs._offsetX||0, offsetY: fs._offsetY||0};
-}
-
-async function exportGLB(){
-  const btn=document.getElementById('btn-glb');if(btn)btn.disabled=true;
-  document.getElementById('exp-prog').classList.add('show');
-  epSet(0,'Union水密メッシュを準備中...');
-  await new Promise(r=>setTimeout(r,20));
-  try{
-    const {glb, totalVerts, totalTris} = await buildVoldiaGLBBytes(epSet);
-    epSet(100,'完了！');
-    const blob=new Blob([glb],{type:'model/gltf-binary'});
-    const url=URL.createObjectURL(blob);
-    const a=Object.assign(document.createElement('a'),{href:url,download:'VOLDIA_union.glb'});
-    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
-    if(btn)btn.disabled=false;
-    document.getElementById('exp-prog').classList.remove('show');
-    toast(`📦 GLB出力完了（Union水密: ${totalVerts}頂点 / ${totalTris}三角形）`);
-  }catch(e){
-    console.error(e);
-    document.getElementById('exp-prog').classList.remove('show');
-    if(btn)btn.disabled=false;
-    toast('⚠ Objectエラー！表示出来ません', 4000);
-  }
-}
-
-// Voldia版: オブジェクト配置モード（開発中）を別タブで起動し、現在のGLBデータをpostMessageで渡す
-async function openPlacementMode(){
-  const btn=document.getElementById('btn-placement');
-  if(btn)btn.disabled=true;
-  try{
-    toast('🏗 配置モード用の地形データを準備中...', 2500);
-    // r075: 通常計算後は「GL平面+押し出しオブジェクト固定表示」、土量計算後は従来通り地形Unionを渡す
-    const _isNormalPlacement = (window._lastCalcModeForPlacement === 'normal');
-    const {glb, offsetX, offsetY} = _isNormalPlacement
-      ? await buildNormalCalcPlacementGLB()
-      : await buildVoldiaGLBBytes(null); // encodeMultiGLB()は素のArrayBufferを返す
-
-    // Voldia版: 同一ページ内にiframeでオーバーレイ表示（別タブ方式はポップアップブロック等が
-    // 面倒なため見送り。iframeなら別タブと同じくJSのグローバル変数が衝突せず、テストも1画面で完結する）
-    // r011: 「戻る」ボタンは配置モード側(#voldia-back-btn)の1つに統一。
-    // 従来ここにあった本体側の赤い外側ボタンは、配置モードのPLANパネルに
-    // 重なって表示される問題があったため撤去し、代わりに配置モード側の
-    // ボタンが送るpostMessage('voldia-placement-close')をここで受け取って
-    // オーバーレイを閉じる形にした。
-    // r016: 従来は再オープンのたびにiframe.srcを再読込しており、地形は
-    // 最新化される一方で配置済みオブジェクトが全て消えてしまっていた。
-    // loadTerrainFromArrayBuffer()はplacedObjects配列に一切触れないことを
-    // 確認済みなので、既存iframeは生かしたまま地形データだけpostMessageで
-    // 直接送り直す形に変更し、配置済みオブジェクトをタブを閉じるまで
-    // 保持できるようにした。
-    let wrap=document.getElementById('placement-overlay');
-    const isFirstOpen = !wrap;
-    if(isFirstOpen){
-      wrap=document.createElement('div');
-      wrap.id='placement-overlay';
-      wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
-      const iframe=document.createElement('iframe');
-      iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0071.html';
-      iframe.style.cssText='width:100%;height:100%;border:none;';
-      wrap.appendChild(iframe);
-      document.body.appendChild(wrap);
-    }else{
-      wrap.style.display='block';
-    }
-    const iframeEl=document.getElementById('placement-iframe');
-    function onCloseMsg(ev){
-      if(ev.source!==iframeEl.contentWindow) return;
-      if(ev.data && ev.data.type==='voldia-placement-close'){
-        wrap.style.display='none';
-      }
-    }
-    window.addEventListener('message', onCloseMsg);
-
-    if(!isFirstOpen){
-      // r016: 2回目以降のオープン。iframeは生きたまま待機しているので、
-      // readyハンドシェイクを待たずに地形データを直接送るだけでよい。
-      iframeEl.contentWindow.postMessage({type:'voldia-terrain-glb', buffer:glb}, '*');
-      // r025(マスター指示・追1): 測点の実座標も一緒に送る(mm→m変換はGLBと同じS=0.001)
-      const __svPts_reopen = (surveyPts||[]).map((p,i)=>({no:i+1, x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}));
-      // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
-      iframeEl.contentWindow.postMessage({type:'voldia-survey-points', points:__svPts_reopen,
-        northAngleDeg: (typeof northAngleDeg==='number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0}, '*');
-      // r044: 山留ラインも配置モードへ送る(測点と同じオフセット/スケール変換)
-      if(typeof yamadome !== 'undefined' && yamadome && yamadome.pts && yamadome.pts.length>=3){
-        const __ydLine_reopen = yamadome.pts.map(p=>({x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}));
-        // 追加2(2026-08-24 引継ぎ18回目): 配置モード側の地形レイキャストによる
-        // 高さ推測(同じ形状のオブジェクトと重なると誤ヒットして山留が消える不具合の
-        // 原因だった)をやめ、本体側の実寸値をそのまま渡す。
-        iframeEl.contentWindow.postMessage({type:'voldia-yamadome-line', points:__ydLine_reopen,
-          realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
-          batterDeg: window._lastYamadomeBatterDeg}, '*');
-      }
-      // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示): グレー壁面ハッチも
-      // 山留と同じ考え方で配置モードへ送る。座標は既にfrustum正規化mm(=山留と同じ
-      // 基準)なのでSを掛けるだけで良い(SC*p.x等、送信側で変換済み)。
-      // [FIX 19回目 2026-08-30 マスター報告] グレー→青など、グレーオブジェクトが
-      // 無くなった(=positions.lengthが0になった)場合にここで送信自体をスキップして
-      // いたため、配置モード側に「もう無い」という情報が届かず、古いハッチが
-      // 消えずに残る不具合があった。空でも必ず送って、配置モード側で確実に
-      // クリアできるようにする(以前は再計算時のみ更新される山留の反省を活かす)。
-      iframeEl.contentWindow.postMessage({type:'voldia-gray-walls', positions: (window._lastGrayWalls&&window._lastGrayWalls.positions)||[], uv: (window._lastGrayWalls&&window._lastGrayWalls.uv)||[]}, '*');
-      if(_pendingPlacementRestore){
-        iframeEl.contentWindow.postMessage({type:'voldia-restore-placement-state', objects:_pendingPlacementRestore}, '*');
-        _pendingPlacementRestore = null;
-      }
-      return;
-    }
-
-    let sent=false;
-    function onMsg(ev){
-      if(ev.source!==iframeEl.contentWindow || sent) return;
-      if(ev.data && ev.data.type==='voldia-placement-ready'){
-        sent=true;
-        iframeEl.contentWindow.postMessage({type:'voldia-terrain-glb', buffer:glb}, '*');
-        // r025(マスター指示・追1): 初回オープン時も同様に測点座標を送る
-        const __svPts_first = (surveyPts||[]).map((p,i)=>({no:i+1, x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}));
-        // r036: 調査用DEBUGログは削除。詳細は Voldia_過去ログ_2026-08-09.md 参照
-        iframeEl.contentWindow.postMessage({type:'voldia-survey-points', points:__svPts_first,
-          northAngleDeg: (typeof northAngleDeg==='number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0}, '*');
-        // r044: 山留ラインも配置モードへ送る(測点と同じオフセット/スケール変換)
-        if(typeof yamadome !== 'undefined' && yamadome && yamadome.pts && yamadome.pts.length>=3){
-          const __ydLine_first = yamadome.pts.map(p=>({x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}));
-          iframeEl.contentWindow.postMessage({type:'voldia-yamadome-line', points:__ydLine_first,
-            realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
-            batterDeg: window._lastYamadomeBatterDeg}, '*');
-        }
-        // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示)
-        // [FIX 19回目] 上と同じ理由で、空でも必ず送る。
-        iframeEl.contentWindow.postMessage({type:'voldia-gray-walls', positions: (window._lastGrayWalls&&window._lastGrayWalls.positions)||[], uv: (window._lastGrayWalls&&window._lastGrayWalls.uv)||[]}, '*');
-        // r013: プロジェクト読込直後の初回オープンなら、保存されていた
-        // 配置オブジェクトも一緒に復元する(一度使ったらクリアして、以後の
-        // 再オープンでは上書きしないようにする＝配置モード内での続きの
-        // 編集を尊重する)
-        if(_pendingPlacementRestore){
-          iframeEl.contentWindow.postMessage({type:'voldia-restore-placement-state', objects:_pendingPlacementRestore}, '*');
-          _pendingPlacementRestore = null;
-        }
-        clearInterval(retryTimer);
-        window.removeEventListener('message', onMsg);
-      }
-    }
-    window.addEventListener('message', onMsg);
-    // iframeの初期化が間に合わない場合に備え、「準備できたら教えて」の合図を数回送る
-    let retries=0;
-    const retryTimer=setInterval(()=>{
-      retries++;
-      if(sent || retries>20){clearInterval(retryTimer);return;}
-      try{ iframeEl.contentWindow.postMessage({type:'voldia-request-ready'}, '*'); }catch(e){}
-    }, 500);
-  }catch(e){
-    console.error(e);
-    toast('⚠ Objectエラー！表示出来ません', 4000);
-  }finally{
-    if(btn)btn.disabled=false;
-  }
-}
-function epSet(pct,msg){
-  const b=document.getElementById('ep-bar'),el=document.getElementById('ep-msg');
-  if(b)b.style.width=pct+'%';if(el)el.textContent=msg;
-}
-
-// ════════════════════════════════════════════════════════════════
-//  r070: エビル(Evidence Builder)統合セクション
-//  ------------------------------------------------------------
-//  方針(マスター合意事項 2026-08-21): GLB経由のまま。
-//  Voldiaが buildVoldiaGLBBytes() で書き出したGLBバイト列を、
-//  配置モードと同じ r128系 THREE.GLTFLoader で読み込み、
-//  エビル(Evidence_Builder_.html)の解析ロジックをほぼそのまま移植する。
-//  Voldiaの本編シーン(threeS/threeC/threeR)には一切触れない、
-//  完全に独立したオフスクリーンシーンで解析・PNG/PDF書き出しを行う。
-//  ※このセクションは未実機確認。次回セッションでまとめてテストすること。
-// ════════════════════════════════════════════════════════════════
-
-let _evScene=null, _evRenderer=null, _evResultGroup=null, _evSubLabelGroup=null, _evFineLineGroup=null;
-let _evAnalysisData=[], _evTotalModelArea=0, _evModelScaleSize=1, _evPendingSubLabels=[];
-let _evGltfLoader=null;
-
-function _evHashVertex(v){
-  const precision=1000;
-  return `${Math.round(v.x*precision)}_${Math.round(v.y*precision)}_${Math.round(v.z*precision)}`;
-}
-
-class _EvUnionFind{
-  constructor(){ this.parent={}; }
-  find(i){
-    if(this.parent[i]===undefined) this.parent[i]=i;
-    if(this.parent[i]===i) return i;
-    return this.parent[i]=this.find(this.parent[i]);
-  }
-  union(i,j){
-    const rootI=this.find(i), rootJ=this.find(j);
-    if(rootI!==rootJ) this.parent[rootI]=rootJ;
-  }
-}
-
-function _evCreateNumberLabel(number, targetScale, useDepthTest){
-  const canvas=document.createElement('canvas');
-  canvas.width=64; canvas.height=64;
-  const ctx=canvas.getContext('2d');
-  ctx.beginPath(); ctx.arc(32,32,30,0,Math.PI*2);
-  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fill();
-  ctx.lineWidth=2; ctx.strokeStyle='#ffffff'; ctx.stroke();
-  ctx.fillStyle='#ffffff'; ctx.font='bold 28px sans-serif';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(number.toString(),32,34);
-  const texture=new THREE.CanvasTexture(canvas);
-  const material=new THREE.SpriteMaterial({map:texture, depthTest:useDepthTest, transparent:true});
-  const sprite=new THREE.Sprite(material);
-  if(!useDepthTest) sprite.renderOrder=999;
-  sprite.scale.set(targetScale,targetScale,1);
-  return sprite;
-}
-
-function _evCreateTinySubLabel(text, targetScale){
-  const canvas=document.createElement('canvas');
-  canvas.width=256; canvas.height=64;
-  const ctx=canvas.getContext('2d');
-  ctx.font='bold 44px sans-serif';
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.lineJoin='round'; ctx.lineWidth=2; ctx.strokeStyle='#ffffff';
-  ctx.strokeText(text,128,32);
-  ctx.fillStyle='#c0392b'; ctx.fillText(text,128,32);
-  const texture=new THREE.CanvasTexture(canvas);
-  texture.minFilter=THREE.LinearMipMapLinearFilter;
-  texture.magFilter=THREE.LinearFilter;
-  const material=new THREE.SpriteMaterial({map:texture, depthTest:false, transparent:true});
-  const sprite=new THREE.Sprite(material);
-  sprite.renderOrder=1000;
-  sprite.scale.set(targetScale*4,targetScale,1);
-  return sprite;
-}
-
-// r091(24回目・追加チェック項目1): 平面図(真上から見たPDF/PNG)上でサブフェイス
-// 番号ラベルが重なる不具合の対策。柱が梁の真上にある等、異なる高さの要素でも
-// XZ座標(平面上の位置)が近いと、真上から見た投影では見分けが付かなくなる。
-// 全ラベル候補が出揃った時点で、既に配置済みのラベルとXZ平面上でAABB衝突判定を
-// 行い、衝突する場合は元の位置を中心に螺旋状に候補点を試して空いている場所へ
-// ずらす。ずらした場合は元の真の位置まで薄い引出線を引き、対応関係を保つ。
-function _evResolveAndPlaceSubLabels(){
-  const placed=[];
-  _evPendingSubLabels.forEach(cand=>{
-    // スプライト全体(targetScale*4 x targetScale)に対し、実際の文字幅は
-    // やや小さいため0.85倍を目安の当たり判定とする
-    const halfW=cand.tinyScale*4*0.5*0.85, halfH=cand.tinyScale*0.5*0.85;
-    const collides=(x,z)=>placed.some(p=>Math.abs(x-p.fcx)<(halfW+p.halfW) && Math.abs(z-p.fcz)<(halfH+p.halfH));
-    let px=cand.fcx, pz=cand.fcz, moved=false;
-    if(collides(px,pz)){
-      moved=true;
-      const baseStep=Math.max(halfW,halfH)*1.4;
-      outer:
-      for(let ring=1;ring<=6;ring++){
-        const radius=baseStep*ring, numAngles=8*ring;
-        for(let i=0;i<numAngles;i++){
-          const ang=(Math.PI*2*i)/numAngles;
-          const tx=cand.fcx+Math.cos(ang)*radius, tz=cand.fcz+Math.sin(ang)*radius;
-          if(!collides(tx,tz)){ px=tx; pz=tz; break outer; }
-        }
-      }
-      // 6リング試しても空きが見つからない場合は最後の候補(密集地の外周)のまま採用
-    }
-    placed.push({fcx:px, fcz:pz, halfW, halfH});
-    const tinyLabel=_evCreateTinySubLabel(cand.subNo, cand.tinyScale);
-    tinyLabel.position.set(px, cand.fcy+(_evModelScaleSize*0.005), pz);
-    _evSubLabelGroup.add(tinyLabel);
-    if(moved){
-      const lineGeom=new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(cand.fcx, cand.fcy+(_evModelScaleSize*0.003), cand.fcz),
-        new THREE.Vector3(px, cand.fcy+(_evModelScaleSize*0.003), pz)
-      ]);
-      const leaderLine=new THREE.Line(lineGeom, new THREE.LineBasicMaterial({color:0xc0392b, transparent:true, opacity:0.6}));
-      leaderLine.renderOrder=999;
-      _evSubLabelGroup.add(leaderLine);
-    }
-  });
-}
-
-// オフスクリーン解析用シーンを準備（Voldia本編の3Dビューとは完全に独立）
-function _evEnsureScene(){
-  if(_evScene) return;
-  _evScene=new THREE.Scene();
-  _evScene.background=new THREE.Color(0xffffff);
-  _evScene.add(new THREE.AmbientLight(0xffffff,0.8));
-  const dl=new THREE.DirectionalLight(0xffffff,0.7);
-  dl.position.set(1,2,1);
-  _evScene.add(dl);
-  _evRenderer=new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
-  _evRenderer.setPixelRatio(1);
-  _evResultGroup=new THREE.Group();
-  _evSubLabelGroup=new THREE.Group();
-  _evFineLineGroup=new THREE.Group(); // r072マスター指摘対応①: サブフェイス単位の細かい面分割線(PDF専用・デフォルト非表示)
-  _evFineLineGroup.visible=false;
-  _evScene.add(_evResultGroup, _evSubLabelGroup, _evFineLineGroup);
-  if(!_evGltfLoader) _evGltfLoader=new THREE.GLTFLoader();
-}
-
-// エビル runAnalysis() の移植版。GLBバイト列(ArrayBuffer)を受け取りメッシュ解析する。
-function _evRunAnalysis(mode, glbArrayBuffer){
-  return new Promise((resolve,reject)=>{
-    _evEnsureScene();
-    _evGltfLoader.parse(glbArrayBuffer, '', (gltf)=>{
-      try{
-        const currentModel=gltf.scene;
-        _evResultGroup.clear();
-        _evSubLabelGroup.clear();
-        _evFineLineGroup.clear();
-        _evTotalModelArea=0;
-
-        const box=new THREE.Box3().setFromObject(currentModel);
-        const yBase=box.min.y;
-        // r070(マスター指示): 基準地盤高の手入力UIは統合版では持たず、
-        // エビル既定動作(未入力時にモデル最上面を自動適用)に合わせて box.max.y を直接使う
-        const z0=box.max.y;
-
-        _evModelScaleSize=Math.max(box.getSize(new THREE.Vector3()).x, box.getSize(new THREE.Vector3()).y, box.getSize(new THREE.Vector3()).z)||1;
-
-        let faces=[];
-        currentModel.updateMatrixWorld(true);
-        currentModel.traverse((child)=>{
-          if(child.isMesh){
-            let geom=child.geometry.clone();
-            geom.applyMatrix4(child.matrixWorld);
-            if(geom.index) geom=geom.toNonIndexed();
-            const pos=geom.attributes.position.array;
-            for(let i=0;i<pos.length;i+=9){
-              const v0=new THREE.Vector3(pos[i],pos[i+1],pos[i+2]);
-              const v1=new THREE.Vector3(pos[i+3],pos[i+4],pos[i+5]);
-              const v2=new THREE.Vector3(pos[i+6],pos[i+7],pos[i+8]);
-              faces.push({v0,v1,v2});
-            }
-          }
-        });
-
-        faces.forEach((f,index)=>{
-          f.id=index;
-          const edge1=new THREE.Vector3().subVectors(f.v1,f.v0);
-          const edge2=new THREE.Vector3().subVectors(f.v2,f.v0);
-          f.normal=new THREE.Vector3().crossVectors(edge1,edge2).normalize();
-          f.avgY=(f.v0.y+f.v1.y+f.v2.y)/3;
-          f.projArea=0.5*Math.abs((f.v1.x-f.v0.x)*(f.v2.z-f.v0.z)-(f.v2.x-f.v0.x)*(f.v1.z-f.v0.z));
-          f.distToOrigin=-f.normal.dot(f.v0);
-          f.hasConvex=false; f.hasConcave=false;
-          f.centroid=new THREE.Vector3().add(f.v0).add(f.v1).add(f.v2).divideScalar(3);
-
-          // 【問題A・アイデア2対応・2026-08-24マスター指示】旧閾値0.01(約0.6度相当)は、
-          // LandXML対策の垂直面回避ハック(noSlopeオブジェクトの微小テーパー、旧3°→今回の
-          // 問題B対応で固定15mmオフセットに変更)による疑似壁まで「法面」と誤認識していた。
-          // Voldiaで選択可能な法面角度は30/45/60/73度の4種類のみなので、最も急な73度でも
-          // normal.y=cos(73°)≈0.29。微小テーパー分(深さにより変動するが実運用ではこれより
-          // 十分小さい)との間に余裕を持たせ、0.2(約78度相当)を閾値とする。これにより
-          // 疑似壁は確実にIGNORE(壁)扱いとなり、本物の法面(最大73度)は引き続きSLOPE判定される。
-          const SLOPE_NORMAL_Y_THRESHOLD = 0.2;
-          if(mode==='structure'){
-            f.calcHeight=f.avgY-yBase;
-            if(f.normal.y>0.99) f.type='UPWARD_FLAT';
-            else if(f.normal.y>SLOPE_NORMAL_Y_THRESHOLD) f.type='UPWARD_SLOPE';
-            else if(f.normal.y<-0.99) f.type='DOWNWARD_FLAT';
-            else if(f.normal.y<-SLOPE_NORMAL_Y_THRESHOLD) f.type='DOWNWARD_SLOPE';
-            else f.type='IGNORE';
-          }else{
-            const absNy=Math.abs(f.normal.y);
-            if(absNy>0.99) f.type='BOTTOM';
-            else if(absNy>SLOPE_NORMAL_Y_THRESHOLD) f.type='SLOPE';
-            else f.type='IGNORE';
-            f.calcHeight=z0-f.avgY;
-          }
-        });
-
-        if(mode==='structure'){
-          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
-        }else{
-          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
-        }
-        faces.forEach(f=>_evTotalModelArea+=f.projArea);
-
-        const edges={};
-        faces.forEach(f=>{
-          const h0=_evHashVertex(f.v0), h1=_evHashVertex(f.v1), h2=_evHashVertex(f.v2);
-          const addEdge=(ha,hb,vStart,vEnd)=>{
-            const key=ha<hb?`${ha}|${hb}`:`${hb}|${ha}`;
-            if(!edges[key]) edges[key]=[];
-            edges[key].push({face:f, vDir:new THREE.Vector3().subVectors(vEnd,vStart)});
-          };
-          addEdge(h0,h1,f.v0,f.v1);
-          addEdge(h1,h2,f.v1,f.v2);
-          addEdge(h2,h0,f.v2,f.v0);
-        });
-
-        const uf=new _EvUnionFind();
-        Object.values(edges).forEach(list=>{
-          if(list.length===2){
-            const f1=list[0].face, f2=list[1].face;
-            if(f1.type===f2.type){
-              const dot=f1.normal.dot(f2.normal);
-              if(dot>0.99){
-                if(mode==='structure'){
-                  if(Math.abs(f1.distToOrigin-f2.distToOrigin)<0.05) uf.union(f1.id,f2.id);
-                }else{
-                  uf.union(f1.id,f2.id);
-                }
-              }else if(f1.type.includes('SLOPE')){
-                const inPlaneVec=new THREE.Vector3().crossVectors(f1.normal,list[0].vDir).normalize();
-                const sign=f2.normal.dot(inPlaneVec);
-                if(sign<-0.001){ f1.hasConcave=true; f2.hasConcave=true; }
-                else if(sign>0.001){ f1.hasConvex=true; f2.hasConvex=true; }
-              }
-            }
-          }
-        });
-
-        const clusters={};
-        faces.forEach(f=>{
-          const rootId=uf.find(f.id);
-          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[]};
-          const c=clusters[rootId];
-          c.projArea+=f.projArea; c.hSum+=f.calcHeight*f.projArea; c.faceCount++;
-          c.groupedFaces.push(f);
-          if(f.hasConvex) c.hasConvex=true;
-          if(f.hasConcave) c.hasConcave=true;
-        });
-
-        _evAnalysisData=[];
-        _evPendingSubLabels=[];
-        let calcId=1, totalVolume=0;
-
-        Object.values(clusters).forEach(c=>{
-          if(c.projArea<0.01) return;
-          const avgH=c.hSum/c.projArea;
-          // r090(24回目・追加修正・項目12): 従来はearthwork(土量計算)限定のガードだった。
-          // structure(通常計算)側でも、上部と下部の形状が同じ(=高さ差0)場合に
-          // volume=0の計算が発生し、Excelに無意味な行が並ぶ・PDF/PNGの番号が
-          // 同一座標に重複して読めなくなる、という不具合の報告を受け、mode制限を撤廃。
-          // structure側もcalcHeight=avgY-yBaseなので、avgH≈0は「この面がちょうど
-          // 基準面上にある=この面が寄与する柱体積は実質0」を正しく表しており、
-          // 除外の理屈はearthwork側と同じ。
-          if(avgH<=0.001) return;
-
-          let hSeed=calcId*15485863;
-          hSeed=(hSeed^(hSeed>>>13))*2654435761;
-          hSeed=(hSeed^(hSeed>>>15));
-          const hue=(hSeed>>>0)/4294967296;
-          const highlightColor=new THREE.Color().setHSL(hue,0.85,0.55);
-          const hexColor='#'+highlightColor.getHexString();
-
-          const positions=[];
-          c.groupedFaces.forEach(f=>{
-            positions.push(f.v0.x,f.v0.y,f.v0.z, f.v1.x,f.v1.y,f.v1.z, f.v2.x,f.v2.y,f.v2.z);
-          });
-          const geom=new THREE.BufferGeometry();
-          geom.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
-          geom.computeVertexNormals();
-
-          const defaultOpacityValue=(mode==='structure')?30:75;
-          const mat=new THREE.MeshLambertMaterial({color:highlightColor, side:THREE.DoubleSide, transparent:true, opacity:defaultOpacityValue/100, depthWrite:(mode!=='structure')});
-          const mesh=new THREE.Mesh(geom,mat);
-          if(c.type.includes('FLAT')||c.type==='BOTTOM') mesh.position.y+=0.02;
-          // r070マスター指摘対応: PDF出力で面分割線が見えない件 → WebGLのlinewidthは
-          // ほぼ全環境で1px固定される「1pxの壁」が原因(voldia3d.js内の別処理で既知の問題)。
-          // 同一LineSegmentsを微小オフセットで5枚重ね描画し、モデル寸法に比例した
-          // 太さ(どの縮尺でも書き出し解像度に対して数px相当)を確保する。
-          const edgesGeo=new THREE.EdgesGeometry(geom);
-          const edgeMat=new THREE.LineBasicMaterial({color:0x222222, linewidth:1});
-          const _evLineW=_evModelScaleSize*0.0008;
-          [[0,0],[_evLineW,0],[-_evLineW,0],[0,_evLineW],[0,-_evLineW]].forEach(([ox,oz])=>{
-            const ln=new THREE.LineSegments(edgesGeo, edgeMat);
-            ln.position.set(ox,0,oz);
-            mesh.add(ln);
-          });
-          _evResultGroup.add(mesh);
-
-          // r072マスター指摘対応①: 上のedgesGeoはクラスター(番号1個分)の外周だけしか出ない
-          // (coplanarな内部三角形の境目はEdgesGeometryの仕様上省略される)。
-          // そのため中の小さいサブフェイス番号(例:"7-3")がどの三角形を指すか分からなかった。
-          // → PDF専用でWireframeGeometry(全三角形の辺を省略なしで出す)を別レイヤーに追加し、
-          // isPdfMode時のみ表示する。
-          const fineWireGeo=new THREE.WireframeGeometry(geom);
-          const fineWireMat=new THREE.LineBasicMaterial({color:0x555555, linewidth:1, transparent:true, opacity:0.8});
-          const _evFineLineW=_evModelScaleSize*0.0003;
-          [[0,0],[_evFineLineW,0],[-_evFineLineW,0]].forEach(([ox,oz])=>{
-            const fln=new THREE.LineSegments(fineWireGeo, fineWireMat);
-            fln.position.set(ox, mesh.position.y, oz);
-            _evFineLineGroup.add(fln);
-          });
-
-          let maxFace=c.groupedFaces[0];
-          for(const f of c.groupedFaces){ if(f.projArea>maxFace.projArea) maxFace=f; }
-          const fx=(maxFace.v0.x+maxFace.v1.x+maxFace.v2.x)/3;
-          const fy=(maxFace.v0.y+maxFace.v1.y+maxFace.v2.y)/3;
-          const fz=(maxFace.v0.z+maxFace.v1.z+maxFace.v2.z)/3;
-
-          let objScale=Math.sqrt(c.projArea)*0.6;
-          const minScale=_evModelScaleSize*0.025, maxScale=_evModelScaleSize*0.10;
-          objScale=Math.max(minScale, Math.min(maxScale, objScale));
-          const useDepthTest=(mode==='earthwork');
-          const labelSprite=_evCreateNumberLabel(calcId, objScale, useDepthTest);
-          labelSprite.position.set(fx, fy+(_evModelScaleSize*0.02), fz);
-          _evResultGroup.add(labelSprite);
-
-          const S=c.projArea;
-          let calcType,note,K;
-          if(mode==='structure'){
-            if(c.type.includes('UPWARD')){
-              calcType=c.type.includes('FLAT')?'天端・上部水平面':'上部斜面';
-              note='正射投影鉛直柱体積算定 (加算)'; K=1.0;
-            }else{
-              calcType=c.type.includes('FLAT')?'天井・下部水平面':'下部斜面';
-              note='正射投影鉛直柱体積算定 (控除)'; K=-1.0;
-            }
-          }else{
-            if(c.type==='BOTTOM'){
-              calcType='掘削底'; note='水平面鉛直柱体体積算定 (直柱体)'; K=1.0;
-            }else{
-              if(c.hasConcave&&c.hasConvex){ calcType='複雑法面'; note='複合傾斜面截頭柱体体積算定 (斜柱体)'; K=0.5; }
-              else if(c.hasConcave||c.hasConvex){ calcType=c.hasConvex?'出隅部':'入隅部'; note='三次元不整角錐体積算定 (錐体分割)'; K=1/3; }
-              else{ calcType='直線法面'; note='単一傾斜面截頭柱体体積算定 (斜柱体)'; K=0.5; }
-            }
-          }
-
-          const displayH=avgH/Math.abs(K);
-          const volume=S*displayH*K;
-
-          const subFacesData=[];
-          c.groupedFaces.forEach((f,idx)=>{
-            const subS=f.projArea, subAvgH=f.calcHeight;
-            const subDisplayH=subAvgH/Math.abs(K);
-            const subVol=subS*subDisplayH*K;
-            const subNo=`${calcId}-${idx+1}`;
-            // r089(24回目・追加修正・項目11): 従来の「底辺×高さ÷2」は、高さの方が
-            // 面積から逆算(2*area/base)された値だったため、検証者から見ると
-            // 循環参照(面積の根拠が面積そのもの)になっており「根拠が無い」との
-            // 指摘を受けた。実測可能な三角形の3辺の長さ(平面投影・XZ平面)に
-            // 差し替える。第三者がこの3辺からヘロンの公式で独立に面積を
-            // 検算できるようにするのが狙い。
-            const dx01=f.v1.x-f.v0.x, dz01=f.v1.z-f.v0.z, side01=Math.sqrt(dx01*dx01+dz01*dz01);
-            const dx12=f.v2.x-f.v1.x, dz12=f.v2.z-f.v1.z, side12=Math.sqrt(dx12*dx12+dz12*dz12);
-            const dx20=f.v0.x-f.v2.x, dz20=f.v0.z-f.v2.z, side20=Math.sqrt(dx20*dx20+dz20*dz20);
-            const areaFormula=`${side01.toFixed(3)}+${side12.toFixed(3)}+${side20.toFixed(3)}`;
-            const h0=mode==='structure'?f.v0.y-yBase:z0-f.v0.y;
-            const h1=mode==='structure'?f.v1.y-yBase:z0-f.v1.y;
-            const h2=mode==='structure'?f.v2.y-yBase:z0-f.v2.y;
-            const hFormula=`(${h0.toFixed(3)} + ${h1.toFixed(3)} + ${h2.toFixed(3)}) / 3 / ${Math.abs(K).toFixed(3)}`;
-
-            if(subS>_evTotalModelArea*0.0001){
-              const fcx=(f.v0.x+f.v1.x+f.v2.x)/3, fcy=(f.v0.y+f.v1.y+f.v2.y)/3, fcz=(f.v0.z+f.v1.z+f.v2.z)/3;
-              let tinyScale=Math.sqrt(subS)*0.2;
-              const minTinyScale=_evModelScaleSize*0.005, maxTinyScale=_evModelScaleSize*0.02;
-              tinyScale=Math.max(minTinyScale, Math.min(maxTinyScale, tinyScale));
-              // r091(24回目・追加チェック項目1): ここで即座にスプライトを追加せず、
-              // 候補として一旦貯める。理由: 別クラスター(例: 柱)が別クラスター
-              // (例: その真下の梁)の真上/真下にあると、上から見た平面図(PDF/PNG)では
-              // XZ座標がほぼ一致し、ラベル同士が重なって読めなくなる不具合が
-              // 報告された。全候補が出揃ってから衝突検出→ずらし処理を行うため、
-              // ここでは位置とサイズの情報だけを記録する。
-              _evPendingSubLabels.push({fcx, fcy, fcz, subNo, tinyScale});
-            }
-
-            subFacesData.push({subNo, id:f.id, areaFormula, hFormula, S:subS, H:subDisplayH, K, V:subVol});
-          });
-
-          _evAnalysisData.push({no:calcId++, type:calcType, location:`自動抽出グループ (面数:${c.faceCount})`, S, H:displayH, K, volume, note, color:hexColor, subFaces:subFacesData});
-          totalVolume+=volume;
-        });
-
-        // r091(24回目・追加チェック項目1): 全サブラベル候補が出揃ったので、
-        // 平面図(XZ)上での重なりを検出してずらし、実際にスプライト/引出線を生成する。
-        _evResolveAndPlaceSubLabels();
-
-        resolve({totalVolume, count:_evAnalysisData.length});
-      }catch(err){ reject(err); }
-    }, (err)=>reject(err));
-  });
-}
-
-// エビル renderPlanView() の移植版。オフスクリーン専用シーンなので保存/復元は不要。
-function _evRenderPlanView(exportWidth, isPdfMode){
-  const box=new THREE.Box3().setFromObject(_evResultGroup);
-  const center=box.getCenter(new THREE.Vector3());
-  const size=box.getSize(new THREE.Vector3());
-  const savedMats=[];
-
-  _evScene.background=new THREE.Color(0xffffff);
-  if(isPdfMode){
-    _evResultGroup.children.forEach(child=>{
-      if(child.isMesh){
-        savedMats.push({mesh:child, mat:child.material});
-        child.material=new THREE.MeshBasicMaterial({color:0xffffff});
-        child.children.forEach(c=>{ if(c.isLineSegments){ c.material.color.setHex(0x000000); c.visible=true; } });
-      }else if(child.isSprite){ child.visible=false; }
-    });
-    // r072マスター指摘対応①④: PDFは細かいサブフェイス番号+その境界線を出す。
-    // PNGは追2対応(大きい番号のみ)のため常にOFFにする。
-    _evSubLabelGroup.visible=true;
-    _evFineLineGroup.visible=true;
-  }else{
-    // r072マスター指摘対応(追2): PNGは①②など大きい番号だけでよい→細かい番号と細線を明示的に隠す
-    _evSubLabelGroup.visible=false;
-    _evFineLineGroup.visible=false;
-  }
-
-  const maxTexSize=_evRenderer.capabilities.maxTextureSize;
-  const safeExportWidth=Math.min(exportWidth, maxTexSize);
-  const safeExportHeight=Math.floor(safeExportWidth/1.414);
-  _evRenderer.setSize(safeExportWidth, safeExportHeight, false);
-  const aspect=safeExportWidth/safeExportHeight;
-
-  const margin=1.05;
-  const sizeX=size.x*margin, sizeZ=size.z*margin;
-  let frustumHeight=sizeZ, frustumWidth=frustumHeight*aspect;
-  if(frustumWidth<sizeX){ frustumWidth=sizeX; frustumHeight=frustumWidth/aspect; }
-
-  const orthoCam=new THREE.OrthographicCamera(-frustumWidth/2,frustumWidth/2,frustumHeight/2,-frustumHeight/2, _evModelScaleSize*0.01, _evModelScaleSize*100);
-  orthoCam.position.set(center.x, box.max.y+_evModelScaleSize*2.0, center.z);
-  orthoCam.lookAt(center);
-
-  _evRenderer.render(_evScene, orthoCam);
-  const mimeType=isPdfMode?'image/jpeg':'image/png';
-  const dataURL=_evRenderer.domElement.toDataURL(mimeType,1.0);
-
-  if(isPdfMode){
-    savedMats.forEach(item=>{
-      if(item.mesh.material) item.mesh.material.dispose();
-      item.mesh.material=item.mat;
-      item.mesh.children.forEach(c=>{ if(c.isLineSegments) c.material.color.setHex(0x222222); });
-    });
-    _evResultGroup.children.forEach(child=>{ if(child.isSprite) child.visible=true; });
-    _evSubLabelGroup.visible=false;
-    _evFineLineGroup.visible=false;
-  }
-  return dataURL;
-}
-
-// エビル generateExcelData() の移植版
-function _evGenerateExcelData(){
-  const fontFamily="メイリオ";
-  const headerStyle={fill:{fgColor:{rgb:"2C3E50"}}, font:{name:fontFamily,sz:10,color:{rgb:"FFFFFF"},bold:true}, alignment:{horizontal:"center",vertical:"center"}, border:{top:{style:"thin",color:{rgb:"000000"}},bottom:{style:"thin",color:{rgb:"000000"}}}};
-  const parentStyle={fill:{fgColor:{rgb:"E8F8F5"}}, font:{name:fontFamily,sz:10,bold:true,color:{rgb:"111111"}}, alignment:{vertical:"center"}, border:{top:{style:"thin",color:{rgb:"BDC3C7"}},bottom:{style:"thin",color:{rgb:"BDC3C7"}}}};
-  const parentNumStyle=Object.assign({},parentStyle,{alignment:{horizontal:"right",vertical:"center"}});
-  const childStyle={font:{name:fontFamily,sz:10,color:{rgb:"555555"}}, alignment:{vertical:"center"}};
-  const childNumStyle=Object.assign({},childStyle,{alignment:{horizontal:"right",vertical:"center"}});
-  const totalStyle={fill:{fgColor:{rgb:"FADBD8"}}, font:{name:fontFamily,sz:10,bold:true,color:{rgb:"C0392B"}}, alignment:{vertical:"center"}, border:{top:{style:"double",color:{rgb:"C0392B"}},bottom:{style:"thin",color:{rgb:"C0392B"}}}};
-  const totalNumStyle=Object.assign({},totalStyle,{alignment:{horizontal:"right",vertical:"center"}});
-
-  const cautionStyle={font:{name:fontFamily,sz:11,bold:true,color:{rgb:"C0392B"}}, alignment:{horizontal:"left",vertical:"center"}};
-
-  const sheetData=[
-    // 新4(2026-08-28 引継ぎ18回目マスター指示): 出力データ冒頭に参考値注記を追加
-    [{v:'このアプリの値は参考値です。値を使用する前に必ず、自分で確認をしましょう。',s:cautionStyle}],
-    [],
-    ['No.','ブロック種別 / 明細','箇所 / 平面積根拠','平面積 S (m²)','公式換算深さ H (m)','形状係数 K','体積 V (m³)','備考'].map(text=>({v:text,s:headerStyle}))
-  ];
-  let currentRow=4;
-
-  _evAnalysisData.forEach(d=>{
-    const childrenStartRow=currentRow+1, childrenEndRow=currentRow+d.subFaces.length;
-    sheetData.push([
-      {v:d.no.toString(),s:parentStyle},
-      {v:d.type,s:parentStyle},
-      {v:d.location,s:parentStyle},
-      {t:'n',v:d.S,z:"0.000",f:`SUBTOTAL(9, D${childrenStartRow}:D${childrenEndRow})`,s:parentNumStyle},
-      {t:'n',v:d.H,z:"0.000",s:parentNumStyle},
-      {t:'n',v:d.K,z:"0.000",s:parentNumStyle},
-      {t:'n',v:d.volume,z:"0.000",f:`SUBTOTAL(9, G${childrenStartRow}:G${childrenEndRow})`,s:parentNumStyle},
-      {v:`${d.note}`,s:parentStyle}
-    ]);
-    currentRow++;
-    d.subFaces.forEach((sub,idx)=>{
-      const isLast=idx===d.subFaces.length-1;
-      const branchChar=isLast?'└':'├';
-      sheetData.push([
-        {v:`  ${sub.subNo}`,s:childStyle},
-        {v:`  ${branchChar} ポリゴン #${sub.id}`,s:childStyle},
-        {v:`[3辺] ${sub.areaFormula}`,s:childStyle},
-        {t:'n',v:sub.S,z:"0.000",s:childNumStyle},
-        {t:'n',v:sub.H,z:"0.000",s:childNumStyle},
-        {t:'n',v:sub.K,z:"0.000",s:childNumStyle},
-        {t:'n',v:sub.V,z:"0.000",f:`D${currentRow}*E${currentRow}*F${currentRow}`,s:childNumStyle},
-        {v:`[H根拠] ${sub.hFormula}`,s:childStyle}
-      ]);
-      currentRow++;
-    });
-  });
-
-  const totalRowIndex=currentRow;
-  sheetData.push([
-    {v:'合計',s:totalStyle},{v:'',s:totalStyle},{v:'',s:totalStyle},{v:'',s:totalStyle},{v:'',s:totalStyle},
-    {v:'総合計体積',s:totalStyle},
-    {t:'n',v:0,z:"0.000",f:`SUBTOTAL(9, G4:G${totalRowIndex-1})`,s:totalNumStyle},
-    {v:'',s:totalStyle}
-  ]);
-
-  const wb=XLSX.utils.book_new();
-  const ws=XLSX.utils.aoa_to_sheet(sheetData);
-  ws['!cols']=[{wch:8},{wch:22},{wch:28},{wch:14},{wch:16},{wch:12},{wch:14},{wch:45}];
-  XLSX.utils.book_append_sheet(wb, ws, "求積計算書 (明細ツリー)");
-  return XLSX.write(wb,{bookType:'xlsx',type:'array'});
-}
-
-// エビル generatePDFData() の移植版
-function _evGeneratePDFData(){
-  const imgData=_evRenderPlanView(4096,true);
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a3"});
-  doc.addImage(imgData,'JPEG',0,0,420,297);
-  return doc.output('arraybuffer');
-}
-
-// r070マスター指摘対応②: データ出力完了時の目立つ注意書き付きダイアログ。
-// 既存のconfirm-modal(HTML側で定義済み・_confirmQueueで直列化)を流用しつつ、
-// このダイアログだけ横長・注意書き強調のためinnerHTMLとwidth指定を一時的に上書きする。
-function _evShowCompleteDialog(summaryLine){
-  const run = ()=> new Promise(resolve=>{
-    const m=document.getElementById('confirm-modal');
-    const c=m.querySelector('.modal-c');
-    const msgEl=document.getElementById('confirm-modal-msg');
-    const iconEl=document.getElementById('confirm-modal-icon');
-    const prevWidth=c.style.width, prevMaxWidth=c.style.maxWidth;
-    const prevWS=msgEl.style.whiteSpace, prevTA=msgEl.style.textAlign;
-    const prevIcon=iconEl.textContent;
-
-    c.style.width='560px'; c.style.maxWidth='92vw';
-    msgEl.style.whiteSpace='normal'; msgEl.style.textAlign='left';
-    iconEl.textContent='📊';
-    msgEl.innerHTML =
-      `<div style="text-align:center;font-weight:bold;font-size:1.05em;margin-bottom:10px;">データ出力が完了しました</div>`+
-      `<div style="text-align:center;color:#b0bec5;font-size:.85em;margin-bottom:14px;">${summaryLine}</div>`+
-      `<div style="background:#4a3300;border:1px solid #ffb300;border-radius:6px;padding:10px 14px;color:#ffd54f;font-weight:bold;font-size:.85em;line-height:1.7;">`+
-      `⚠ 3D表示とExcelでは体積の計算方法が異なるため、多少の誤差が生じます`+
-      `</div>`;
-
-    m.style.display='flex';
-    const yesBtn=document.getElementById('confirm-modal-yes');
-    const noBtn=document.getElementById('confirm-modal-no');
-    const prevLabel=yesBtn.textContent;
-    yesBtn.textContent='OK';
-    noBtn.style.display='none';
-    const cleanup=()=>{
-      m.style.display='none';
-      yesBtn.textContent=prevLabel;
-      noBtn.style.display='';
-      msgEl.innerHTML='';
-      msgEl.style.whiteSpace=prevWS; msgEl.style.textAlign=prevTA;
-      iconEl.textContent=prevIcon;
-      c.style.width=prevWidth; c.style.maxWidth=prevMaxWidth;
-      resolve();
-    };
-    yesBtn.addEventListener('click',cleanup,{once:true});
-  });
-  const next=_confirmQueue.then(run);
-  _confirmQueue=next.catch(()=>{});
-  return next;
-}
-
-// メインエントリ: ボタンから呼ばれる。mode='structure'(躯体解析) or 'earthwork'(掘削土量解析)
-async function runEvidenceAnalysis(mode){
-  // 【問題A・将来課題の記録・2026-08-24マスター指示】現状はアイデア2(エビル側の
-  // SLOPE判定閾値0.2)＋問題B(垂直面回避ハックの固定15mmオフセット化)のみ実装し、
-  // アイデア3(エビル計算専用にテーパー0度の別GLBを都度再生成する案)は複雑さ・
-  // Manifoldクラッシュリスクに対して得られる精度改善が小さいと判断し保留にしている。
-  // ただし将来、現場データで想定外に大きい誤差や壁面誤認が再発した場合は、
-  // アイデア3(buildManifoldUnionGeom等にテーパー無効化フラグを追加し、データ出力
-  // ボタン押下時だけ表示用キャッシュ(_lastGeoms)をバイパスして再計算する方式)が
-  // 次の一手になる。詳細な比較検討は「Voldia 3Dメッシュ生成およびエビル統合に
-  // 関する改修方針.md」(2026-08-24マスター作成)を参照。
-  const btnId=mode==='structure'?'btn-analyze-structure':'btn-analyze-earthwork';
-  const btn=document.getElementById(btnId);
-  const btnGlb=document.getElementById('btn-glb'); // r070: GLB出力は本機能に統合済み、単体ボタンはOFFのまま
-  if(btn)btn.disabled=true;
-  const epTitleEl=document.getElementById('exp-prog')?.querySelector('.ep-title');
-  if(epTitleEl) epTitleEl.textContent='⚙ データ出力（Excel/PNG/PDF/GLB）生成中...';
-  document.getElementById('exp-prog').classList.add('show');
-  epSet(0,'Union水密メッシュを準備中...');
-  await new Promise(r=>setTimeout(r,20));
-  try{
-    const {glb, totalVerts, totalTris}=await buildVoldiaGLBBytes(epSet);
-    epSet(45,'メッシュ解析中（面分類・グルーピング）...');
-    await new Promise(r=>setTimeout(r,20));
-    const {totalVolume, count}=await _evRunAnalysis(mode, glb);
-    if(count===0){
-      throw new Error('計算対象となる面が抽出できませんでした');
-    }
-    epSet(60,'Excel計算書を生成中...');
-    await new Promise(r=>setTimeout(r,20));
-    const excelData=_evGenerateExcelData();
-
-    epSet(75,'配置図(PNG)を生成中...');
-    await new Promise(r=>setTimeout(r,20));
-    const pngDataUrl=_evRenderPlanView(2048,false);
-    const pngBase64=pngDataUrl.split(',')[1];
-
-    epSet(88,'全明細CAD図面(PDF)を生成中...');
-    await new Promise(r=>setTimeout(r,20));
-    const pdfData=_evGeneratePDFData();
-
-    epSet(95,'ZIPに圧縮中...');
-    await new Promise(r=>setTimeout(r,20));
-    // r072マスター指定の命名規則: 「YYMMDDHHMMSS_Voldia_○○export」(○○=Structure/Earthwork)
-    const modeWord=(mode==='structure')?'Structure':'Earthwork';
-    const baseName=`${getVoldiaTimestamp()}_Voldia_${modeWord}export`;
-
-    const zip=new JSZip();
-    zip.file(`${baseName}.xlsx`, excelData);
-    zip.file(`${baseName}.png`, pngBase64, {base64:true});
-    zip.file(`${baseName}.pdf`, pdfData);
-    zip.file(`${baseName}.glb`, glb); // r070(マスター指示): GLBも一緒に出力
-
-    const zipBlob=await zip.generateAsync({type:'blob'});
-    epSet(100,'完了！');
-    const url=URL.createObjectURL(zipBlob);
-    const a=Object.assign(document.createElement('a'),{href:url, download:`${baseName}.zip`});
-    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
-
-    document.getElementById('exp-prog').classList.remove('show');
-    if(btn)btn.disabled=false;
-    _evShowCompleteDialog(`${count}ブロック / 総合計 ${totalVolume.toFixed(2)} m³ / ${totalVerts}頂点`);
-  }catch(e){
-    console.error(e);
-    document.getElementById('exp-prog').classList.remove('show');
-    if(btn)btn.disabled=false;
-    toast(`⚠ データ出力の生成に失敗しました: ${e.message||e}`, 4000);
-  }
-}

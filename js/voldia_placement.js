@@ -1,495 +1,7 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Voldia 配置モード（開発中） v0021</title>
-<style>
-  body { margin: 0; overflow: hidden; background-color: #3a4045; color: #fff; font-family: 'Segoe UI', sans-serif; }
+// ============================================================
+// voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
+// ============================================================
 
-  /* Voldia版: 左側UIパネル（PLAN, 戻るボタン, 使い方） */
-  #left-panel {
-    position: absolute; top: 15px; left: 15px; z-index: 10;
-    display: flex; flex-direction: column; gap: 10px;
-  }
-
-  /* 戻るボタン: Voldia本体側の#btn-calc-back(◀ 戻る)と配色・体裁を統一。
-     本体では赤(#c0392b系)は「キャンセル/削除」用の色として使われているため、
-     単なる画面遷移である「戻る」に赤を使うと本体の配色規約と衝突する。
-     本体に合わせてグレー基調(#444/#666/#ccc)に変更。 */
-  #voldia-back-btn {
-    background: #444; color: #ccc; border: 1px solid #666; border-radius: 4px;
-    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
-    width: 100%; box-sizing: border-box; text-align: center;
-  }
-  #voldia-back-btn:hover { background: #555; }
-  #voldia-save-btn {
-    background: #2e7d32; color: #fff; border: 1px solid #4caf50; border-radius: 4px;
-    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
-    box-sizing: border-box; white-space: nowrap;
-  }
-  #voldia-save-btn:hover { background: #388e3c; }
-  #voldia-save-btn:disabled { opacity: 0.6; cursor: default; }
-  #voldia-print-btn {
-    background: #37474f; color: #cfd8dc; border: 1px solid #607d8b; border-radius: 4px;
-    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
-    margin-top: 6px;
-  }
-  #voldia-print-btn:hover { background: #455a64; }
-  #voldia-print-btn:disabled { opacity: 0.6; cursor: default; }
-
-  /* 「使い方」ボタン周り */
-  /* r062: マウスオーバー表示→クリックで開閉するボタン式に変更。
-     表示中は#help-block-overlayが画面全体(地形3Dビュー含む)を覆い、
-     作図・カメラ操作を停止する。ツールチップ自体はオーバーレイより
-     高いz-indexに置き、中の「地形(GLB)を手動読込」ボタンは操作可能なままにする。
-     画面の他の場所(オーバーレイ部分)をクリックすると閉じる。 */
-  #help-btn-wrap { position: relative; }
-  #help-btn {
-    background: rgba(20, 30, 40, 0.9); color: #a5d6a7; border: 1px solid #4caf50; border-radius: 6px;
-    padding: 7px 14px; font-size: 0.85em; font-weight: bold; cursor: pointer;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-  }
-  #help-tooltip {
-    display: none; margin-top: 6px; width: 330px; position: relative; z-index: 251;
-    background: rgba(20, 30, 40, 0.95); padding: 15px; border-left: 5px solid #4caf50; border-radius: 6px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-size: 0.85em; color: #ccc; line-height: 1.6;
-  }
-  #help-tooltip.show { display: block; }
-  #help-block-overlay {
-    display: none; position: fixed; inset: 0; z-index: 250;
-    background: rgba(0,0,0,.45); cursor: not-allowed;
-  }
-  #help-block-overlay.show { display: block; }
-
-  /* Voldia版: 保存不可の常設バナー */
-  .load-btn {
-    display: inline-block; margin-top: 10px; background: #2e7d32; color: #fff; pointer-events: auto;
-    border: 1px solid #4caf50; border-radius: 4px; padding: 6px 12px;
-    font-size: 0.85em; cursor: pointer; font-weight: bold; transition: background 0.2s;
-  }
-  .load-btn:hover { background: #388e3c; }
-
-  #ui-container {
-    position: absolute; top: 15px; right: 15px; z-index: 10;
-    width: 260px; display: flex; flex-direction: column; gap: 10px;
-    max-height: 95vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
-  }
-  
-  #radar-wrapper {
-    background: rgba(10, 20, 30, 0.9); border: 2px solid #4caf50; border-radius: 8px;
-    padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
-  }
-  #radar-title { font-size: 0.8em; color: #81c784; margin-bottom: 5px; text-align: center; font-weight: bold; letter-spacing: 1px;}
-  #radar-canvas {
-    width: 216px; height: 216px; background: #0b1116; border: 1px solid #333; cursor: crosshair;
-    background-image: linear-gradient(#1a2a1a 1px, transparent 1px), linear-gradient(90deg, #1a2a1a 1px, transparent 1px);
-    background-size: 21.6px 21.6px;
-    margin: 0 auto; display: block;
-  }
-
-  #palette {
-    background: rgba(20, 30, 40, 0.9); border: 1px solid #444; border-radius: 8px;
-    padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
-  }
-  .pal-title { font-size: 0.75em; color: #aaa; margin-bottom: 6px; margin-top: 6px; border-bottom: 1px solid #444; padding-bottom: 3px; }
-  .pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-  .pal-btn {
-    background: #2a3a4a; border: 1px solid #3a5a7a; color: #cde; border-radius: 4px;
-    padding: 6px; font-size: 0.75em; cursor: pointer; transition: all 0.2s;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .pal-btn:hover { background: #3a5a7a; }
-  .pal-btn.active { background: #4caf50; border-color: #81c784; color: #fff; font-weight: bold; }
-
-  /* スクロールバー装飾 */
-  #ui-container::-webkit-scrollbar { width: 6px; }
-  #ui-container::-webkit-scrollbar-thumb { background: #4caf50; border-radius: 3px; }
-
-  #controls {
-    position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.7); padding: 8px 15px; border-radius: 20px; font-size: 0.8em; color: #ccc;
-    pointer-events: none; border: 1px solid #555;
-  }
-  #controls span { color: #4caf50; font-weight: bold; }
-
-  #loading {
-    position: absolute; inset: 0; background: rgba(0,0,0,0.8); z-index: 9999;
-    display: none; align-items: center; justify-content: center; font-size: 1.5em; color: #4caf50; font-weight: bold;
-  }
-
-  #toast {
-    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-    background: rgba(231, 76, 60, 0.9); border: 2px solid #c0392b; border-radius: 8px;
-    padding: 10px 20px; color: #fff; font-weight: bold; font-size: 1em;
-    pointer-events: none; z-index: 1000; opacity: 0; transition: opacity 0.3s;
-  }
-
-  /* 配置モード案内メッセージ */
-  #placement-mode-msg {
-    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-    background: rgba(46, 125, 50, 0.9); border: 2px solid #4caf50; border-radius: 30px;
-    padding: 12px 30px; color: #fff; font-weight: bold; font-size: 1.1em;
-    pointer-events: auto; z-index: 1000; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-    text-align: center; line-height: 1.4;
-  }
-  #placement-mode-msg span {
-    font-size: 0.8em; color: #c8e6c9; font-weight: normal; pointer-events: none;
-  }
-
-  /* カラーピッカー (線用) */
-  #line-color-picker {
-    display: none; justify-content: center; gap: 10px; margin-top: 10px;
-  }
-  .color-btn {
-    width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; transition: transform 0.2s;
-  }
-  .color-btn:hover { transform: scale(1.2); }
-  .color-btn.active { outline: 3px solid #4caf50; outline-offset: 2px; }
-  
-  /* 線引き終了ボタン */
-  #finish-line-btn {
-    display: none; margin-top: 15px; background: #c0392b; border: 2px solid #e74c3c;
-    color: white; padding: 6px 20px; border-radius: 20px; cursor: pointer;
-    font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-    transition: all 0.2s;
-  }
-  #finish-line-btn:hover { background: #e74c3c; transform: scale(1.05); }
-
-  /* テンキーUI */
-  #numpad-ui {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
-    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-    display: none; z-index: 1000; width: 220px;
-  }
-  #numpad-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 5px; text-align: center; font-weight: bold; }
-  #numpad-warning { font-size: 0.7em; color: #ffab91; margin-bottom: 10px; text-align: center; line-height: 1.3; }
-  #numpad-display {
-    background: #0b1116; color: #4caf50; font-size: 1.8em; text-align: right; padding: 10px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #333;
-  }
-  .numpad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .numpad-btn {
-    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.2em; padding: 12px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
-  }
-  .numpad-btn:hover { background: #3a5a7a; }
-  .numpad-ok { background: #2e7d32; border-color: #4caf50; font-weight: bold; }
-  .numpad-ok:hover { background: #388e3c; }
-  #numpad-cancel {
-    width: 100%; background: #c0392b; border: 1px solid #e74c3c; color: #fff; margin-top: 10px; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold;
-  }
-  #numpad-cancel:hover { background: #e74c3c; }
-
-  /* カスタムボックス入力UI */
-  #box-input-ui {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
-    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-    display: none; z-index: 1000; width: 260px;
-  }
-  #box-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
-  .box-inputs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
-  .box-input-group {
-    display: flex; justify-content: space-between; align-items: center;
-    background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.9em; transition: 0.2s;
-  }
-  .box-input-group.active { border-color: #4caf50; color: #4caf50; font-weight: bold; }
-  .box-val { font-size: 1.2em; color: #fff; width: 60px; text-align: right; }
-  
-  .box-colors { display: flex; justify-content: space-between; margin-bottom: 15px; }
-  .b-color-btn {
-    width: 24px; height: 24px; border-radius: 4px; border: 2px solid #333; cursor: pointer; transition: transform 0.2s;
-  }
-  .b-color-btn:hover { transform: scale(1.1); }
-  .b-color-btn.active { border-color: #fff; outline: 2px solid #4caf50; outline-offset: 1px; }
-  
-  .box-numpad-btn {
-    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.1em; padding: 8px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
-  }
-  .box-numpad-btn:hover { background: #3a5a7a; }
-
-  /* テキスト入力UI */
-  #text-input-ui {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
-    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-    display: none; z-index: 1000; width: 300px;
-  }
-  #text-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 10px; text-align: center; font-weight: bold; }
-  #text-input-area {
-    width: 100%; height: 100px; background: #0b1116; color: #fff; border: 1px solid #333; border-radius: 4px;
-    padding: 8px; font-size: 1em; resize: none; outline: none; font-family: 'Segoe UI', sans-serif; box-sizing: border-box;
-  }
-  .text-ui-btns { display: flex; gap: 10px; margin-top: 15px; }
-  .text-ui-btn { flex: 1; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; border: none; color: #fff; }
-  #text-btn-ok { background: #2e7d32; } #text-btn-ok:hover { background: #388e3c; }
-  #text-btn-cancel { background: #c0392b; } #text-btn-cancel:hover { background: #e74c3c; }
-
-  /* カスタム確認ダイアログ */
-  /* r062: 元は#custom-confirm-box(IDセレクタ)だったが、構台削除確認ダイアログ側は
-     class="custom-confirm-box"で参照していたためCSSが一切当たっておらず、
-     見た目が「線を削除しますか？」ダイアログと異なって見えていた(根本原因)。
-     クラスセレクタに統一し、両方の確認ダイアログが同じ見た目になるようにした。 */
-  #custom-confirm-overlay {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0, 0, 0, 0.6); z-index: 2000; display: none;
-    align-items: center; justify-content: center;
-  }
-  .custom-confirm-box {
-    background: #2a3a4a; border: 2px solid #e74c3c; border-radius: 8px;
-    padding: 20px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-    text-align: center; min-width: 250px;
-  }
-  #custom-confirm-msg {
-    font-size: 1.1em; color: #fff; margin-bottom: 20px; font-weight: bold;
-  }
-  .custom-confirm-btns {
-    display: flex; justify-content: center; gap: 15px;
-  }
-  .custom-confirm-btn {
-    padding: 8px 20px; font-size: 1em; border-radius: 4px; cursor: pointer; font-weight: bold; border: none;
-  }
-  #custom-confirm-yes { background: #e74c3c; color: #fff; }
-  #custom-confirm-yes:hover { background: #c0392b; }
-  #custom-confirm-no { background: #555; color: #fff; }
-  #custom-confirm-no:hover { background: #333; }
-</style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-</head>
-<body>
-
-<!-- 新6(2026-08-24 引継ぎ19回目マスター指示): 配置モードにもノースアロー(2D)を
-     設置。本体側と同じ「測点が1つ以上ある時だけ表示」条件で、カメラの水平回転
-     (方位)に合わせてアイコンを回転させる。実際の回転更新はanimate()内、
-     表示/非表示切替はupdateCompassVisibility()参照。 -->
-<div id="placement-compass-wrap" style="position:fixed;left:16px;bottom:16px;z-index:500;display:none;
-     width:56px;height:56px;border-radius:50%;background:rgba(20,20,20,.72);
-     border:2px solid #64b5f6;box-shadow:0 2px 8px rgba(0,0,0,.5);pointer-events:none;">
-  <div id="placement-compass-rotor" style="width:100%;height:100%;transform-origin:50% 50%;transform:rotate(0deg);">
-    <svg viewBox="0 0 56 56" width="56" height="56">
-      <polygon points="28,8 22,30 28,25 34,30" fill="#e8391f"/>
-      <polygon points="28,48 22,30 28,33 34,30" fill="#cfd8dc"/>
-      <text x="28" y="19" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">N</text>
-    </svg>
-  </div>
-</div>
-
-<div id="left-panel">
-  <button id="voldia-back-btn" style="width:100%;box-sizing:border-box;">◀ Voldiaに戻る</button>
-  <button id="voldia-save-btn" style="width:100%;box-sizing:border-box;">📤 Vold出力</button>
-  <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷(A3 PDF)</button>
-  <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
-
-  <!-- r071(20回目引継ぎ・マスター要望): 影の精度(shadow.mapSize)を軽量/標準/高画質の
-       3段階から選べるUI。4096は綺麗だが重い可能性があるため選択式にし、デフォルトは
-       標準(2048)。 -->
-  <div id="shadow-quality-group" style="margin-top:6px;padding:6px;background:#1a1a1a;border-radius:4px;">
-    <div style="font-size:.68em;color:#888;margin-bottom:4px;">影の精度</div>
-    <div style="display:flex;gap:3px;">
-      <button class="shadow-q-btn" data-size="1024" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">軽量</button>
-      <button class="shadow-q-btn active" data-size="2048" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#d0d0d0;color:#000;border:1px solid #d0d0d0;font-weight:bold;cursor:pointer;">標準</button>
-      <button class="shadow-q-btn" data-size="4096" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">高画質</button>
-    </div>
-  </div>
-
-  <!-- r064: PLANビュー(レーダー)は表示から除外。内部の描画/クリック処理には
-       他の箇所からまだ参照があるため、要素自体は残しdisplay:noneのみで隠す
-       (丸ごと削除すると radarCtx 参照エラーで壊れる箇所が多数あるため安全策)。 -->
-  <div id="radar-wrapper" style="display:none;">
-    <div id="radar-title">PLAN</div>
-    <canvas id="radar-canvas" width="216" height="216"></canvas>
-  </div>
-
-  <div id="help-btn-wrap">
-    <div id="help-block-overlay"></div>
-    <div id="help-btn">❔ 使い方</div>
-    <div id="help-tooltip">
-      <h1 style="margin:0 0 8px;font-size:1.05em;color:#a5d6a7;">🏗️ Voldia 配置モード</h1>
-      <p>    1. パレット選択で <b>配置モードON</b> (右クリックで解除)<br>
-       2. 配置モード中: 3D地形を <b>左クリック</b> で配置<br>
-       3. 通常モード時: <b>左/右ドラッグ</b> で移動・回転<br>
-       4. 通常モード時: 重機類を <b>左クリック</b> で回転(15度)<br>
-       5. 通常モード時: コメントと矢印は <b>ダブルクリック</b> で拡大(1〜3倍)<br>
-       6. 通常モード時: クレーンを <b style="color:#ef5350;">右クリック</b> で作業半径記入<br>
-       7. 通常モード時: 線を <b>ダブルクリック</b> で削除<br>
-       8. クレーン上体や矢印は <b style="color:#4fc3f7;">青い点</b> を<b>ドラッグ</b>で水平旋回<br>
-       <span style="color:#f1c40f;">※ 各ツールは1回使用すると自動終了します。連続配置時は都度選択してください。</span><br>
-       <span style="color:#888;font-size:0.9em;">※ オブジェクトのサイズ・形状は正確ではありません。<br>
-       　重機等の形状を簡略化しているのは、低性能のPCでも動くように配慮したためです。</span></p>
-      <button id="load-glb-btn" class="load-btn" onclick="document.getElementById('glb-input').click()" style="margin-top:10px;">📂 地形(GLB)を手動読込</button>
-      <input type="file" id="glb-input" accept=".glb,.gltf" style="display:none">
-    </div>
-  </div>
-</div>
-
-<div id="placement-mode-msg">
-  <span id="placement-msg-text" style="font-size:1em; color:#fff; font-weight:bold;">✨ 選択したオブジェクトを配置してください</span><br>
-  <span id="placement-msg-sub">（右クリックでキャンセル）</span>
-  
-  <div id="line-color-picker">
-    <div class="color-btn" style="background: #e74c3c;" data-color="0xe74c3c"></div>
-    <div class="color-btn active" style="background: #f1c40f;" data-color="0xf1c40f"></div>
-    <div class="color-btn" style="background: #3498db;" data-color="0x3498db"></div>
-    <div class="color-btn" style="background: #111111;" data-color="0x111111"></div>
-  </div>
-  
-  <br><button id="finish-line-btn">線引き終了</button>
-</div>
-
-<!-- r025(マスター指示・追1): 測点フラグのホバーツールチップ -->
-<div id="flag-hover-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.78);color:#fff;padding:3px 9px;border-radius:4px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;"></div>
-<div id="line-close-tip" style="display:none;position:fixed;z-index:9000;background:rgba(231,76,60,.92);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">🔒 閉じる（終了）</div>
-<!-- r073(21回目引継ぎ・マスター要望「構台にマウスオーバーで削除方法を表示」): 既存のline-close-tipと同じ「カーソル追従」パターンを流用 -->
-<div id="kotai-delete-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.8);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">🗑️ ダブルクリックで削除</div>
-
-<div id="ui-container">
-  <div id="palette">
-    <div class="pal-title">📏 計画ツール</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="line">線を引く (Line)</button>
-      <button class="pal-btn" data-type="text_balloon">💬 コメント</button>
-      <button class="pal-btn" data-type="custom_box_input">📦 ボックス</button>
-      <button class="pal-btn" data-type="arrow">➡ 矢印</button>
-    </div>
-
-    <div class="pal-title">🚜 掘削機 (Backhoe)</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="bh_mini">ミニBH</button>
-      <button class="pal-btn" data-type="bh_025">0.25m³ BH</button>
-      <button class="pal-btn" data-type="bh_045">0.45m³ BH</button>
-      <button class="pal-btn" data-type="bh_07">0.7m³ BH</button>
-      <button class="pal-btn" data-type="bh_12">1.2m³ BH</button>
-      <button class="pal-btn" data-type="bd_08t">8t級 ブル</button>
-      <button class="pal-btn" data-type="bd_13t">13t級 ブル</button>
-      <button class="pal-btn" data-type="bd_20t">20t級 ブル</button>
-    </div>
-    
-    <div class="pal-title">🏗️ クレーン類</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="rt_16t">16t ラフター</button>
-      <button class="pal-btn" data-type="rt_25t">25t ラフター</button>
-      <button class="pal-btn" data-type="rt_60t">60t ラフター</button>
-      <button class="pal-btn" data-type="cr_80t">80t クローラー</button>
-    </div>
-
-    <div class="pal-title">🚚 ダンプ (Dump Truck)</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="dump_4t">4tダンプ</button>
-      <button class="pal-btn" data-type="dump_10t">10tダンプ</button>
-      <button class="pal-btn" data-type="mx_10t">生コン車</button>
-      <button class="pal-btn" data-type="cp_10t">ポンプ車</button>
-    </div>
-    <div class="pal-title">👷 人員 (Workers)</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="worker">作業員</button>
-      <button class="pal-btn" data-type="guard">警備員</button>
-    </div>
-    <div class="pal-title">🚧 保安用品 (Safety)</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="conebar" style="grid-column: 1 / -1;">カラーコーン＆バー</button>
-    </div>
-
-    <div class="pal-title">🏗️ 仮設構造物</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="kotai" style="grid-column: 1 / -1;">🏗️ 構台</button>
-      <button class="pal-btn" data-type="h_pile" style="grid-column: 1 / -1;">🔩 鋼材柱 (H鋼杭)</button>
-    </div>
-  </div>
-</div>
-
-<div id="controls">
-  🖱 <span>左/右ドラッグ</span>:オービット(3D回転) ｜ 🖱 <span>中ドラッグ</span>:パン(画面移動) ｜ ⚙️ <span>ホイール</span>:ズーム
-</div>
-
-<div id="loading">GLB 解析・再構築中...</div>
-<div id="toast">⚠️ オブジェクトが奈落へ落ちました</div>
-
-<!-- テンキーUI -->
-<div id="numpad-ui">
-  <div id="numpad-title">作業半径を入力 (m)</div>
-  <div id="numpad-warning">※この作業半径は“おおまかな円”です。<br>正確ではありませんので注意してください。</div>
-  <div id="numpad-display">0</div>
-  <div class="numpad-grid">
-    <button class="numpad-btn">7</button><button class="numpad-btn">8</button><button class="numpad-btn">9</button>
-    <button class="numpad-btn">4</button><button class="numpad-btn">5</button><button class="numpad-btn">6</button>
-    <button class="numpad-btn">1</button><button class="numpad-btn">2</button><button class="numpad-btn">3</button>
-    <button class="numpad-btn">0</button><button class="numpad-btn">.</button><button class="numpad-btn">C</button>
-    <button class="numpad-btn numpad-ok" style="grid-column: 1 / -1;">決 定 (OK)</button>
-  </div>
-  <button id="numpad-cancel">キャンセル</button>
-</div>
-
-<!-- カスタムボックス入力UI -->
-<div id="box-input-ui">
-  <div id="box-input-title">📦 ボックス設定 (m)</div>
-  <div class="box-inputs">
-    <div class="box-input-group" data-target="boxW">
-      <span>幅 (X)</span> <span id="box-val-boxW" class="box-val">1.0</span>
-    </div>
-    <div class="box-input-group" data-target="boxD">
-      <span>奥行 (Z)</span> <span id="box-val-boxD" class="box-val">1.0</span>
-    </div>
-    <div class="box-input-group" data-target="boxH">
-      <span>高さ (Y)</span> <span id="box-val-boxH" class="box-val">1.0</span>
-    </div>
-  </div>
-  
-  <div class="box-colors">
-    <div class="b-color-btn active" style="background:#e74c3c" data-color="0xe74c3c"></div>
-    <div class="b-color-btn" style="background:#3498db" data-color="0x3498db"></div>
-    <div class="b-color-btn" style="background:#f1c40f" data-color="0xf1c40f"></div>
-    <div class="b-color-btn" style="background:#2ecc71" data-color="0x2ecc71"></div>
-    <div class="b-color-btn" style="background:#9b59b6" data-color="0x9b59b6"></div>
-    <div class="b-color-btn" style="background:#95a5a6" data-color="0x95a5a6"></div>
-  </div>
-  
-  <div class="numpad-grid">
-    <button class="box-numpad-btn">7</button><button class="box-numpad-btn">8</button><button class="box-numpad-btn">9</button>
-    <button class="box-numpad-btn">4</button><button class="box-numpad-btn">5</button><button class="box-numpad-btn">6</button>
-    <button class="box-numpad-btn">1</button><button class="box-numpad-btn">2</button><button class="box-numpad-btn">3</button>
-    <button class="box-numpad-btn">0</button><button class="box-numpad-btn">.</button><button class="box-numpad-btn">C</button>
-  </div>
-  <div class="text-ui-btns">
-    <button id="box-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
-    <button id="box-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
-  </div>
-</div>
-
-<!-- テキスト入力UI -->
-<div id="text-input-ui">
-  <div id="text-input-title">コメントを入力</div>
-  <textarea id="text-input-area" placeholder="Enterで改行できます"></textarea>
-  <div class="text-ui-btns">
-    <button id="text-btn-cancel" class="text-ui-btn">キャンセル</button>
-    <button id="text-btn-ok" class="text-ui-btn">決 定</button>
-  </div>
-</div>
-
-<!-- カスタム確認ダイアログ -->
-<div id="custom-confirm-overlay">
-  <div id="custom-confirm-box" class="custom-confirm-box">
-    <div id="custom-confirm-msg">線を削除しますか？</div>
-    <div class="custom-confirm-btns">
-      <button id="custom-confirm-yes" class="custom-confirm-btn">はい</button>
-      <button id="custom-confirm-no" class="custom-confirm-btn">いいえ</button>
-    </div>
-  </div>
-</div>
-
-<!-- r063: 構台作図終了確認ダイアログ -->
-<div id="kotai-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;">
-  <div class="custom-confirm-box">
-    <div id="kotai-confirm-msg">構台作図を終了しますか？</div>
-    <div class="custom-confirm-btns">
-      <button id="kotai-confirm-yes" class="custom-confirm-btn">はい</button>
-      <button id="kotai-confirm-no" class="custom-confirm-btn">いいえ</button>
-    </div>
-  </div>
-</div>
-
-<script>
 console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み完了', 'color:#0f0;font-weight:bold;');
   window.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -519,6 +31,15 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   // 対数デプスバッファを有効化。PUSH_OUT等のオフセット量を増やす対処療法では
   // 根本解決しないため、この方式で統一する。
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // r076(21回目引継ぎ4回目・マスター報告「オブジェクトを置くまで矢印キーが効かない」):
+  // 親ページ側(display:none復帰時)のiframe.focus()呼び出しで主要因は解消したが、
+  // OS側の別ウインドウへの切替→復帰など、親ページのdisplay切替を経由しない
+  // フォーカス喪失パターンも起こり得るため、保険としてこちら側にも自動フォーカス
+  // 復帰策を入れておく。マウスがこの画面上にある間は、このドキュメントが
+  // フォーカスを失っていたら能動的に取り戻す(hasFocus()チェックのみなので
+  // 負荷はごく小さい)。
+  window.focus();
+  window.addEventListener('mousemove', () => { if (!document.hasFocus()) window.focus(); }, { passive: true });
   
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -534,8 +55,15 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
   controls.update();
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  // r012(27回目セッション根治修正): 環境光0.7+直射光1.0の合計1.7倍が、完全水平で
+  // 直射光をほぼ正面から受ける面(既存躯体の天端など)では0.565(#909090相当)×1.7≈0.96
+  // まで明るさが積み上がり、ほぼ白飛びしていたことが判明(レイキャスト診断でマテリアル
+  // 色自体は正しく#909090のままだったため、データではなく露出オーバーと確定)。
+  // 斜面が多い地形側は正面から光を受ける面が少なく目立たなかっただけで、今後どんな
+  // 水平な物体を追加しても同じ問題が起きうる根本原因だったため、ライト全体の強度を
+  // 白飛びしない範囲まで下げる(合計最大1.3倍、0.565×1.3≈0.73で白飛びしない)。
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.75);
   dirLight.position.set(30, 50, -20);
   dirLight.castShadow = true;
   dirLight.shadow.mapSize.width = 2048;
@@ -833,15 +361,26 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
         // FixedObjectsは複数の独立した立体を含み得るため、GL面境界ループ検出(customGround生成)
         // に混ぜると誤動作する。別枠(fixedObjTargets)に分離し、境界検出の対象からは外す。
         const fixedObjTargets = [];
+        // 26回目セッション新規: 既存躯体(グレー)ノード。fixedObjTargetsと全く同じ
+        // 理由(境界検出誤動作防止)で別枠に分離する。マスター指示により「体積とは
+        // 無関係、通常の地面や躯体を表示するのと同じ段階でオブジェクトを作るだけ」。
+        const existingStructTargets = [];
         terrain.traverse(child => {
           if (child.isMesh && child.geometry.index && !child.userData.isEdgeDecoration) {
             if (child.name === 'Voldia_FixedObjects') {
               fixedObjTargets.push(child);
+            } else if (child.name === 'Voldia_ExistingStructure') {
+              existingStructTargets.push(child);
             } else {
               terrainTargets.push(child);
             }
           }
         });
+        // r011: 診断ログ(terrainTargets/existingStructTargetsのbbox比較)により、
+        // 既存躯体の下端が捨てコン厚さ分深くなり地形床面とy座標が一致してz-fighting
+        // (白い板)を起こしていたことが判明・修正済み(このforEachループ内の
+        // position.yオフセットと、voldia_export.js側のr011修正を参照)。
+        // 縮退三角形は0件で無関係と判明したため、診断ログ自体は撤去。
         // 追加(2026-08-25引継ぎ19回目 B3対応): 通常計算→配置モードでは
         // Voldia_GLPlane(地面, y=0)とVoldia_FixedObjects(オブジェクト天端がy=0の
         // ケースがある)が同一平面に来てZファイティングを起こすとの報告。
@@ -924,6 +463,51 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
             const fixedLine = buildFatEdgeLines(child.geometry, 25, 0x0a1a3a, 0.75, 0.035);
             fixedLine.userData.isEdgeDecoration = true;
             child.add(fixedLine);
+            terrainMeshes.push(child);
+        });
+
+        // 26回目セッション新規: 既存躯体(グレー)。fixedObjTargetsと同様に
+        // 地形扱い(レイキャスト対象=クレーン等の設置面)にするが、色は仕様通り
+        // 常時グレー(SHAPE_COLORS_3D.grayと同じ#909090系)で固定する。
+        existingStructTargets.forEach(child => {
+            child.geometry.computeVertexNormals();
+            child.receiveShadow = true;
+            child.castShadow = true;
+            child.material = new THREE.MeshPhongMaterial({
+              color: 0x909090, side: THREE.DoubleSide, flatShading: true, shininess: 10,
+              // r013(28回目セッション): 「白い天端の上に黒い対角線が乗って見える」不具合。
+              // シャドウ品質(mapSize)を変えても線が変わらず、Yオフセット量を増やすと
+              // 薄くなり最終的に消えることをマスター実機で確認済み → シャドウアクネでは
+              // なく正真正銘のz-fighting(掘削シェル側の本来の面/頂点と、既存躯体の天端が
+              // 空間的にほぼ一致していることが根本原因。3Dイメージ側r008と同根の設計上の
+              // 問題で、掘削シェル生成が既存躯体の存在を一切考慮しないためどうしても起こる)。
+              // Yオフセット(下記)を主たる対策としつつ、GPU側のポリゴンオフセットも
+              // 併用して余白を持たせる(特定のカメラ距離やスケールでオフセット量が
+              // ギリギリになっても粘れるようにするための二重の安全策で、値の勘だけに
+              // 頼らないための措置)。
+              // r014(28回目セッション): 60mmオフセットで通常視点では解消したが、
+              // マスター確認で「カメラを遠ざけると薄く再発する」ことが判明。これは
+              // 対数深度バッファであっても遠距離では深度分解能自体が粗くなるため、
+              // 固定のワールド座標オフセットだけでは絶対的な余白が相対的に足りなく
+              // なる典型パターン(r053のnear:far比コメントと同じ理屈)。距離が伸びても
+              // スロープ込みで効くpolygonOffset側を主対策として強化する方が筋がいいため、
+              // factor/unitsを-4→-10に引き上げ。
+              polygonOffset: true, polygonOffsetFactor: -10, polygonOffsetUnits: -10
+            });
+            child.userData.isExistingStructure = true;
+            // r011(27回目セッション): 既存躯体の天端が地形(掘削シェル)の頂点と
+            // Y座標で一致し、地形側のエッジ表現(buildFatEdgeLines、帯状ポリゴン)が
+            // 既存躯体の面とz-fightingを起こして白い板のように浮いて見える不具合が
+            // あった(3Dイメージ側のr008と同根)。表示専用でわずかに(20mm)持ち上げて
+            // 面の完全一致を避ける。エッジ装飾(esLine)はchild.addで子要素にしている
+            // ため、この位置移動に追従して一緒にずれるので見た目上の整合性は保たれる。
+            // r013(28回目セッション): マスター実機検証の結果、+10mmで薄くなり+50mmで
+            // 完全に消えることを確認。20mmでは不足だったため、確認済みの閾値に安全マージンを
+            // 足した60mmに引き上げる(表示専用オフセットのため体積計算等には影響しない)。
+            child.position.y += 0.06;
+            const esLine = buildFatEdgeLines(child.geometry, 25, 0x0a1a3a, 0.75, 0.035);
+            esLine.userData.isEdgeDecoration = true;
+            child.add(esLine);
             terrainMeshes.push(child);
         });
 
@@ -1104,6 +688,13 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
 
         dirLight.shadow.camera.left = -mapRange;
         dirLight.shadow.camera.right = mapRange;
+
+        // r012: 診断ログ(シーン全体ダンプ・Alt+クリックのレイキャスト)により、
+        // 白い板の正体は「別オブジェクトの混入」でも「z-fighting」でもなく、
+        // 完全水平な面(既存躯体の天端)にライトが正面から当たって白飛びしていた
+        // ことが判明・修正済み(このファイル冒頭のライト強度調整を参照)。
+        // 診断ログ自体は用済みのため撤去。
+
         dirLight.shadow.camera.top = mapRange;
         dirLight.shadow.camera.bottom = -mapRange;
         dirLight.shadow.camera.near = 0.1;
@@ -1122,11 +713,11 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
         // 到着順序に関わらず常に最新の地形と一致させる。
         if (_lastSurveyPoints.length > 0) placeSurveyFlags(_lastSurveyPoints);
         if (_lastYamadomeLine.length > 0) placeYamadomeMarker(_lastYamadomeLine, _lastYamadomeRealYTop, _lastYamadomeRealYBot, _lastYamadomeBatterDeg);
-        // [FIX 19回目 2026-08-30] グレー→青など、グレー壁面が無くなった時に
-        // ここで呼び出し自体をスキップすると、古いgrayWallMarkerGroupが
-        // 消えずに残ってしまうバグがあった(placeGrayWallMarkers自身は空データでも
+        // [FIX 19回目 2026-08-30] 紫→青など、紫壁面が無くなった時に
+        // ここで呼び出し自体をスキップすると、古いpurpleWallMarkerGroupが
+        // 消えずに残ってしまうバグがあった(placePurpleWallMarkers自身は空データでも
         // まず古いグループを消してくれるので、呼ぶこと自体は常に必要)。
-        placeGrayWallMarkers(_lastGrayWalls || { positions: [], uv: [] });
+        placePurpleWallMarkers(_lastPurpleWalls || { positions: [], uv: [] });
 
         document.getElementById('loading').style.display = 'none';
         document.getElementById('load-glb-btn').style.display = 'none';
@@ -1278,13 +869,13 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       _lastYamadomeRealYBot = d.realYBot;
       _lastYamadomeBatterDeg = d.batterDeg;
       placeYamadomeMarker(d.points, d.realYTop, d.realYBot, d.batterDeg);
-    } else if (d.type === 'voldia-gray-walls' && d.positions) {
+    } else if (d.type === 'voldia-purple-walls' && d.positions) {
       // 6D-6配置モード反映・根本修正版(2026-08-29 引継ぎ18回目マスター指示):
       // 2Dヒューリスティックによる再計算をやめ、本体側でManifoldのID追跡により
       // 実際に採用された壁面三角形(positions/uv)をそのまま受け取って描画するだけ。
       // 座標は既に配置モードと同じ基準・スケールに変換済みなので変換不要。
-      _lastGrayWalls = { positions: d.positions, uv: d.uv };
-      placeGrayWallMarkers(_lastGrayWalls);
+      _lastPurpleWalls = { positions: d.positions, uv: d.uv };
+      placePurpleWallMarkers(_lastPurpleWalls);
     } else if (d.type === 'voldia-save-done') {
       const btn = document.getElementById('voldia-save-btn');
       btn.textContent = d.ok ? '✓ 出力完了' : '⚠ 出力失敗';
@@ -1416,65 +1007,11 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   });
 
   // ==========================================
-  // 3. プロシージャル・モデリング
-  // ==========================================
-  const matYellow = new THREE.MeshLambertMaterial({ color: 0xf39c12 });
-  const matDark   = new THREE.MeshLambertMaterial({ color: 0x222222 });
-  const matGlass  = new THREE.MeshLambertMaterial({ color: 0x2980b9, transparent: true, opacity: 0.6 });
-  const matSilver = new THREE.MeshLambertMaterial({ color: 0xbdc3c7 });
-  const matSkyBlue = new THREE.MeshLambertMaterial({ color: 0x4fc3f7 }); // r022(追7): 生コン車の車体色
-  const matRedGlow= new THREE.MeshBasicMaterial({ color: 0xff3333 }); 
-  const matMiniOlive = new THREE.MeshLambertMaterial({ color: 0xB5AB1C }); // r072(21回目引継ぎ): GLB「ローポリミニ.glb」のbaseColorFactorを実測してhex化した色
 
-  // r072(21回目引継ぎ): マスター提供の実測参考モデル「ローポリミニ.glb」の頂点データを
-  // 直接埋め込み(GLTFLoaderは使わず、事前にPython/trimeshでノード変換行列を適用した
-  // ワールド座標へ変換し、さらに本アプリの軸規約(X=左右幅/Y=高さ/Z=前後長,ブームは+Z)へ
-  // remapし、面ごとに頂点を複製(非インデックス化)してフラットシェーディングになる
-  // よう整形済み。upper=Layer:131(黄土色, 本体+運転席+ブーム+アーム+バケット一体),
-  // lower=Layer:130(黒, 下部走行体)。実測サイズはBASE_W=1.4/BASE_H≒2.353で、
-  // マスター実寸図面(全幅1.45/全高2.343)とほぼ1:1に近いスケールになる。
-const MINI_BH_GEO = {
-  upper: new Float32Array([0.69,0.5585,-1.2199,-0.69,0.5585,-1.2199,-0.69,0.7885,-1.2199,-0.69,0.7885,-1.2199,0.69,0.7885,-1.2199,0.69,0.5585,-1.2199,0.69,0.5585,0.4137,-0.69,0.5585,0.4137,-0.69,0.5585,-1.2199,-0.69,0.5585,-1.2199,0.69,0.5585,-1.2199,0.69,0.5585,0.4137,0.69,0.7885,0.4137,-0.69,0.7885,0.4137,-0.69,0.5585,0.4137,-0.69,0.5585,0.4137,0.69,0.5585,0.4137,0.69,0.7885,0.4137,0.69,0.7885,-1.2199,-0.69,0.7885,-1.2199,-0.69,0.7885,0.4137,-0.69,0.7885,0.4137,0.69,0.7885,0.4137,0.69,0.7885,-1.2199,0.69,0.7885,0.4137,0.69,0.5585,0.4137,0.69,0.5585,-1.2199,0.69,0.5585,-1.2199,0.69,0.7885,-1.2199,0.69,0.7885,0.4137,-0.69,0.7885,-1.2199,-0.69,0.5585,-1.2199,-0.69,0.5585,0.4137,-0.69,0.5585,0.4137,-0.69,0.7885,0.4137,-0.69,0.7885,-1.2199,0.69,1.3649,-0.1953,-0.69,1.3649,-0.1953,-0.69,0.7885,-0.1953,-0.69,0.7885,-0.1953,0.69,0.7885,-0.1953,0.69,1.3649,-0.1953,0.69,1.3649,-1.2493,-0.69,1.3649,-1.2493,-0.69,1.3649,-0.1953,-0.69,1.3649,-0.1953,0.69,1.3649,-0.1953,0.69,1.3649,-1.2493,0.69,0.7885,-1.2493,-0.69,0.7885,-1.2493,-0.69,1.3649,-1.2493,-0.69,1.3649,-1.2493,0.69,1.3649,-1.2493,0.69,0.7885,-1.2493,0.69,0.7885,-0.1953,-0.69,0.7885,-0.1953,-0.69,0.7885,-1.2493,-0.69,0.7885,-1.2493,0.69,0.7885,-1.2493,0.69,0.7885,-0.1953,-0.69,0.7885,-0.1953,-0.69,1.3649,-0.1953,-0.69,1.3649,-1.2493,-0.69,1.3649,-1.2493,-0.69,0.7885,-1.2493,-0.69,0.7885,-0.1953,0.69,0.7885,-1.2493,0.69,1.3649,-1.2493,0.69,1.3649,-0.1953,0.69,1.3649,-0.1953,0.69,0.7885,-0.1953,0.69,0.7885,-1.2493,-0.47,2.1972,-1.0115,0.47,2.1972,-1.0115,0.47,1.3649,-1.0115,0.47,1.3649,-1.0115,-0.47,1.3649,-1.0115,-0.47,2.1972,-1.0115,-0.47,1.3649,-1.0115,0.47,1.3649,-1.0115,0.47,1.3649,-0.9073,0.47,1.3649,-0.9073,-0.47,1.3649,-0.9073,-0.47,1.3649,-1.0115,-0.47,1.3649,-0.9073,0.47,1.3649,-0.9073,0.47,2.1972,-0.9073,0.47,2.1972,-0.9073,-0.47,2.1972,-0.9073,-0.47,1.3649,-0.9073,-0.47,2.1972,-0.9073,0.47,2.1972,-0.9073,0.47,2.1972,-1.0115,0.47,2.1972,-1.0115,-0.47,2.1972,-1.0115,-0.47,2.1972,-0.9073,-0.47,2.1972,-1.0115,-0.47,1.3649,-1.0115,-0.47,1.3649,-0.9073,-0.47,1.3649,-0.9073,-0.47,2.1972,-0.9073,-0.47,2.1972,-1.0115,0.47,2.1972,-0.9073,0.47,1.3649,-0.9073,0.47,1.3649,-1.0115,0.47,1.3649,-1.0115,0.47,2.1972,-1.0115,0.47,2.1972,-0.9073,0.47,2.1972,-1.0115,-0.47,2.1972,-1.0115,-0.47,2.3069,-1.0115,-0.47,2.3069,-1.0115,0.47,2.3069,-1.0115,0.47,2.1972,-1.0115,0.47,2.1972,0.0358,-0.47,2.1972,0.0358,-0.47,2.1972,-1.0115,-0.47,2.1972,-1.0115,0.47,2.1972,-1.0115,0.47,2.1972,0.0358,0.47,2.3069,0.0358,-0.47,2.3069,0.0358,-0.47,2.1972,0.0358,-0.47,2.1972,0.0358,0.47,2.1972,0.0358,0.47,2.3069,0.0358,0.47,2.3069,-1.0115,-0.47,2.3069,-1.0115,-0.47,2.3069,0.0358,-0.47,2.3069,0.0358,0.47,2.3069,0.0358,0.47,2.3069,-1.0115,0.47,2.3069,0.0358,0.47,2.1972,0.0358,0.47,2.1972,-1.0115,0.47,2.1972,-1.0115,0.47,2.3069,-1.0115,0.47,2.3069,0.0358,-0.47,2.3069,-1.0115,-0.47,2.1972,-1.0115,-0.47,2.1972,0.0358,-0.47,2.1972,0.0358,-0.47,2.3069,0.0358,-0.47,2.3069,-1.0115,-0.35,1.5282,0.3147,0.35,1.5282,0.3147,0.35,0.7885,0.3147,0.35,0.7885,0.3147,-0.35,0.7885,0.3147,-0.35,1.5282,0.3147,-0.35,1.5282,0.3558,0.35,1.5282,0.3558,0.35,1.5282,0.3147,0.35,1.5282,0.3147,-0.35,1.5282,0.3147,-0.35,1.5282,0.3558,-0.35,0.7885,0.3558,0.35,0.7885,0.3558,0.35,1.5282,0.3558,0.35,1.5282,0.3558,-0.35,1.5282,0.3558,-0.35,0.7885,0.3558,-0.35,0.7885,0.3147,0.35,0.7885,0.3147,0.35,0.7885,0.3558,0.35,0.7885,0.3558,-0.35,0.7885,0.3558,-0.35,0.7885,0.3147,-0.35,0.7885,0.3558,-0.35,1.5282,0.3558,-0.35,1.5282,0.3147,-0.35,1.5282,0.3147,-0.35,0.7885,0.3147,-0.35,0.7885,0.3558,0.35,0.7885,0.3147,0.35,1.5282,0.3147,0.35,1.5282,0.3558,0.35,1.5282,0.3558,0.35,0.7885,0.3558,0.35,0.7885,0.3147,-0.2074,0.7885,0.4137,0.2074,0.7885,0.4137,0.2074,0.5805,0.4137,0.2074,0.5805,0.4137,-0.2074,0.5805,0.4137,-0.2074,0.7885,0.4137,-0.2074,0.5805,0.4137,0.2074,0.5805,0.4137,0.2074,0.5805,0.6917,0.2074,0.5805,0.6917,-0.2074,0.5805,0.6917,-0.2074,0.5805,0.4137,-0.2074,0.5805,0.6917,0.2074,0.5805,0.6917,0.2074,0.7885,0.6917,0.2074,0.7885,0.6917,-0.2074,0.7885,0.6917,-0.2074,0.5805,0.6917,-0.2074,0.7885,0.6917,0.2074,0.7885,0.6917,0.2074,0.7885,0.4137,0.2074,0.7885,0.4137,-0.2074,0.7885,0.4137,-0.2074,0.7885,0.6917,0.2074,0.7885,0.6917,0.2074,0.5805,0.6917,0.2074,0.5805,0.4137,0.2074,0.5805,0.4137,0.2074,0.7885,0.4137,0.2074,0.7885,0.6917,-0.2074,0.7885,0.4137,-0.2074,0.5805,0.4137,-0.2074,0.5805,0.6917,-0.2074,0.5805,0.6917,-0.2074,0.7885,0.6917,-0.2074,0.7885,0.4137,-0.125,1.2121,3.5109,0.125,1.2121,3.5109,0.125,2.3531,2.3652,0.125,2.3531,2.3652,-0.125,2.3531,2.3652,-0.125,1.2121,3.5109,-0.125,2.3531,2.3652,0.125,2.3531,2.3652,0.125,2.1902,2.2029,0.125,2.1902,2.2029,-0.125,2.1902,2.2029,-0.125,2.3531,2.3652,-0.125,2.1902,2.2029,0.125,2.1902,2.2029,0.125,1.0491,3.3486,0.125,1.0491,3.3486,-0.125,1.0491,3.3486,-0.125,2.1902,2.2029,-0.125,1.0491,3.3486,0.125,1.0491,3.3486,0.125,1.2121,3.5109,0.125,1.2121,3.5109,-0.125,1.2121,3.5109,-0.125,1.0491,3.3486,-0.125,1.2121,3.5109,-0.125,2.3531,2.3652,-0.125,2.1902,2.2029,-0.125,2.1902,2.2029,-0.125,1.0491,3.3486,-0.125,1.2121,3.5109,0.125,2.1902,2.2029,0.125,2.3531,2.3652,0.125,1.2121,3.5109,0.125,1.2121,3.5109,0.125,1.0491,3.3486,0.125,2.1902,2.2029,-0.125,0.7511,0.5188,0.125,0.7511,0.5188,0.125,0.5979,0.7611,0.125,0.5979,0.7611,-0.125,0.5979,0.7611,-0.125,0.7511,0.5188,-0.125,0.5979,0.7611,0.125,0.5979,0.7611,0.125,2.0377,1.6709,0.125,2.0377,1.6709,-0.125,2.0377,1.6709,-0.125,0.5979,0.7611,-0.125,2.0377,1.6709,0.125,2.0377,1.6709,0.125,2.1908,1.4285,0.125,2.1908,1.4285,-0.125,2.1908,1.4285,-0.125,2.0377,1.6709,-0.125,2.1908,1.4285,0.125,2.1908,1.4285,0.125,0.7511,0.5188,0.125,0.7511,0.5188,-0.125,0.7511,0.5188,-0.125,2.1908,1.4285,-0.125,0.5979,0.7611,-0.125,2.0377,1.6709,-0.125,2.1908,1.4285,-0.125,2.1908,1.4285,-0.125,0.7511,0.5188,-0.125,0.5979,0.7611,0.125,2.1908,1.4285,0.125,2.0377,1.6709,0.125,0.5979,0.7611,0.125,0.5979,0.7611,0.125,0.7511,0.5188,0.125,2.1908,1.4285,-0.125,1.8109,1.1969,0.125,1.8109,1.1969,0.125,1.8494,3.0179,0.125,1.8494,3.0179,-0.125,1.8494,3.0179,-0.125,1.8109,1.1969,-0.125,1.8494,3.0179,0.125,1.8494,3.0179,0.125,2.0636,3.0109,0.125,2.0636,3.0109,-0.125,2.0636,3.0109,-0.125,1.8494,3.0179,-0.125,2.0636,3.0109,0.125,2.0636,3.0109,0.125,2.025,1.19,0.125,2.025,1.19,-0.125,2.025,1.19,-0.125,2.0636,3.0109,-0.125,2.025,1.19,0.125,2.025,1.19,0.125,1.8109,1.1969,0.125,1.8109,1.1969,-0.125,1.8109,1.1969,-0.125,2.025,1.19,-0.125,1.8494,3.0179,-0.125,2.0636,3.0109,-0.125,2.025,1.19,-0.125,2.025,1.19,-0.125,1.8109,1.1969,-0.125,1.8494,3.0179,0.125,2.025,1.19,0.125,2.0636,3.0109,0.125,1.8494,3.0179,0.125,1.8494,3.0179,0.125,1.8109,1.1969,0.125,2.025,1.19,-0.3519,1.2073,3.2104,0.3519,1.2073,3.2104,0.3519,0.5294,2.9953,0.3519,0.5294,2.9953,-0.3519,0.5294,2.9953,-0.3519,1.2073,3.2104,-0.3519,0.5294,2.9953,0.3519,0.5294,2.9953,0.3519,0.3625,3.5211,0.3519,0.3625,3.5211,-0.3519,0.3625,3.5211,-0.3519,0.5294,2.9953,-0.3519,0.3625,3.5211,0.3519,0.3625,3.5211,0.3519,1.0404,3.7363,0.3519,1.0404,3.7363,-0.3519,1.0404,3.7363,-0.3519,0.3625,3.5211,-0.3519,1.0404,3.7363,0.3519,1.0404,3.7363,0.3519,1.2073,3.2104,0.3519,1.2073,3.2104,-0.3519,1.2073,3.2104,-0.3519,1.0404,3.7363,-0.3519,1.2073,3.2104,-0.3519,0.5294,2.9953,-0.3519,0.3625,3.5211,-0.3519,0.3625,3.5211,-0.3519,1.0404,3.7363,-0.3519,1.2073,3.2104,0.3519,0.3625,3.5211,0.3519,0.5294,2.9953,0.3519,1.2073,3.2104,0.3519,1.2073,3.2104,0.3519,1.0404,3.7363,0.3519,0.3625,3.5211]),
-  lower: new Float32Array([0.45,0.4407,-0.9073,0.7,0.4407,-0.9073,0.7,0.0,-0.9073,0.7,0.0,-0.9073,0.45,0.0,-0.9073,0.45,0.4407,-0.9073,0.45,0.0,-0.9073,0.7,0.0,-0.9073,0.7,0.0,0.8856,0.7,0.0,0.8856,0.45,0.0,0.8856,0.45,0.0,-0.9073,0.45,0.0,0.8856,0.7,0.0,0.8856,0.7,0.4407,0.8856,0.7,0.4407,0.8856,0.45,0.4407,0.8856,0.45,0.0,0.8856,0.45,0.4407,0.8856,0.7,0.4407,0.8856,0.7,0.4407,-0.9073,0.7,0.4407,-0.9073,0.45,0.4407,-0.9073,0.45,0.4407,0.8856,0.45,0.4407,-0.9073,0.45,0.0,-0.9073,0.45,0.0,0.8856,0.45,0.0,0.8856,0.45,0.4407,0.8856,0.45,0.4407,-0.9073,0.7,0.4407,0.8856,0.7,0.0,0.8856,0.7,0.0,-0.9073,0.7,0.0,-0.9073,0.7,0.4407,-0.9073,0.7,0.4407,0.8856,-0.45,0.0,-0.9073,-0.7,0.0,-0.9073,-0.7,0.4407,-0.9073,-0.7,0.4407,-0.9073,-0.45,0.4407,-0.9073,-0.45,0.0,-0.9073,-0.45,0.0,0.8856,-0.7,0.0,0.8856,-0.7,0.0,-0.9073,-0.7,0.0,-0.9073,-0.45,0.0,-0.9073,-0.45,0.0,0.8856,-0.45,0.4407,0.8856,-0.7,0.4407,0.8856,-0.7,0.0,0.8856,-0.7,0.0,0.8856,-0.45,0.0,0.8856,-0.45,0.4407,0.8856,-0.45,0.4407,-0.9073,-0.7,0.4407,-0.9073,-0.7,0.4407,0.8856,-0.7,0.4407,0.8856,-0.45,0.4407,0.8856,-0.45,0.4407,-0.9073,-0.45,0.4407,0.8856,-0.45,0.0,0.8856,-0.45,0.0,-0.9073,-0.45,0.0,-0.9073,-0.45,0.4407,-0.9073,-0.45,0.4407,0.8856,-0.7,0.4407,-0.9073,-0.7,0.0,-0.9073,-0.7,0.0,0.8856,-0.7,0.0,0.8856,-0.7,0.4407,0.8856,-0.7,0.4407,-0.9073,0.45,0.0824,-0.6676,-0.45,0.0824,-0.6676,-0.45,0.3585,-0.6676,-0.45,0.3585,-0.6676,0.45,0.3585,-0.6676,0.45,0.0824,-0.6676,0.45,0.0824,0.6676,-0.45,0.0824,0.6676,-0.45,0.0824,-0.6676,-0.45,0.0824,-0.6676,0.45,0.0824,-0.6676,0.45,0.0824,0.6676,0.45,0.3585,0.6676,-0.45,0.3585,0.6676,-0.45,0.0824,0.6676,-0.45,0.0824,0.6676,0.45,0.0824,0.6676,0.45,0.3585,0.6676,0.45,0.3585,-0.6676,-0.45,0.3585,-0.6676,-0.45,0.3585,0.6676,-0.45,0.3585,0.6676,0.45,0.3585,0.6676,0.45,0.3585,-0.6676,0.45,0.3585,0.6676,0.45,0.0824,0.6676,0.45,0.0824,-0.6676,0.45,0.0824,-0.6676,0.45,0.3585,-0.6676,0.45,0.3585,0.6676,-0.45,0.3585,-0.6676,-0.45,0.0824,-0.6676,-0.45,0.0824,0.6676,-0.45,0.0824,0.6676,-0.45,0.3585,0.6676,-0.45,0.3585,-0.6676,-0.2732,0.0791,1.2411,-0.1925,0.0791,1.2411,-0.1925,0.2036,1.255,-0.1925,0.2036,1.255,-0.2732,0.2036,1.255,-0.2732,0.0791,1.2411,-0.2732,0.2036,1.255,-0.1925,0.2036,1.255,-0.1925,0.3118,0.6676,-0.1925,0.3118,0.6676,-0.2732,0.3118,0.6676,-0.2732,0.2036,1.255,-0.2732,0.3118,0.6676,-0.1925,0.3118,0.6676,-0.1925,0.1847,0.6676,-0.1925,0.1847,0.6676,-0.2732,0.1847,0.6676,-0.2732,0.3118,0.6676,-0.2732,0.1847,0.6676,-0.1925,0.1847,0.6676,-0.1925,0.0791,1.2411,-0.1925,0.0791,1.2411,-0.2732,0.0791,1.2411,-0.2732,0.1847,0.6676,-0.2732,0.2036,1.255,-0.2732,0.3118,0.6676,-0.2732,0.1847,0.6676,-0.2732,0.1847,0.6676,-0.2732,0.0791,1.2411,-0.2732,0.2036,1.255,-0.1925,0.1847,0.6676,-0.1925,0.3118,0.6676,-0.1925,0.2036,1.255,-0.1925,0.2036,1.255,-0.1925,0.0791,1.2411,-0.1925,0.1847,0.6676,0.2732,0.2036,1.255,0.1925,0.2036,1.255,0.1925,0.0791,1.2411,0.1925,0.0791,1.2411,0.2732,0.0791,1.2411,0.2732,0.2036,1.255,0.2732,0.3118,0.6676,0.1925,0.3118,0.6676,0.1925,0.2036,1.255,0.1925,0.2036,1.255,0.2732,0.2036,1.255,0.2732,0.3118,0.6676,0.2732,0.1847,0.6676,0.1925,0.1847,0.6676,0.1925,0.3118,0.6676,0.1925,0.3118,0.6676,0.2732,0.3118,0.6676,0.2732,0.1847,0.6676,0.2732,0.0791,1.2411,0.1925,0.0791,1.2411,0.1925,0.1847,0.6676,0.1925,0.1847,0.6676,0.2732,0.1847,0.6676,0.2732,0.0791,1.2411,0.2732,0.1847,0.6676,0.2732,0.3118,0.6676,0.2732,0.2036,1.255,0.2732,0.2036,1.255,0.2732,0.0791,1.2411,0.2732,0.1847,0.6676,0.1925,0.2036,1.255,0.1925,0.3118,0.6676,0.1925,0.1847,0.6676,0.1925,0.1847,0.6676,0.1925,0.0791,1.2411,0.1925,0.2036,1.255,0.7,0.0403,1.2368,-0.7,0.0403,1.2368,-0.7,0.4117,1.2782,-0.7,0.4117,1.2782,0.7,0.4117,1.2782,0.7,0.0403,1.2368,0.7,0.0265,1.36,-0.7,0.0265,1.36,-0.7,0.0403,1.2368,-0.7,0.0403,1.2368,0.7,0.0403,1.2368,0.7,0.0265,1.36,0.7,0.398,1.4014,-0.7,0.398,1.4014,-0.7,0.0265,1.36,-0.7,0.0265,1.36,0.7,0.0265,1.36,0.7,0.398,1.4014,0.7,0.4117,1.2782,-0.7,0.4117,1.2782,-0.7,0.398,1.4014,-0.7,0.398,1.4014,0.7,0.398,1.4014,0.7,0.4117,1.2782,0.7,0.0265,1.36,0.7,0.0403,1.2368,0.7,0.4117,1.2782,0.7,0.4117,1.2782,0.7,0.398,1.4014,0.7,0.0265,1.36,-0.7,0.4117,1.2782,-0.7,0.0403,1.2368,-0.7,0.0265,1.36,-0.7,0.0265,1.36,-0.7,0.398,1.4014,-0.7,0.4117,1.2782])
-};
 
-  const matCraneBody = new THREE.MeshLambertMaterial({ color: 0x1f5c87 }); 
-  const matBoomColor = new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }); 
-  
-  const matWorker = new THREE.MeshLambertMaterial({ color: 0x2e7d32 }); 
-  const matGuard  = new THREE.MeshLambertMaterial({ color: 0x1565c0 }); 
 
-  function createTrussTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128; canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, 128, 256);
-    ctx.strokeStyle = '#e0e0e0';
-    ctx.lineWidth = 16;
-    ctx.strokeRect(0, 0, 128, 256);
-    ctx.beginPath();
-    ctx.moveTo(0, 0); ctx.lineTo(128, 128); ctx.stroke();
-    ctx.moveTo(128, 0); ctx.lineTo(0, 128); ctx.stroke();
-    ctx.moveTo(0, 128); ctx.lineTo(128, 256); ctx.stroke();
-    ctx.moveTo(128, 128); ctx.lineTo(0, 256); ctx.stroke();
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(1, 8);
-    return tex;
-  }
-  const matTruss = new THREE.MeshLambertMaterial({
-    map: createTrussTexture(), transparent: true, alphaTest: 0.5, side: THREE.DoubleSide
-  });
 
-  function createDragMarker(radius = 0.3) {
-    const geo = new THREE.SphereGeometry(radius, 8, 8);
-    const mat = new THREE.MeshBasicMaterial({ color: 0x00aaff, depthTest: false, depthWrite: false });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.renderOrder = 999;
-    mesh.userData.isDragMarker = true; 
-    return mesh;
-  }
 
-  const setShadows = (m) => { m.castShadow = true; m.receiveShadow = true; };
 
   function addEdgeLines(obj) {
     const meshes = [];
@@ -1492,438 +1029,16 @@ const MINI_BH_GEO = {
   }
 
   // ★ 矢印（地面追従、厚み付き3Dモデル、水平旋回）の生成
-  function createArrowMesh() {
-    const group = new THREE.Group();
-
-    // ベース部分（黒い土台とポール）
-    const baseGroup = new THREE.Group();
-    const matBlack = new THREE.MeshLambertMaterial({ color: 0x111111 });
-    
-    const dotGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
-    const dotMesh = new THREE.Mesh(dotGeo, matBlack);
-    dotMesh.position.y = 0.05;
-    setShadows(dotMesh);
-    baseGroup.add(dotMesh);
-
-    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.0, 8);
-    const poleObj = new THREE.Mesh(poleGeo, matBlack);
-    poleObj.position.y = 0.5;
-    setShadows(poleObj);
-    baseGroup.add(poleObj);
-
-    group.add(baseGroup);
-
-    // アッパー部分（矢印本体と旋回グリップ）
-    const upperGroup = new THREE.Group();
-    upperGroup.position.set(0, 1.0, 0); 
-    upperGroup.userData.isUpper = true; 
-
-    const matRed = new THREE.MeshLambertMaterial({ color: 0xff0000 });
-
-    const shaftRadius = 0.25;
-    const shaftLength = 2.0;
-    const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 16);
-    shaftGeo.rotateX(Math.PI / 2); 
-    shaftGeo.translate(0, 0, shaftLength / 2 - 0.5); 
-
-    const shaftMesh = new THREE.Mesh(shaftGeo, matRed);
-    setShadows(shaftMesh);
-    shaftMesh.userData.isArrowBody = true;
-    upperGroup.add(shaftMesh);
-
-    const headRadius = 0.7;
-    const headLength = 1.2;
-    const headGeo = new THREE.CylinderGeometry(0, headRadius, headLength, 16);
-    headGeo.rotateX(Math.PI / 2);
-    headGeo.translate(0, 0, shaftLength - 0.5 + headLength / 2); 
-
-    const headMesh = new THREE.Mesh(headGeo, matRed);
-    setShadows(headMesh);
-    headMesh.userData.isArrowBody = true;
-    upperGroup.add(headMesh);
-
-    const marker = createDragMarker(0.25); 
-    marker.position.set(0, 0, shaftLength + headLength + 0.1); 
-    upperGroup.add(marker);
-
-    group.add(upperGroup);
-    return group;
-  }
 
   // r072(21回目引継ぎ): ミニBHはbox-primitiveの寄せ集めでは限界があった(2回連続で
   // マスターから「反映されてない/形が違う」との指摘)ため、マスター提供の実測参考
   // モデル「ローポリミニ.glb」の頂点データ(MINI_BH_GEO)から直接BufferGeometryを
-  // 構築する方式に全面移行。非一様スケールは(既存のせん断バグ対策と同じ思想で)
-  // group.scaleではなく頂点データ自体に焼き込む。upperGroup配下のupperMesh1つに
-  // isBoom=trueを付け、旋回ドラッグ判定(クリックで上部構造をつかんで旋回)を
-  // 既存の仕組みのまま流用できるようにしている。
-  const MINI_BH_BASE_W = 1.4, MINI_BH_BASE_H = 2.35313;
-  function createMiniBackhoeFromModel(targetW, targetH) {
-    const sx = targetW / MINI_BH_BASE_W, sy = targetH / MINI_BH_BASE_H;
-    function buildMesh(srcPositions, material) {
-      const positions = new Float32Array(srcPositions.length);
-      for (let i = 0; i < srcPositions.length; i += 3) {
-        positions[i] = srcPositions[i] * sx;
-        positions[i + 1] = srcPositions[i + 1] * sy;
-        positions[i + 2] = srcPositions[i + 2] * sy;
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geo.computeVertexNormals(); // 面ごとに頂点を複製済み(非インデックス)なのでフラットシェーディングになる
-      const mesh = new THREE.Mesh(geo, material);
-      setShadows(mesh);
-      return mesh;
-    }
-    const group = new THREE.Group();
-    const lowerMesh = buildMesh(MINI_BH_GEO.lower, matDark);
-    const upperMesh = buildMesh(MINI_BH_GEO.upper, matMiniOlive);
-    upperMesh.userData.isBoom = true; // クリックで上部構造をつかんで旋回できるようにする(既存の旋回ドラッグ判定を流用)
-    const upperGroup = new THREE.Group();
-    upperGroup.userData.isUpper = true;
-    upperGroup.add(upperMesh);
-    // バケット付近(前方)にドラッグつまみマーカーを追加(他の重機と同様の操作性を確保)
-    const marker = createDragMarker(0.25 * sy);
-    marker.position.set(0, 0.3 * sy, 3.2 * sy);
-    upperMesh.add(marker);
-    group.add(lowerMesh, upperGroup);
-    return group;
-  }
 
-  function createBackhoe(targetW, targetH, offsetCab = true) {
-    if (!offsetCab) return createMiniBackhoeFromModel(targetW, targetH); // r072: bh_miniはGLB由来の実測形状に一本化
-    // r066(20回目引継ぎ・マスター指摘「旋回させると歪む」): 従来はgroup.scale.set()で
-    // 非一様スケール(scaleX≠scaleYZ)をグループに持たせていたが、配置モードで
-    // オブジェクトを旋回させる処理(1127行目 mesh.rotation.y=d.rotY)がこの同じ
-    // groupに対して直接Y軸回転を適用するため、Y軸回転(X/Z軸を混ぜる)と
-    // 非一様スケールが合成されてせん断(歪み)が発生していた。気のせいではなく
-    // 実際のバグ。対策として、非一様スケールをgroup.scaleではなく各メッシュの
-    // geometry(頂点データ)に直接焼き込む方式に変更。こうするとgroup自身は
-    // スケール1のままになり、以降どれだけ回転(旋回・ブーム角度等)を重ねても
-    // 剛体変換の合成にしかならないため、原理的に二度と歪まない。
-    // r072(21回目引継ぎ): offsetCab=false(bh_mini)は上でcreateMiniBackhoeFromModelへ
-    // 早期returnするため、ここから下は常にoffsetCab=true(bh_025以上)のみが通る。
-    const BASE_W = 2.9, BASE_H = 2.4;
-    const sx = targetW / BASE_W, sy = targetH / BASE_H;
-    const P = (x, y, z) => [x * sx, y * sy, z * sy]; // 位置座標の補正(非一様スケール分)
-    const G = (w, h, d) => new THREE.BoxGeometry(w * sx, h * sy, d * sy); // ボックス寸法の補正
 
-    const group = new THREE.Group();
-    const trackGeo = G(0.7, 0.8, 3.5);
-    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(...P(1.1, 0.4, 0)); setShadows(tL);
-    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(...P(-1.1, 0.4, 0)); setShadows(tR);
-    const base = new THREE.Mesh(G(1.5, 0.4, 2.0), matDark); base.position.set(...P(0, 0.6, 0)); setShadows(base);
 
-    const upperGroup = new THREE.Group();
-    upperGroup.position.set(...P(0, 0.8, 0));
-    upperGroup.userData.isUpper = true;
 
-    // 中型/大型(bh_025以上): 機械部分(エンジン/カウンターウェイト)は後方に
-    // フルワイドで配置し、運転席は前方右寄せ、アームは運転席と反対側(左側)へ
-    const engine = new THREE.Mesh(G(2.4, 1.2, 1.7), matYellow); engine.position.set(...P(0, 0.6, -0.75)); setShadows(engine);
-    const cabin = new THREE.Mesh(G(0.9, 1.5, 1.2), matGlass); cabin.position.set(...P(0.65, 0.75, 0.75)); setShadows(cabin);
-    const roof = new THREE.Mesh(G(1.05, 0.1, 1.35), matDark); roof.position.set(...P(0.65, 1.55, 0.75)); setShadows(roof);
-    upperGroup.add(engine, cabin, roof);
-    const boomX = -0.65; // 運転席(x=0.65)の反対側
 
-    // r069/r070: GLB実測(ブーム+アームの張り出しが全長の6割程度)を踏まえ張り出しを
-    // 延長(3.5→3.8/2.5→2.9)。太さも幅方向の圧縮(ミニはsx=0.5)で細くなりすぎない
-    // よう底上げ(0.4→0.55/0.3→0.45/0.6→0.75)
-    const boom = new THREE.Mesh(G(0.55, 3.8, 0.4), matYellow); boom.position.set(...P(boomX, 2.0, 1.6)); boom.rotation.x = Math.PI / 4; setShadows(boom);
-    const arm = new THREE.Mesh(G(0.45, 2.9, 0.3), matYellow); arm.position.set(...P(boomX, 2.35, 3.05)); arm.rotation.x = -Math.PI / 4; setShadows(arm);
-    const bucket = new THREE.Mesh(G(0.75, 0.8, 0.6), matDark); bucket.position.set(...P(boomX, 1.2, 3.9)); bucket.rotation.x = Math.PI / 4; setShadows(bucket);
-    boom.userData.isBoom = true; arm.userData.isBoom = true; bucket.userData.isBoom = true;
 
-    const marker = createDragMarker(0.25 * sy);
-    marker.position.set(...P(0, -0.2, 0.4));
-    bucket.add(marker);
-
-    upperGroup.add(boom, arm, bucket);
-    group.add(tL, tR, base, upperGroup);
-    return group;
-  }
-
-  function createBulldozer(targetW, targetH) {
-    // r066(20回目引継ぎ・マスター指摘「旋回させると歪む」): バックホーと同じ理由
-    // (group.scaleの非一様スケールが配置モードの旋回Y軸回転と合成されせん断が
-    // 発生する)で、こちらもgeometry.scale()による焼き込み方式に変更。
-    const BASE_W = 2.4, BASE_H = 2.75;
-    const sx = targetW / BASE_W, sy = targetH / BASE_H;
-    const P = (x, y, z) => [x * sx, y * sy, z * sy];
-    const G = (w, h, d) => new THREE.BoxGeometry(w * sx, h * sy, d * sy);
-
-    const group = new THREE.Group();
-    const trackGeo = G(0.6, 0.8, 3.0);
-    const tL = new THREE.Mesh(trackGeo, matDark); tL.position.set(...P(0.9, 0.4, 0)); setShadows(tL);
-    const tR = new THREE.Mesh(trackGeo, matDark); tR.position.set(...P(-0.9, 0.4, 0)); setShadows(tR);
-    const base = new THREE.Mesh(G(1.6, 1.0, 2.5), matYellow); base.position.set(...P(0, 0.7, 0)); setShadows(base);
-    const cab = new THREE.Mesh(G(1.4, 1.5, 1.4), matGlass); cab.position.set(...P(0, 1.95, -0.2)); setShadows(cab);
-    const roof = new THREE.Mesh(G(1.5, 0.1, 1.5), matYellow); roof.position.set(...P(0, 2.7, -0.2)); setShadows(roof);
-    const pipeGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.8); pipeGeo.scale(sx, sy, sx);
-    const pipe = new THREE.Mesh(pipeGeo, matDark); pipe.position.set(...P(0.6, 1.6, 0.8)); setShadows(pipe);
-
-    const blade = new THREE.Mesh(G(3.0, 1.0, 0.2), matSilver);
-    blade.position.set(...P(0, 0.5, 1.8));
-    blade.rotation.x = Math.PI / 12;
-    setShadows(blade);
-
-    const armL = new THREE.Mesh(G(0.2, 0.2, 1.5), matYellow); armL.position.set(...P(1.0, 0.5, 1.2)); setShadows(armL);
-    const armR = new THREE.Mesh(G(0.2, 0.2, 1.5), matYellow); armR.position.set(...P(-1.0, 0.5, 1.2)); setShadows(armR);
-
-    group.add(tL, tR, base, cab, roof, pipe, blade, armL, armR);
-    return group;
-  }
-
-  function createDump(isLarge = false) {
-    const group = new THREE.Group();
-    const bedLength = isLarge ? 5.5 : 3.5;
-    const zOffset = isLarge ? -1.0 : 0;
-    // r064(20回目引継ぎ・マスター指摘): 実機カタログ(4tダンプ全高2.5m/10tダンプ全高3.3m)
-    // と比較したところ、4tは元々ほぼ一致していたが10tは車体高さがisLarge時も
-    // 変わらず全高が実機より約80cm低かった。10t側はタイヤをやや大径化(半径0.5→0.6)
-    // しつつ、車体一式(cab/wnd/bed/chassis)を目標の全高3.3mに合うよう底上げする。
-    const tireR = isLarge ? 0.6 : 0.5;
-    const cabY = isLarge ? 2.3 : 1.5; // isLarge時: cab.top=cabY+1.0=3.3m(実機全高)に一致
-    const wndY = cabY + 0.3;
-    const bedY = cabY + 0.3;
-    const chassisY = cabY - 0.7;
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matYellow); cab.position.set(0, cabY, 2.0); setShadows(cab);
-    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, wndY, 2.0); setShadows(wnd);
-    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.2, bedLength), matSilver); bed.position.set(0, bedY, -0.8 + zOffset); setShadows(bed);
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, chassisY, -0.2 + zOffset/2); setShadows(chassis);
-    const tireGeo = new THREE.CylinderGeometry(tireR, tireR, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
-    const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset] ];
-    if (isLarge) { positions.push([1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset]); }
-    positions.forEach(p => {
-      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], tireR, p[1]); setShadows(tire); group.add(tire);
-    });
-    group.add(cab, wnd, bed, chassis);
-    group.rotation.y = Math.PI;
-    return group;
-  }
-
-  function createMixerTruck() {
-    const group = new THREE.Group();
-    const bedLength = 5.5;
-    const zOffset = -1.0;
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matSkyBlue); cab.position.set(0, 1.5, 2.0); setShadows(cab);
-    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, 1.8, 2.0); setShadows(wnd);
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, 0.8, -0.2 + zOffset/2); setShadows(chassis);
-
-    const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
-    const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset], [1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset] ];
-    positions.forEach(p => {
-      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], 0.5, p[1]); setShadows(tire); group.add(tire);
-    });
-
-    // r026: マスター提示の側面図に合わせ、単純な片テーパー円柱ではなく
-    // 「コーンを2個、くびれ部分で背中合わせにした紡錘形（＜＞のような形）」に作り直し。
-    // くびれ(中央最大径)を境に、前方(cab側)と後方(hopper/シュート側)それぞれ別のテーパーで先細りさせる。
-    const drumHalfLen = 2.0;   // 中央から前後それぞれの長さ
-    const drumWaistR = 1.25;   // 中央（くびれ）の最大半径
-    const drumFrontTipR = 0.32; // 前方(cab側)先端の半径
-    const drumRearTipR  = 0.42; // 後方(hopper/シュート側)先端の半径（前方よりわずかに太め）
-
-    // 前半（くびれ→前方先端）: ローカルZ 0→+drumHalfLen
-    const drumFrontGeo = new THREE.CylinderGeometry(drumFrontTipR, drumWaistR, drumHalfLen, 16);
-    drumFrontGeo.rotateX(Math.PI / 2);
-    drumFrontGeo.translate(0, 0, drumHalfLen / 2);
-    // 後半（くびれ→後方先端）: ローカルZ 0→-drumHalfLen
-    const drumRearGeo = new THREE.CylinderGeometry(drumWaistR, drumRearTipR, drumHalfLen, 16);
-    drumRearGeo.rotateX(Math.PI / 2);
-    drumRearGeo.translate(0, 0, -drumHalfLen / 2);
-
-    const drumFrontMesh = new THREE.Mesh(drumFrontGeo, matSkyBlue);
-    const drumRearMesh  = new THREE.Mesh(drumRearGeo, matSkyBlue);
-    setShadows(drumFrontMesh); setShadows(drumRearMesh);
-
-    const drum = new THREE.Group();
-    drum.add(drumFrontMesh, drumRearMesh);
-    drum.position.set(0, 2.0, -1.0);
-    drum.rotation.x = Math.PI / 12; // r025: 後方(hopper側)が高くなるよう符号を反転（マスター実車確認による指摘）
-
-    const waterTank = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.8, 0.8), matSilver);
-    waterTank.position.set(0, 1.4, 0.8); setShadows(waterTank);
-
-    const hopper = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 1.0), matSkyBlue);
-    hopper.position.set(0, 2.5, -3.2); setShadows(hopper);
-
-    group.add(cab, wnd, chassis, drum, waterTank, hopper);
-    group.rotation.y = Math.PI;
-    return group;
-  }
-
-  function createPumpTruck() {
-    const group = new THREE.Group();
-    const bedLength = 5.5;
-    const zOffset = -1.0;
-
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 1.8), matYellow); cab.position.set(0, 1.5, 2.0); setShadows(cab);
-    const wnd = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 1.85), matGlass); wnd.position.set(0, 1.8, 2.0); setShadows(wnd);
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, bedLength + 1.5), matDark); chassis.position.set(0, 0.8, -0.2 + zOffset/2); setShadows(chassis);
-
-    const tireGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
-    const positions = [ [1.1, 2.0], [-1.1, 2.0], [1.1, -1.0 + zOffset], [-1.1, -1.0 + zOffset], [1.1, -2.5 + zOffset], [-1.1, -2.5 + zOffset] ];
-    positions.forEach(p => {
-      const tire = new THREE.Mesh(tireGeo, matDark); tire.position.set(p[0], 0.5, p[1]); setShadows(tire); group.add(tire);
-    });
-
-    const pumpUnit = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.0, 4.0), matSilver);
-    pumpUnit.position.set(0, 1.4, -1.5); setShadows(pumpUnit);
-
-    const outL = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.2, 0.4), matDark); outL.position.set(0, 1.0, 0.5); setShadows(outL);
-    const outR = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.2, 0.4), matDark); outR.position.set(0, 1.0, -3.0); setShadows(outR);
-
-    const upperGroup = new THREE.Group();
-    upperGroup.position.set(0, 1.9, -2.0);
-    upperGroup.userData.isUpper = true;
-
-    const boomGroup = new THREE.Group();
-
-    const arm1Len = 4.0;
-    const arm1Geo = new THREE.BoxGeometry(0.4, arm1Len, 0.6);
-    arm1Geo.translate(0, arm1Len / 2, 0);
-    const arm1 = new THREE.Mesh(arm1Geo, matRedGlow);
-    arm1.rotation.x = Math.PI / 6;
-    arm1.userData.isBoom = true;
-    setShadows(arm1);
-
-    const arm2Len = 3.5;
-    const arm2Geo = new THREE.BoxGeometry(0.3, arm2Len, 0.5);
-    arm2Geo.translate(0, arm2Len / 2, 0);
-    const arm2 = new THREE.Mesh(arm2Geo, matRedGlow);
-    arm2.position.set(0, Math.cos(Math.PI / 6) * arm1Len, Math.sin(Math.PI / 6) * arm1Len);
-    arm2.rotation.x = Math.PI * 0.6;
-    arm2.userData.isBoom = true;
-    setShadows(arm2);
-
-    const arm3Len = 3.0;
-    const arm3Geo = new THREE.BoxGeometry(0.2, arm3Len, 0.4);
-    arm3Geo.translate(0, arm3Len / 2, 0);
-    const arm3 = new THREE.Mesh(arm3Geo, matRedGlow);
-    arm3.position.set(
-      0,
-      Math.cos(Math.PI / 6) * arm1Len + Math.cos(Math.PI * 0.6) * arm2Len,
-      Math.sin(Math.PI / 6) * arm1Len + Math.sin(Math.PI * 0.6) * arm2Len
-    );
-    arm3.rotation.x = Math.PI * 0.8;
-    arm3.userData.isBoom = true;
-    setShadows(arm3);
-
-    const marker = createDragMarker(0.2);
-    marker.position.set(0, arm3Len, 0);
-    arm3.add(marker);
-
-    boomGroup.add(arm1, arm2, arm3);
-    upperGroup.add(boomGroup);
-
-    group.add(cab, wnd, chassis, pumpUnit, outL, outR, upperGroup);
-    group.rotation.y = Math.PI;
-    return group;
-  }
-
-  function createRoughTerrainCrane(type) {
-    const group = new THREE.Group();
-
-    let l = 5.3, w = 2.2, h = 1.2, outR = 5.2, outSpan = 4.4, tZ = 1.6;
-    let upperL = 3.5, upperH = 0.8, cabH = 1.2;
-    if (type === 'rt_25t') { l = 7.9; w = 2.62; h = 1.4; outR = 6.6; outSpan = 6.0; tZ = 2.5; upperL = 4.5; upperH = 0.9; cabH = 1.4; }
-    else if (type === 'rt_60t') { l = 9.7; w = 2.78; h = 1.6; outR = 7.6; outSpan = 7.6; tZ = 3.2; upperL = 5.5; upperH = 1.0; cabH = 1.5; }
-
-    const tR = 0.6;
-    const tD = (w / 2) - 0.2;
-
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), matCraneBody);
-    chassis.position.set(0, tR + h / 2, 0);
-    setShadows(chassis);
-    group.add(chassis);
-
-    const tireGeo = new THREE.CylinderGeometry(tR, tR, 0.4, 16); tireGeo.rotateZ(Math.PI/2);
-    const tirePositions = [];
-    if (type === 'rt_60t') {
-      tirePositions.push([tD, tZ], [-tD, tZ], [tD, tZ - 1.5], [-tD, tZ - 1.5], [tD, -tZ], [-tD, -tZ]);
-    } else {
-      tirePositions.push([tD, tZ], [-tD, tZ], [tD, -tZ], [-tD, -tZ]);
-    }
-    tirePositions.forEach(pos => {
-      const tire = new THREE.Mesh(tireGeo, matDark);
-      tire.position.set(pos[0], tR, pos[1]);
-      setShadows(tire);
-      group.add(tire);
-    });
-
-    const outZ_F = outSpan / 2;
-    const outZ_R = -outSpan / 2;
-    const outriggerBeam = new THREE.BoxGeometry(outR, 0.3, 0.4);
-
-    const beamF = new THREE.Mesh(outriggerBeam, matDark);
-    beamF.position.set(0, tR + 0.3, outZ_F);
-    const beamR = new THREE.Mesh(outriggerBeam, matDark);
-    beamR.position.set(0, tR + 0.3, outZ_R);
-    setShadows(beamF); setShadows(beamR);
-    group.add(beamF, beamR);
-
-    const jackGeo = new THREE.CylinderGeometry(0.12, 0.12, tR + 0.3, 8);
-    jackGeo.translate(0, (tR + 0.3)/2, 0);
-    [ [outR/2, outZ_F], [-outR/2, outZ_F], [outR/2, outZ_R], [-outR/2, outZ_R] ].forEach(pos => {
-      const jack = new THREE.Mesh(jackGeo, matSilver);
-      jack.position.set(pos[0], 0, pos[1]);
-      setShadows(jack);
-
-      const float = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.5), matDark);
-      float.position.set(pos[0], 0.05, pos[1]);
-      setShadows(float);
-
-      group.add(jack, float);
-    });
-
-    const upperGroup = new THREE.Group();
-    const turretZ = -l * 0.05;
-    upperGroup.position.set(0, tR + h + 0.1, turretZ);
-    upperGroup.userData.isUpper = true;
-
-    const rearL = upperL * 0.5;
-    const rearBox = new THREE.Mesh(new THREE.BoxGeometry(w, upperH, rearL), matCraneBody);
-    rearBox.position.set(0, upperH/2, -rearL/2);
-    setShadows(rearBox);
-    upperGroup.add(rearBox);
-
-    const cabW = w / 2;
-    const cabL = upperL * 0.5;
-    const cabBase = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH * 0.5, cabL), matCraneBody);
-    cabBase.position.set(-w/4, cabH * 0.25, cabL/2);
-    setShadows(cabBase);
-    const cabTop = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH * 0.5, cabL * 0.7), matGlass);
-    cabTop.position.set(-w/4, cabH * 0.75, cabL/2 - cabL * 0.15);
-    setShadows(cabTop);
-    upperGroup.add(cabBase, cabTop);
-
-    const boomGroup = new THREE.Group();
-    boomGroup.position.set(w/4, upperH, -rearL * 0.3);
-    boomGroup.rotation.x = Math.PI * (35/180);
-
-    const boomLen = type === 'rt_60t' ? 12 : (type === 'rt_25t' ? 10 : 8);
-    const boomGeo1 = new THREE.BoxGeometry(0.8, boomLen, 0.8);
-    boomGeo1.translate(0, boomLen/2, 0);
-    const boom1 = new THREE.Mesh(boomGeo1, matBoomColor);
-    boom1.userData.isBoom = true;
-    setShadows(boom1);
-
-    const boomGeo2 = new THREE.BoxGeometry(0.6, boomLen * 0.5, 0.6);
-    boomGeo2.translate(0, boomLen + (boomLen * 0.5)/2 - 0.5, 0);
-    const boom2 = new THREE.Mesh(boomGeo2, matBoomColor);
-    boom2.userData.isBoom = true;
-    setShadows(boom2);
-
-    const marker = createDragMarker(0.25);
-    marker.position.set(0, boomLen * 1.45, 0);
-    boom2.add(marker);
-
-    boomGroup.add(boom1, boom2);
-    upperGroup.add(boomGroup);
-
-    group.add(upperGroup);
-    return group;
-  }
 
   // r025(マスター指示①): 80tクローラークレーンの外形を充実化。
   // ・ブームのトラス(matTruss)テクスチャ表現は気に入っているとのことでそのまま維持
@@ -1934,94 +1049,6 @@ const MINI_BH_GEO = {
   //   ハウス相当)＋カウンターウェイト」の2段構成にしてボリューム感を出し、
   //   ブーム基部にペデスタル(台座)を追加してブームがせり上がって生えている
   //   構造を再現した。
-  function createCrawlerCrane() {
-    const group = new THREE.Group();
-
-    const trackL = 5.99, trackW = 0.85, trackH = 1.05, trackOutW = 4.9;
-    const bodyW = 3.3, bodyH = 1.3;
-    const trackX = (trackOutW / 2) - (trackW / 2);
-
-    function buildTrack(x) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(trackW, trackH, trackL), matDark);
-      body.position.y = trackH / 2;
-      setShadows(body);
-      g.add(body);
-      // スプロケット/アイドラー(前後の円柱)。実車のシルエットに近づける
-      const wheelR = trackH / 2 * 0.92;
-      const wheelGeo = new THREE.CylinderGeometry(wheelR, wheelR, trackW * 1.04, 12);
-      [trackL / 2 - wheelR * 0.5, -(trackL / 2 - wheelR * 0.5)].forEach(z => {
-        const wheel = new THREE.Mesh(wheelGeo, matDark);
-        wheel.rotation.z = Math.PI / 2;
-        wheel.position.set(0, wheelR, z);
-        setShadows(wheel);
-        g.add(wheel);
-      });
-      g.position.set(x, 0, 0);
-      return g;
-    }
-    group.add(buildTrack(trackX), buildTrack(-trackX));
-
-    const baseGeo = new THREE.BoxGeometry(trackOutW - trackW * 0.3, trackH * 0.85, trackL * 0.55);
-    const base = new THREE.Mesh(baseGeo, matDark);
-    base.position.set(0, trackH / 2, 0);
-    setShadows(base);
-    group.add(base);
-
-    const upperGroup = new THREE.Group();
-    upperGroup.position.set(0, trackH, 0);
-    upperGroup.userData.isUpper = true;
-
-    // デッキ(下段・幅広): エンジンハウス相当のボリューム
-    const turretZ = -1.6;
-    const deckW = bodyW, deckH = bodyH * 0.55, deckL = 7.4;
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(deckW, deckH, deckL), matCraneBody);
-    deck.position.set(0, deckH / 2, turretZ);
-    setShadows(deck);
-    upperGroup.add(deck);
-
-    // カウンターウェイト(上段・後方寄り、やや幅を絞る): 実車の後部の張り出し
-    const cwW = bodyW * 0.9, cwH = bodyH * 0.65, cwL = deckL * 0.4;
-    const counterweight = new THREE.Mesh(new THREE.BoxGeometry(cwW, cwH, cwL), matCraneBody);
-    counterweight.position.set(0, deckH + cwH / 2, turretZ - deckL / 2 + cwL / 2 + 0.1);
-    setShadows(counterweight);
-    upperGroup.add(counterweight);
-
-    const cabW = 1.0, cabH = 1.5, cabL = 1.7;
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH, cabL), matGlass);
-    cab.position.set(-deckW / 2 + cabW / 2 + 0.08, deckH + cabH / 2, turretZ + deckL / 2 - cabL / 2 - 0.1);
-    setShadows(cab);
-    upperGroup.add(cab);
-
-    // ブーム基部のペデスタル(台座): ブームが本体からせり上がって生えている
-    // 構造を再現するための土台
-    const pedestalH = 0.55;
-    const pedestal = new THREE.Mesh(new THREE.BoxGeometry(bodyW * 0.5, pedestalH, 1.0), matCraneBody);
-    pedestal.position.set(0, deckH + pedestalH / 2, 1.0);
-    setShadows(pedestal);
-    upperGroup.add(pedestal);
-
-    const boomGroup = new THREE.Group();
-    boomGroup.position.set(0, deckH + pedestalH, 1.0);
-    boomGroup.rotation.x = Math.PI * (25 / 180);
-
-    const boomLen = 15;
-    const boomGeo1 = new THREE.BoxGeometry(1.0, boomLen, 1.0);
-    boomGeo1.translate(0, boomLen / 2, 0);
-    const boom1 = new THREE.Mesh(boomGeo1, matTruss);
-    boom1.userData.isBoom = true;
-    setShadows(boom1);
-
-    const marker = createDragMarker(0.3);
-    marker.position.set(0, boomLen, 0);
-    boom1.add(marker);
-
-    boomGroup.add(boom1);
-    upperGroup.add(boomGroup);
-
-    group.add(upperGroup);
-    return group;
-  }
 
   // r025(マスター指示・追1): 測点フラグ。Voldia本体の測点(実座標mm→m変換済み)を
   // 受け取り、テレイン上(GL, y=0)に自動配置する。ポールはまっすぐ垂直に立てる
@@ -2041,37 +1068,9 @@ const MINI_BH_GEO = {
   // 地形読込完了のたびに再配置し直す。
   // 追加2(2026-08-24 引継ぎ18回目): 本体側の実寸値も同様に保持(地形読込完了時の再配置で使う)
   let _lastYamadomeRealYTop = null, _lastYamadomeRealYBot = null, _lastYamadomeBatterDeg = 1;
-  // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示): グレー壁面マーカー
-  let grayWallMarkerGroup = null;
-  let _lastGrayWalls = null;
-  function createSurveyFlag(no) {
-    const g = new THREE.Group();
-    g.userData = { isRoot: true, type: 'survey_flag', no, isFlag: true };
-    const poleH = 1.6, poleR = 0.022;
-    const pole = new THREE.Mesh(
-      new THREE.CylinderGeometry(poleR, poleR, poleH, 8),
-      new THREE.MeshLambertMaterial({ color: 0xded9ba })
-    );
-    pole.position.y = poleH / 2;
-    g.add(pole);
-    // 旗（右に伸びる三角形の吹き流し、上辺だけ少し波打たせる）
-    const fw = 0.56, fh = 0.34;
-    const shape = new THREE.Shape();
-    shape.moveTo(0, 0);
-    shape.lineTo(0, fh);
-    shape.quadraticCurveTo(fw * 0.42, fh * 0.8, fw * 0.6, fh * 0.62);
-    shape.lineTo(fw, fh * 0.42);
-    shape.lineTo(0, 0);
-    const flagGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.01, bevelEnabled: false });
-    const flagMesh = new THREE.Mesh(
-      flagGeo,
-      new THREE.MeshLambertMaterial({ color: 0xe8391f, side: THREE.DoubleSide })
-    );
-    flagMesh.position.set(poleR, poleH - fh - 0.02, 0);
-    flagMesh.userData.isFlagCloth = true; // r025(マスター指示): なびきアニメ用マーカー
-    g.add(flagMesh);
-    return g;
-  }
+  // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示→26回目セッションで紫に移設): 紫壁面マーカー
+  let purpleWallMarkerGroup = null;
+  let _lastPurpleWalls = null;
   function placeSurveyFlags(points) {
     // r025(マスター指示・追1直し): y=0固定だと浮いてしまう(テレインは平坦でないため)。
     // 既存オブジェクトと同じspawn+fallingObjects物理演算に乗せて、実際の地形面まで
@@ -2197,14 +1196,14 @@ const MINI_BH_GEO = {
   }
 
   // 6D-6配置モード反映・根本修正版(2026-08-29 引継ぎ18回目マスター指示):
-  // 「グレー矩形で発生する垂直面と同じ形状の面(Manifoldが既に正しく計算済み)を
+  // 「紫矩形で発生する垂直面と同じ形状の面(Manifoldが既に正しく計算済み)を
   // 少し前に出してテクスチャを貼るだけ」というマスターの指摘の通り、本体側で
   // ManifoldのoriginalID追跡により実際に採用された壁面三角形(positions/uv)を
   // そのまま受け取ってメッシュ化するだけ。座標系変換・2Dヒューリスティックに
   // よる再計算は一切不要になった(隣接オブジェクトがどれだけ複雑でも、Union
   // 計算自体が正しく処理した結果をそのまま流用するため常に正しい)。
-  function placeGrayWallMarkers(wallData) {
-    if (grayWallMarkerGroup) { scene.remove(grayWallMarkerGroup); grayWallMarkerGroup = null; }
+  function placePurpleWallMarkers(wallData) {
+    if (purpleWallMarkerGroup) { scene.remove(purpleWallMarkerGroup); purpleWallMarkerGroup = null; }
     if (!wallData || !wallData.positions || !wallData.positions.length) return;
     const hatchTex = _getYamadomeHatchTexture();
     const geo = new THREE.BufferGeometry();
@@ -2222,9 +1221,9 @@ const MINI_BH_GEO = {
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 10;
-    mesh.userData = { isRoot: true, type: 'gray_wall_marker' };
-    grayWallMarkerGroup = mesh;
-    scene.add(grayWallMarkerGroup);
+    mesh.userData = { isRoot: true, type: 'purple_wall_marker' };
+    purpleWallMarkerGroup = mesh;
+    scene.add(purpleWallMarkerGroup);
   }
   window.addEventListener('pointermove', e => {
     if (surveyFlags.length === 0) return;
@@ -2247,221 +1246,10 @@ const MINI_BH_GEO = {
     tip.style.display = 'none';
   });
 
-  function createWorker(isGuard = false) {
-    const group = new THREE.Group();
-    const shape = new THREE.Shape();
-    
-    // ★ 警備員: 修正済みのL字ポーズ
-    if (isGuard) {
-      shape.moveTo(-0.18, 2.0); 
-      shape.lineTo( 0.18, 2.0); 
-      shape.lineTo( 0.18, 1.65); 
-      shape.lineTo( 0.40, 1.65); 
-      shape.lineTo( 0.40, 2.15); 
-      shape.lineTo( 0.60, 2.15); 
-      shape.lineTo( 0.60, 1.45); 
-      shape.lineTo( 0.28, 1.45); 
-      shape.lineTo( 0.28, 0.85); 
-      shape.lineTo( 0.42, 0.0);  
-      shape.lineTo( 0.15, 0.0);  
-      shape.lineTo( 0.0,  0.75); 
-      shape.lineTo(-0.15, 0.0);  
-      shape.lineTo(-0.42, 0.0);  
-      shape.lineTo(-0.28, 0.85); 
-      shape.lineTo(-0.28, 1.35); 
-      shape.lineTo(-0.35, 1.35); 
-      shape.lineTo(-0.35, 0.6);  
-      shape.lineTo(-0.55, 0.6);  
-      shape.lineTo(-0.55, 1.55); 
-      shape.lineTo(-0.18, 1.65); 
-      shape.lineTo(-0.18, 2.0);  
-    } else {
-      shape.moveTo(-0.18, 2.0); 
-      shape.lineTo( 0.18, 2.0); 
-      shape.lineTo( 0.18, 1.65); 
-      shape.lineTo( 0.55, 1.55); 
-      shape.lineTo( 0.55, 0.6); 
-      shape.lineTo( 0.35, 0.6); 
-      shape.lineTo( 0.35, 1.35); 
-      shape.lineTo( 0.28, 1.35); 
-      shape.lineTo( 0.28, 0.85); 
-      shape.lineTo( 0.42, 0.0); 
-      shape.lineTo( 0.15, 0.0); 
-      shape.lineTo( 0.0,  0.75); 
-      shape.lineTo(-0.15, 0.0); 
-      shape.lineTo(-0.42, 0.0); 
-      shape.lineTo(-0.28, 0.85); 
-      shape.lineTo(-0.28, 1.35); 
-      shape.lineTo(-0.35, 1.35); 
-      shape.lineTo(-0.35, 0.6); 
-      shape.lineTo(-0.55, 0.6); 
-      shape.lineTo(-0.55, 1.55); 
-      shape.lineTo(-0.18, 1.65); 
-      shape.lineTo(-0.18, 2.0);
-    }
 
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.2, bevelEnabled: false });
-    geo.center(); 
-    const mat = isGuard ? matGuard : matWorker;
-    const body = new THREE.Mesh(geo, mat);
-    body.position.set(0, 1.0, 0);
-    setShadows(body);
-    group.add(body);
 
-    if (isGuard) {
-      // 修正済みの誘導棒配置
-      const batonGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8);
-      batonGeo.translate(0, 0.25, 0); 
-      const baton = new THREE.Mesh(batonGeo, matRedGlow);
-      
-      const wristX = 0.50 - 0.025;
-      const wristY = 2.15 - 1.075 + 1.0; 
-      
-      baton.position.set(wristX, wristY, 0.1); 
-      baton.rotation.z = -Math.PI / 6; 
-      baton.rotation.x = Math.PI / 8;  
-      group.add(baton);
-    }
-    return group;
-  }
 
-  function createStripedTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#f1c40f'; ctx.fillRect(0, 0, 256, 256); ctx.fillStyle = '#111111';
-    for (let i = -256; i < 512; i += 64) {
-      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 128, 256); ctx.lineTo(i + 128 + 32, 256); ctx.lineTo(i + 32, 0); ctx.fill();
-    }
-    const tex = new THREE.CanvasTexture(canvas); tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(4, 1);
-    return tex;
-  }
-  const matStripe = new THREE.MeshLambertMaterial({ map: createStripedTexture() });
-  const matCone   = new THREE.MeshLambertMaterial({ color: 0xe74c3c });
-  const matWhite  = new THREE.MeshLambertMaterial({ color: 0xffffff });
 
-  function createConeBar() {
-    const group = new THREE.Group();
-    const makeCone = (xPos) => {
-      const cGrp = new THREE.Group();
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.4), matCone); base.position.set(0, 0.025, 0); setShadows(base);
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.18, 0.7, 16), matCone); body.position.set(0, 0.35, 0); setShadows(body);
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 0.15, 16), matWhite); band.position.set(0, 0.45, 0);
-      cGrp.add(base, body, band); cGrp.position.set(xPos, 0, 0); return cGrp;
-    };
-    group.add(makeCone(-1.0), makeCone(1.0));
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.0, 8), matStripe);
-    bar.rotation.z = Math.PI / 2; bar.position.set(0, 0.65, 0); setShadows(bar); group.add(bar);
-    return group;
-  }
-
-  function createCustomBoxMesh(w, d, h, colorHex) {
-    const group = new THREE.Group();
-    const geo = new THREE.BoxGeometry(w, h, d);
-    geo.translate(0, h / 2, 0);
-    const mat = new THREE.MeshLambertMaterial({ color: colorHex });
-    const mesh = new THREE.Mesh(geo, mat);
-    setShadows(mesh);
-    group.add(mesh);
-    return group;
-  }
-
-  function createTextBalloonMesh(text) {
-    const group = new THREE.Group();
-    
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const lines = text.split('\n');
-    ctx.font = "bold 32px 'Segoe UI', sans-serif";
-    
-    let maxWidth = 0;
-    lines.forEach(line => {
-      const metrics = ctx.measureText(line);
-      if (metrics.width > maxWidth) maxWidth = metrics.width;
-    });
-    
-    const padding = 20;
-    const tailHeight = 30;
-    const tailWidth = 30;
-    const lineHeight = 40;
-    const boxWidth = maxWidth + padding * 2;
-    const boxHeight = lines.length * lineHeight + padding * 2;
-    
-    canvas.width = boxWidth;
-    canvas.height = boxHeight + tailHeight;
-    
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 4;
-    const r = 10;
-    ctx.beginPath();
-    ctx.moveTo(r, 0);
-    ctx.lineTo(boxWidth - r, 0);
-    ctx.quadraticCurveTo(boxWidth, 0, boxWidth, r);
-    ctx.lineTo(boxWidth, boxHeight - r);
-    ctx.quadraticCurveTo(boxWidth, boxHeight, boxWidth - r, boxHeight);
-    
-    ctx.lineTo(boxWidth/2 + tailWidth/2, boxHeight);
-    ctx.lineTo(boxWidth/2, boxHeight + tailHeight);
-    ctx.lineTo(boxWidth/2 - tailWidth/2, boxHeight);
-    
-    ctx.lineTo(r, boxHeight);
-    ctx.quadraticCurveTo(0, boxHeight, 0, boxHeight - r);
-    ctx.lineTo(0, r);
-    ctx.quadraticCurveTo(0, 0, r, 0);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    
-    ctx.fillStyle = '#111';
-    ctx.textBaseline = 'top';
-    ctx.font = "bold 32px 'Segoe UI', sans-serif";
-    lines.forEach((line, i) => {
-      ctx.fillText(line, padding, padding + i * lineHeight);
-    });
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    const aspect = canvas.width / canvas.height;
-    const scaleY = (boxHeight + tailHeight) / 50; 
-    const scaleX = scaleY * aspect;
-    
-    const planeGeo = new THREE.PlaneGeometry(scaleX, scaleY);
-    planeGeo.translate(0, scaleY / 2, 0);
-    
-    const material = new THREE.MeshLambertMaterial({ 
-      map: texture, 
-      transparent: true,
-      alphaTest: 0.1, 
-      side: THREE.DoubleSide
-    });
-    
-    const billboard = new THREE.Mesh(planeGeo, material);
-    billboard.castShadow = true; 
-    
-    billboard.userData.isBillboard = true;
-    billboard.userData.baseScaleX = scaleX;
-    billboard.userData.baseScaleY = scaleY;
-    billboard.userData.scaleMultiplier = 1;
-
-    billboard.position.y = 0.5;
-    group.add(billboard);
-
-    const dotGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.05, 16);
-    const dotMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
-    const dotMesh = new THREE.Mesh(dotGeo, dotMat);
-    dotMesh.position.y = 0.025; 
-    dotMesh.castShadow = true;
-    group.add(dotMesh);
-
-    const poleGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8);
-    const poleMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
-    const poleObj = new THREE.Mesh(poleGeo, poleMat);
-    poleObj.position.y = 0.25;
-    poleObj.castShadow = true;
-    group.add(poleObj);
-    
-    return group;
-  }
 
   // ==========================================
   // ★ 地形に沿う作業半径・線描画ロジック
@@ -3116,6 +1904,16 @@ const MINI_BH_GEO = {
   // 移動量はカメラ〜注視点の現在距離に比例させ、どのズームレベルでも体感速度が
   // 一定になるようにする。構台モード中は専用のカメラ制御(_kotaiSavedCam!==null)
   // と競合するため対象外。フォーム入力中も誤爆防止で無効化。
+  // r075(21回目引継ぎ3回目・マスター報告「オブジェクトをクリックするまで動かない/
+  // 他ウインドウに切替えて戻ると再び動かなくなる」): 診断ログで原因判明。
+  // camera.position/controls.targetの更新自体は毎回正しく実行されていた
+  // (distの値が押すたびに変化することで確認できた)が、実際の再描画は
+  // animate()内のrequestAnimationFrameループ任せになっていた。ブラウザは
+  // ウインドウ(OSフォーカス)が外れている間rAFを間引く/止めるため、その間は
+  // 画面が更新されず「動いていないように見える」。クリック(≒ウインドウに
+  // フォーカスが戻る操作)をきっかけにrAFが再開し、それまでの蓄積分が一気に
+  // 反映されて「クリックしたら動いた」ように見えていた、が真相。
+  // 対策: rAFループを待たず、キー入力のたびにここで直接1回描画する。
   window.addEventListener('keydown', (e) => {
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
     const tag = document.activeElement && document.activeElement.tagName;
@@ -3136,6 +1934,8 @@ const MINI_BH_GEO = {
     move.multiplyScalar(step);
     camera.position.add(move);
     controls.target.add(move);
+    controls.update();
+    renderer.render(scene, camera); // r075: rAFループを待たず即座に反映
   });
 
   const radarCanvas = document.getElementById('radar-canvas');
@@ -3277,48 +2077,6 @@ const MINI_BH_GEO = {
   // ==========================================
   // 標準的なH形鋼の断面(300x300、フランジ厚15mm、ウェブ厚10mmを想定)を
   // アウトライン1本(穴なし)で表現し、縦方向(Y軸)に押し出す。
-  function createHPileMesh(heightM) {
-    const W = 0.3, TF = 0.015, TW = 0.01; // 断面寸法(m)
-    const shape = new THREE.Shape();
-    shape.moveTo(-W/2, -W/2);
-    shape.lineTo(W/2, -W/2);
-    shape.lineTo(W/2, -W/2+TF);
-    shape.lineTo(TW/2, -W/2+TF);
-    shape.lineTo(TW/2, W/2-TF);
-    shape.lineTo(W/2, W/2-TF);
-    shape.lineTo(W/2, W/2);
-    shape.lineTo(-W/2, W/2);
-    shape.lineTo(-W/2, W/2-TF);
-    shape.lineTo(-TW/2, W/2-TF);
-    shape.lineTo(-TW/2, -W/2+TF);
-    shape.lineTo(-W/2, -W/2+TF);
-    shape.lineTo(-W/2, -W/2);
-
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: heightM, bevelEnabled: false });
-    geo.rotateX(Math.PI / 2); // (x,y,z)→(x,-z,y): z=0面がy=0(上端)、z=heightM面がy=-heightM(下端)
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, metalness: 0.6, roughness: 0.4, side: THREE.DoubleSide });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-
-    // r064: H形鋼の断面は薄く(フランジ/ウェブ幅10〜15mm)、中央部分は空洞のため
-    // 実ジオメトリだけでは掴む判定が非常にシビアだった(マスター指摘: 上の方は
-    // 特に掴みにくい)。断面全体を覆う太さ0.3m相当の透明円柱を当たり判定専用
-    // として重ね、ドラッグ開始のピック判定を掴みやすくする。見た目には出さず、
-    // 影・輪郭線・バウンディングボックス(衝突判定)・他オブジェクトの着地先
-    // 判定からは isDragHitbox フラグで除外する。
-    const hitboxGeo = new THREE.CylinderGeometry(0.3, 0.3, heightM, 8);
-    const hitboxMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
-    const hitbox = new THREE.Mesh(hitboxGeo, hitboxMat);
-    hitbox.position.y = -heightM / 2; // メッシュのローカル座標は上端y=0・下端y=-heightM
-    hitbox.userData.isDragHitbox = true;
-    hitbox.castShadow = false;
-    hitbox.receiveShadow = false;
-    mesh.add(hitbox);
-
-    return mesh;
-  }
 
   const HPILE_TOP_Y = 0.4; // r062: 鋼材柱の天端固定値(GL+0.4)。配置時・ドラッグ移動後・復元時で共有
 
@@ -4463,6 +3221,3 @@ const MINI_BH_GEO = {
 
   animate();
 
-</script>
-</body>
-</html>
