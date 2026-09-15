@@ -1856,9 +1856,15 @@ async function runCalc(mode){
   // フラスタムを使っていたため、天端が0でない既存躯体では重複体積の計算自体も
   // ズレていた可能性がある。ここで既存躯体だけを退避し、捨てコン加算分だけ
   // (通常計算と同じ理屈で)相殺してモード非依存のD=tl-bに揃え、天端正規化・
-  // GLオフセット・地盤面より上の除外など、これ以降のモード別調整を一切
-  // 適用せずに末尾で無調整のまま合流させる。
-  const _grayFsUntouched = fs.filter(f=>f.color==='gray')
+  // 地盤面より上の除外など、これ以降のモード別調整を一切適用せずに末尾で合流させる。
+  // r015(28回目セッション): 上記のうち「GLオフセットの反映」だけは除外し過ぎだった。
+  // マスター実機検証(GL±1000で既存躯体のtl/Dが本当に無変化なことをログで確認済み)を
+  // 受けての指摘: 「2Dで描いた下端が正解値であり、GLが変わったら他のオブジェクトと
+  // 同じ数値だけ全オブジェクトが上下するべき。既存躯体だけ動かないのはおかしい」との
+  // 仕様確定。天端の強制ゼロ化(バグ本体、上記の理由で除外を維持)とGLオフセットの反映は
+  // 別物として切り分け、GLオフセットは青(掘削)と全く同じ式(D+=glOff)を既存躯体にも
+  // 適用する(letに変更、doboku・GLオフセット指定時のみ下記で追加調整)。
+  let _grayFsUntouched = fs.filter(f=>f.color==='gray')
     .map(f=>({...f, D: f.D - concVal}))
     .filter(f=>f.D>0);
   fs = fs.filter(f=>f.color!=='gray');
@@ -1905,6 +1911,13 @@ async function runCalc(mode){
       const glOff = window._glOffsetMm;
       const excludedGL=[];
       fs = fs.map(f => ({...f, D: f.D + glOff})).filter(f=>{
+        if(f.D <= 0){ excludedGL.push(f.name || '(無名)'); return false; }
+        return true;
+      });
+      // r015: 既存躯体(グレー)にも青と全く同じ式でGLオフセットを反映する。
+      // 天端(tl)は_grayFsUntouched生成時点で既に「描いた通り」のまま保持されて
+      // いる(強制ゼロ化は受けていない)ので、ここではDにglOffを足すだけでよい。
+      _grayFsUntouched = _grayFsUntouched.map(f => ({...f, D: f.D + glOff})).filter(f=>{
         if(f.D <= 0){ excludedGL.push(f.name || '(無名)'); return false; }
         return true;
       });
