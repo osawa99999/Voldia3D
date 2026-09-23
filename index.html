@@ -19,6 +19,13 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<!-- ⚠️⚠️ r023(30回目セッション、マスター指示・著作権クリアランス対応):
+     上記CDN読込ライブラリ、および lib/earcut.js・lib/clipper.js(同梱ファイル)の著作権表記・
+     ライセンス種別一覧は、免責ダイアログ下部の「使用ライブラリのライセンス表記(Credits)」
+     モーダル(id="license-modal")にまとめてある。
+     ★★★ 新しいライブラリをCDN追加・lib/へ同梱する時は、必ずlicense-modalの一覧にも
+     一項目追加すること。ここを更新し忘れると表記自体が不正確になり、著作権対応の
+     意味が無くなる。忘れずに！ ★★★ -->
 <style>
 :root{
   --bg:#1a1a1a;--text:#e0e0e0;--panel:#242424;--btn:#333;
@@ -238,6 +245,10 @@ select#sc-select{width:100%;background:#333;color:var(--text);border:1px solid v
    #pg-modalの.modal-cだけmax-height+overflow-yを付けてスクロール対応にした。
    他の.modal-c共用箇所(sc-modal/confirm-modal等)には影響しないようスコープを絞っている。 */
 #pg-modal .modal-c{max-height:78vh;overflow-y:auto;}
+/* r023(30回目セッション、マスター指示・著作権クリアランス対応): 使用ライブラリの
+   ライセンス表記(Credits)モーダル。項目数が多く左寄せの長文になるため、
+   pg-modalと同様にスクロール対応させた上でtext-align/widthだけ個別指定する。 */
+#license-modal .modal-c{max-height:78vh;overflow-y:auto;width:540px;max-width:92vw;text-align:left;}
 
 /* トースト */
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
@@ -931,6 +942,66 @@ D&D or クリックでロードしてください</p>
     </span>
     <span>でブックマークしておくと、便利です</span>
   </div>
+  <!-- r023(30回目セッション、マスター指示): 使用ライブラリのライセンス表記への導線 -->
+  <div style="margin-top:10px;">
+    <a id="open-license-modal" href="#" style="color:#7a95c9;font-size:.75em;text-decoration:underline;">使用ライブラリのライセンス表記 (Credits)</a>
+  </div>
+  </div>
+</div>
+
+<!-- ライセンス表記(Credits)モーダル -->
+<!-- r023(30回目セッション、マスター指示・著作権クリアランス対応):
+     本アプリが内蔵/CDN読込している主要ライブラリの著作権表記・ライセンス種別一覧。
+     ★新しいライブラリ(CDN追加・lib/への同梱問わず)を追加した時は、必ずこのリストにも
+     一項目追加すること。追加コード側だけ直してここを更新し忘れると、この表記自体が
+     嘘になってしまう(次回引継ぎプロンプトにも同様の注意書きを入れてあるので、
+     引継ぎを読んだ次回セッションのClaudeもこの点を確認すること)。 -->
+<div id="license-modal" class="modal">
+  <div class="modal-c">
+    <h3 style="text-align:center;">使用ライブラリ ライセンス表記 (Credits)</h3>
+    <p style="color:#aaa;font-size:.78em;line-height:1.7;margin-bottom:14px;">
+      本アプリは以下のオープンソースライブラリを利用しています。各ライブラリの著作権は
+      それぞれの著作権者に帰属します。
+    </p>
+    <div style="font-size:.78em;line-height:1.75;color:#ccc;">
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">earcut</strong>（同梱・lib/earcut.js）<br>
+        Copyright (c) 2016, Mapbox — ISC License<br>
+        <span style="color:#889;">https://github.com/mapbox/earcut</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">Javascript Clipper</strong>（同梱・lib/clipper.js, v6.4.2.2）<br>
+        Copyright Angus Johnson 2010-2017 / Timo Kähkönen 2012-2017 — Boost Software License 1.0<br>
+        JSBN (BigInteger) by Tom Wu を含む(BSD系ライセンス)<br>
+        <span style="color:#889;">http://www.angusj.com / http://www.boost.org/LICENSE_1_0.txt</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">three.js</strong>（CDN読込、r128）+ <strong style="color:#88aaff;">GLTFLoader</strong><br>
+        Copyright © 2010-2024 three.js authors — MIT License<br>
+        <span style="color:#889;">https://github.com/mrdoob/three.js</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">PDF.js</strong>（CDN読込、v2.12.313）<br>
+        Copyright Mozilla and PDF.js contributors — Apache License 2.0<br>
+        <span style="color:#889;">https://github.com/mozilla/pdf.js</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">xlsx-js-style</strong>（CDN読込、SheetJSベース）<br>
+        Apache License 2.0<br>
+        <span style="color:#889;">https://github.com/gitbrent/xlsx-js-style</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">jsPDF</strong>（CDN読込、v2.5.1）<br>
+        MIT License<br>
+        <span style="color:#889;">https://github.com/parallax/jsPDF</span>
+      </div>
+      <div style="margin-bottom:4px;">
+        <strong style="color:#88aaff;">JSZip</strong>（CDN読込、v3.10.1）<br>
+        MIT License（デュアルライセンスのうちMIT側を適用）<br>
+        <span style="color:#889;">https://github.com/Stuk/jszip</span>
+      </div>
+    </div>
+    <button id="license-modal-close" style="display:block;width:100%;margin-top:18px;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.9em;cursor:pointer;font-weight:700;">閉じる</button>
   </div>
 </div>
 

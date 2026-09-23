@@ -398,6 +398,19 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('disclaimer-modal').style.display='none';
   });
 
+  // r023(30回目セッション、マスター指示): ライセンス表記(Credits)モーダルの開閉。
+  // 免責モーダルの下から開く導線なので、開いている間は免責モーダルの後ろに重ねて表示する
+  // (免責モーダルはposition:fixedのdivそのもの、license-modalは.modalクラスのz-index:10000
+  // なので、免責モーダル側のz-indexを明示していない=デフォルトスタック順に依存する点に注意。
+  // 実機で重なり順がおかしい場合はここのz-indexを見直すこと)。
+  document.getElementById('open-license-modal').addEventListener('click',(e)=>{
+    e.preventDefault();
+    document.getElementById('license-modal').style.display='flex';
+  });
+  document.getElementById('license-modal-close').addEventListener('click',()=>{
+    document.getElementById('license-modal').style.display='none';
+  });
+
   // 回転確認モーダル
   // 回転確認モーダル：Yesを選択した時
   document.getElementById('rot-yes').addEventListener('click',()=>{

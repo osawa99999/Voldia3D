@@ -750,13 +750,29 @@ async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
   // r065(AIS修正案): 山留オフセットをバケツリレーで橋渡し(致命的バグ修正)
   // ★_calcVolumeFallback自体は無改変(体積計算の正解関数)。既存躯体(グレー)は
   // 掘削対象外のため、ここではexcavFrustumsのみを渡す。
-  let totalVol = _calcVolumeFallback(excavFrustums, offsetXmm, offsetYmm);
+  const excavVol = _calcVolumeFallback(excavFrustums, offsetXmm, offsetYmm);
+  let totalVol = excavVol;
 
   // 26回目セッション新規: 既存躯体が掘削形状と重なる分だけ、体積計算結果から
   // 差し引く(「そこには既にコンクリートがあるから体積がその分減る」)
+  // r017(28回目セッション): マスター要望により、この2つの内訳((A)掘削のみ合計と
+  // (B)既存躯体重複)をxlsx/PDF/PNG出力に別掲するため、totalVol算出と別に
+  // それぞれ単独で保持しておく(既存の合算ロジック・最終値自体は変更なし)。
+  let overlapVol = 0;
   if(structFrustums.length){
-    const overlapVol = _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offsetXmm, offsetYmm);
+    overlapVol = _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offsetXmm, offsetYmm);
     totalVol = Math.max(0, totalVol - overlapVol);
+
+    // 【診断用・段階1検証・r018】(B)専用メッシュの体積を発散定理で算出し、
+    // 基準値(_calcExistingStructureOverlapVolumeの10mmスライス数値)と突き合わせる。
+    // マスター実機確認後、撤去して次段階(GLB化・エビル連携)へ進む。
+    try{
+      const diagGeom = buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offsetXmm, offsetYmm);
+      const diagVolM3 = diagGeom ? _diagMeshVolume(diagGeom) : 0;
+      console.log('[DIAG-B] 基準値(10mmスライス)=' + overlapVol.toFixed(4) + 'm³ / メッシュ体積(発散定理)=' + diagVolM3.toFixed(4) + 'm³ / 差=' + (diagVolM3-overlapVol).toFixed(4) + 'm³ / 頂点数=' + (diagGeom?diagGeom.attributes.position.count:0));
+    }catch(e){
+      console.warn('[DIAG-B] buildExistingStructureOverlapMeshでエラー:', e);
+    }
   }
 
   // 外皮シェルメッシュ生成
@@ -829,6 +845,8 @@ async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
     unionGeoms,
     existingStructGeoms,
     unionVol: totalVol,
+    excavOnlyVol: excavVol,          // (A) 既存躯体を考慮しない掘削のみの合計
+    existingStructOverlapVol: overlapVol, // (B) 掘削と重なる既存躯体の体積
     error: null
   };
 }
@@ -1091,6 +1109,357 @@ function _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offs
 }
 
 // ────────────────────────────────────────────────────────────────
+//  buildExistingStructureOverlapMesh: (B)専用 — 掘削∩既存躯体の水密ソリッド
+//  r018(29回目セッション、段階1): マスター方針(2026-09-15)
+//  「3Dイメージ側のスライス計算とExcel(エビル)側の計算は完全に別物」に基づき、
+//  Excel専用のB(既存躯体重複分)ソリッドをbuildShellMeshのブレークポイント+loft
+//  手法で新設。表示専用オフセット(z-fighting回避・LandXML用テーパー回避)は
+//  一切継承しない。掘削側の法面自体は実形状なので反映するが、既存躯体側は
+//  _calcExistingStructureOverlapVolumeと同じく「描いた形状そのまま」とする。
+//  段階1の現時点では単体関数として作成のみ。GLB化・エビル連携は未着手
+//  (_diagMeshVolumeで数値検証してから次段階へ進む)。
+//
+//  ★★★r021(30回目セッション)で根本原因を特定・修正(実機未確認)★★★
+//  r020まで、本関数の体積は正解(6.864m³)に対し系統的に過小評価していた
+//  (試行1=2端点直接loft: 5.60m³/-18%、試行2=細分化+段差スタック: -25〜33%)。
+//  Node.jsで「100×100→80×80の2段テスト」等を使い切り分けた結果、原因は
+//  addLoftWallの頂点対応や段差面の巻き方向ではなく、emitLayer内で
+//  addLoftWall(topの全周→botの全周、斜めloft)に加えて
+//  「stepFaces=clipperDifference(topContours,botContours)」という水平面を
+//  "追加で"足していたことによる二重計上だったと判明した。addLoftWall1枚だけで
+//  区間の体積は過不足なく表現できるため(単一フラスタムのbuildShellMeshと同原理)、
+//  段差面は完全に不要かつ有害だった。証拠: stepFacesを完全に削除し
+//  addLoftWallのみにしたところ、線形テーパーでは分割数Nによらず常に理論値と
+//  厳密一致、非線形(sqrt)テーパーでもN=100で誤差0.02%以下まで収束することを
+//  確認した。逆にstepFacesを残したままだと(flipNormalの向きを反転させても)、
+//  Nを増やす=細分化を細かくするほど誤差が悪化する(試行1→試行2で悪化していたのは
+//  これが理由)。今回はr020までの2行(stepFaces計算とaddFace呼び出し)を削除する
+//  形でemitLayer内に修正済み。voldia_export.js側のB_PIPELINE_ENABLEDはテスト用に
+//  trueへ戻したが、実機の[DIAG-B]/[DIAG-B-GLB]ログで基準値6.864m³との一致を
+//  必ず確認すること(過去2回、机上では正しく見えた修正が実機検証で誤りと判明した
+//  実績があるため、この修正も実機確認が済むまでは「たぶん直った」の域を出ない)。
+// ────────────────────────────────────────────────────────────────
+function buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offsetXmm, offsetYmm){
+  const SF = 1000000;
+  const positions = [];
+  const indices   = [];
+
+  function addVertex(x, y, depth){
+    positions.push(x, -depth, y);
+    return (positions.length/3) - 1;
+  }
+  function addFace(outerPts, holesPts, depth, flipNormal){
+    if(!outerPts || outerPts.length < 3) return;
+    const baseIdx = positions.length/3;
+    const flat=[]; const holeStarts=[];
+    outerPts.forEach(p=>flat.push(p.x,p.y));
+    (holesPts||[]).forEach(h=>{
+      if(!h||h.length<3) return;
+      holeStarts.push(flat.length/2);
+      h.forEach(p=>flat.push(p.x,p.y));
+    });
+    const allPts=[...outerPts, ...(holesPts||[]).flat()];
+    allPts.forEach(p=>addVertex(p.x,p.y,depth));
+    const tris=earcut(flat, holeStarts.length?holeStarts:null, 2);
+    for(let i=0;i<tris.length;i+=3){
+      if(flipNormal) indices.push(baseIdx+tris[i], baseIdx+tris[i+2], baseIdx+tris[i+1]);
+      else indices.push(baseIdx+tris[i], baseIdx+tris[i+1], baseIdx+tris[i+2]);
+    }
+  }
+  // buildShellMeshのaddLoftWallと同一ロジック(流用元は変更しないため独立実装)
+  function addLoftWall(upperPts, lowerPts, upperDepth, lowerDepth){
+    if(!upperPts||!lowerPts) return;
+    const nu=upperPts.length, nl=lowerPts.length;
+    if(nu<2||nl<2) return;
+    const uBase=positions.length/3;
+    upperPts.forEach(p=>addVertex(p.x,p.y,upperDepth));
+    const lBase=positions.length/3;
+    lowerPts.forEach(p=>addVertex(p.x,p.y,lowerDepth));
+    let bestOffset=0, bestDist=Infinity;
+    for(let off=0; off<nl; off++){
+      const dx=upperPts[0].x-lowerPts[off].x, dy=upperPts[0].y-lowerPts[off].y;
+      const d=dx*dx+dy*dy;
+      if(d<bestDist){bestDist=d;bestOffset=off;}
+    }
+    let ui=0, li=0;
+    const totalSteps=nu+nl;
+    for(let step=0; step<totalSteps; step++){
+      const uNext=(ui+1)%nu, lNext=(li+1)%nl;
+      const lIdx=(li+bestOffset)%nl, lNextIdx=(lNext+bestOffset)%nl;
+      if(ui<nu-1 && li<nl-1){
+        const du=Math.hypot(upperPts[uNext].x-lowerPts[lIdx].x, upperPts[uNext].y-lowerPts[lIdx].y);
+        const dl=Math.hypot(upperPts[ui].x-lowerPts[lNextIdx].x, upperPts[ui].y-lowerPts[lNextIdx].y);
+        if(du<=dl){ indices.push(uBase+ui, lBase+lIdx, uBase+uNext); ui++; }
+        else{ indices.push(uBase+ui, lBase+lIdx, lBase+lNextIdx); li++; }
+      } else if(ui<nu-1){ indices.push(uBase+ui, lBase+lIdx, uBase+uNext); ui++; }
+      else if(li<nl-1){ indices.push(uBase+ui, lBase+lIdx, lBase+lNextIdx); li++; }
+      else break;
+    }
+    indices.push(uBase+(nu-1), lBase+((bestOffset+nl-1)%nl), uBase+0);
+    indices.push(uBase+0, lBase+((bestOffset+nl-1)%nl), lBase+bestOffset);
+  }
+  // r026(30回目セッション、マスター実機報告「ZIPが4ファイルしか出ない」への対応・
+  // 根本原因特定): この関数のClipper呼び出しは全てpftPositiveフィルルールを
+  // 使っているが、pftPositiveは入力パスがCCW(符号付き面積が正)である前提のルールで、
+  // CW(符号付き面積が負)のパスを渡すと「内部」を一切検出できず、Union/Intersection/
+  // Differenceの結果が常に0パスになる。実機のVoldiaが保存する図形の頂点順は
+  // (画面のY軸下向き座標系に由来して)CWになっており、これをconsole.log等で
+  // 実データそのまま検証したところ、purple∩grayのような明白に重複している矩形同士でも
+  // Clipperが0パスを返すことをNode.js上で再現・確認した。同じ(B)機能でも、既に正しい
+  // 値を出している_calcExistingStructureOverlapVolume()は、AddPathの直前に必ず
+  // 符号付き面積を計算して負なら反転する処理を入れており(このtoClipPath/
+  // toClipPathHoleはそれと同じ処理を関数化したもの)、この関数(buildExistingStructure
+  // OverlapMesh)だけがその処理を欠いていた。r021の段差面二重計上バグとは完全に別の、
+  // より根源的な「メッシュが常に空になる」バグで、r021修正の実機検証がずっとできず
+  // (B)がZIPから常に欠落していた直接の原因はこちらだった。
+  function toClipPath(pts){
+    const raw = pts.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+    let sa=0;
+    for(let i=0;i<raw.length;i++){ const j=(i+1)%raw.length; sa += raw[i].X*raw[j].Y - raw[j].X*raw[i].Y; }
+    if(sa<0) raw.reverse();
+    return raw;
+  }
+  function toClipPathHole(pts){
+    const raw = pts.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+    let sa=0;
+    for(let i=0;i<raw.length;i++){ const j=(i+1)%raw.length; sa += raw[i].X*raw[j].Y - raw[j].X*raw[i].Y; }
+    if(sa>0) raw.reverse(); // 穴は外周と逆巻きにする(_calcExistingStructureOverlapVolumeと同じ規約)
+    return raw;
+  }
+  // r021: emitLayer側での唯一の呼び出し箇所を削除したため、この関数自体は
+  // 現在未使用(二重計上バグの原因だった処理)。実機検証が完了して問題なければ
+  // 次回セッションで関数ごと削除してよい。念のため今回は残してある。
+  function clipperDifference(contoursA, contoursB){
+    if(!contoursA.length) return [];
+    if(!contoursB.length) return contoursA;
+    const cl=new ClipperLib.Clipper();
+    contoursA.forEach(item=>cl.AddPath(toClipPath(item.outer), ClipperLib.PolyType.ptSubject, true));
+    contoursB.forEach(item=>cl.AddPath(toClipPath(item.outer), ClipperLib.PolyType.ptClip, true));
+    const sol=new ClipperLib.Paths();
+    cl.Execute(ClipperLib.ClipType.ctDifference, sol, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+    return classifyPaths(sol, SF);
+  }
+
+  // ── 掘削側: 法面込みの実断面(表示用オフセットは含まない)
+  function excavContourAtDepth(f, z){
+    const topDepth=-(f.tl||0), botDepth=f.D-(f.tl||0);
+    if(z<topDepth-1e-6 || z>botDepth+1e-6) return null;
+    let offsetDist;
+    if(f.noSlope){ offsetDist=f.OD; }
+    else {
+      const fromTop=z-topDepth, ratio=1.0-fromTop/f.D;
+      offsetDist=f.OD+ratio*f.D*getSlopeRatio();
+      if(offsetDist<0) offsetDist=0;
+    }
+    return offsetDist>0 ? clipContourToYamadome(offsetPolygon(f.ptsMm,offsetDist), SF, offsetXmm, offsetYmm)
+                         : clipContourToYamadome(f.ptsMm.map(p=>({x:p.x,y:p.y})), SF, offsetXmm, offsetYmm);
+  }
+  function excavUnionAtDepth(z){
+    const cl=new ClipperLib.Clipper(); let added=false;
+    excavFrustums.forEach(f=>{
+      const c=excavContourAtDepth(f,z);
+      if(!c||c.length<3) return;
+      cl.AddPath(toClipPath(c), ClipperLib.PolyType.ptSubject, true);
+      added=true;
+    });
+    if(!added) return [];
+    const sol=new ClipperLib.Paths();
+    cl.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+    return classifyPaths(sol, SF);
+  }
+
+  // ── 既存躯体側: 描いた形状そのまま(法面・オフセット一切なし)
+  function structContourAtDepth(f, z){
+    const topDepth=-(f.tl||0), botDepth=f.D-(f.tl||0);
+    if(z<topDepth-1e-6 || z>botDepth+1e-6) return null;
+    return f.ptsMm.map(p=>({x:p.x,y:p.y}));
+  }
+  function structUnionAtDepth(z){
+    const cl=new ClipperLib.Clipper(); let added=false;
+    structFrustums.forEach(f=>{
+      const c=structContourAtDepth(f,z);
+      if(!c||c.length<3) return;
+      cl.AddPath(toClipPath(c), ClipperLib.PolyType.ptSubject, true);
+      added=true;
+      (f.holesMm||[]).forEach(h=>{
+        if(!h||h.length<3) return;
+        cl.AddPath(toClipPathHole(h), ClipperLib.PolyType.ptSubject, true);
+      });
+    });
+    if(!added) return [];
+    const sol=new ClipperLib.Paths();
+    cl.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+    return classifyPaths(sol, SF);
+  }
+
+  // ── 交差(重複)断面
+  function overlapContoursAtDepth(z){
+    const ex=excavUnionAtDepth(z), st=structUnionAtDepth(z);
+    if(!ex.length || !st.length) return [];
+    const cl=new ClipperLib.Clipper();
+    ex.forEach(item=>{
+      cl.AddPath(toClipPath(item.outer), ClipperLib.PolyType.ptSubject, true);
+      item.holes.forEach(h=>cl.AddPath(toClipPathHole(h), ClipperLib.PolyType.ptSubject, true));
+    });
+    st.forEach(item=>{
+      cl.AddPath(toClipPath(item.outer), ClipperLib.PolyType.ptClip, true);
+      item.holes.forEach(h=>cl.AddPath(toClipPathHole(h), ClipperLib.PolyType.ptClip, true));
+    });
+    const sol=new ClipperLib.Paths();
+    cl.Execute(ClipperLib.ClipType.ctIntersection, sol, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
+    return classifyPaths(sol, SF);
+  }
+  function overlapAreaAtDepth(z){
+    const c=overlapContoursAtDepth(z);
+    let a=0;
+    c.forEach(item=>{
+      a += Math.abs(polySignedArea(item.outer));
+      item.holes.forEach(h=>{ a -= Math.abs(polySignedArea(h)); });
+    });
+    return a;
+  }
+
+  // ── ① ブレークポイント収集(掘削・既存躯体それぞれの天端/下端)
+  const depthSet=new Set();
+  excavFrustums.forEach(f=>{ depthSet.add(-(f.tl||0)); depthSet.add(f.D-(f.tl||0)); });
+  structFrustums.forEach(f=>{ depthSet.add(-(f.tl||0)); depthSet.add(f.D-(f.tl||0)); });
+  let sortedDepths=[...depthSet].sort((a,b)=>a-b);
+  if(sortedDepths.length<2) return null;
+
+  // ── ② 各区間で重複面積の有無(0↔非0)が切り替わっていたら二分探索で境界を追加
+  const EPS=1e-3;
+  // r028(30回目セッション、マスター実機報告「面分割が崩れる/2-1の形状がおかしい」への
+  // 対応・真因特定): マスター提供のAutoCAD正解形状(2609181326_AC_surface.csv)と
+  // 実際のGLBをClaudeが数値比較した結果、体積は正しいが特定の三角形2〜3枚だけが
+  // 平面から外れて歪んでいた。原因はFINE_STEP_MM=150mm固定刻みの機械的な細分化位置が、
+  // 実際に交差輪郭のトポロジー(頂点構成)が変化する深さ(このケースではY=-315mm、
+  // 掘削法面が既存躯体の入隅コーナーを実際に横切る瞬間)と一致していなかったこと。
+  // 150mm刻みの層[300,450]がこの真の境界(315mm)をまたいでしまい、区間の上端と下端で
+  // 頂点数が異なる交差輪郭同士をaddLoftWallが無理やり対応付けようとして、本来1枚の
+  // 平面であるべき面に余計な三角形が混入していた。
+  // 対策: 面積の有無(ゼロ⇄非ゼロ)の境界と全く同じ要領で、交差輪郭の「頂点構成
+  // (輪郭の数×各輪郭の頂点数)」が変化する深さも二分探索で正確に特定し、そこにも
+  // 区切り(ブレークポイント)を追加する。これにより、隣接するブレークポイントの間では
+  // 交差輪郭のトポロジーが変化しないことが保証されるので、FINE_STEP_MMによる機械的な
+  // 追加細分化は不要になった(単一フラスタムのbuildShellMeshと同じ理屈で、区間の
+  // 上端・下端をaddLoftWall1回で直結するだけで正確かつトポロジー的にも安全)。
+  function contourSignature(z){
+    const c=overlapContoursAtDepth(z);
+    let rings=0, n=0;
+    c.forEach(item=>{ rings++; n+=item.outer.length; item.holes.forEach(h=>{rings++; n+=h.length;}); });
+    return rings*10000+n;
+  }
+  const extraBreaks=[];
+  for(let i=0;i<sortedDepths.length-1;i++){
+    const zA=sortedDepths[i], zB=sortedDepths[i+1];
+    const areaA=overlapAreaAtDepth(zA+EPS);
+    const areaB=overlapAreaAtDepth(zB-EPS);
+    if((areaA>1e-6) !== (areaB>1e-6)){
+      let lo=zA, hi=zB, loHas=areaA>1e-6;
+      for(let iter=0; iter<20 && (hi-lo)>1; iter++){
+        const mid=(lo+hi)/2;
+        const midHas=overlapAreaAtDepth(mid)>1e-6;
+        if(midHas===loHas) lo=mid; else hi=mid;
+      }
+      extraBreaks.push(Math.round(((lo+hi)/2)*100)/100);
+      continue; // 面積の有無自体が変わる境界は既に区切り済みなので、頂点構成チェックは不要
+    }
+    if(areaA<=1e-6) continue; // 区間内で重複自体が無いなら頂点構成の比較も不要
+    const sigA=contourSignature(zA+EPS), sigB=contourSignature(zB-EPS);
+    if(sigA===sigB) continue;
+    let lo=zA, hi=zB, loSig=sigA;
+    for(let iter=0; iter<24 && (hi-lo)>1; iter++){
+      const mid=(lo+hi)/2;
+      const midSig=contourSignature(mid);
+      if(midSig===loSig) lo=mid; else hi=mid;
+    }
+    extraBreaks.push(Math.round(((lo+hi)/2)*100)/100);
+  }
+  extraBreaks.forEach(d=>depthSet.add(d));
+  sortedDepths=[...depthSet].sort((a,b)=>a-b);
+
+  // ── ③④⑤ 各ブレークポイント深さの交差輪郭を「1深さにつき1回だけ」評価してキャッシュする
+  // r029(30回目セッション、マスター報告のGLB解析で発覚): r028の対策で大きな異常三角形は
+  // 解消したが、Claudeが新しいGLBを数値解析したところ、幅0.09mm程度のごく細い異常三角形が
+  // 1枚だけ残っていた(トポロジー境界のちょうど深さで、上側区間はzB-EPS、下側区間は
+  // zA+EPSと、真の境界を挟んで反対側からそれぞれ評価していたため、輪郭が連続的に
+  // 変化する区間ではごくわずかに違う座標になっていた)。対策: 各ブレークポイント深さの
+  // 交差輪郭を配列に1回だけキャッシュし、隣り合う区間の「上端の下蓋」と「下端の上蓋」に
+  // 同じキャッシュを使い回すことで、境界での座標の食い違いを原理的に無くした。
+  // 最上端・最下端(区間の外側、重複の有無がゼロ⇄非ゼロに切り替わる可能性がある端点)だけは
+  // 従来通りEPSだけ内側にずらして評価する。
+  const layerContours = sortedDepths.map((z,i)=>{
+    if(i===0) return overlapContoursAtDepth(z+EPS);
+    if(i===sortedDepths.length-1) return overlapContoursAtDepth(z-EPS);
+    return overlapContoursAtDepth(z);
+  });
+
+  // ── ③ 最上端で既に重複がある場合、上蓋を追加
+  // (buildShellMeshと違い(B)は独立した水密ソリッドなので、天面も塞ぐ必要がある)
+  const topContours=layerContours[0];
+  topContours.forEach(item=>addFace(item.outer, item.holes, sortedDepths[0], false));
+
+  // ── ④ 区間ごとにメッシュ生成
+  // r028: 上記のトポロジー境界検出により、隣接ブレークポイント間は交差輪郭が
+  // 同じ頂点構成のまま連続的に変形するとわかっているので、addLoftWall1回の直結で
+  // 正確につなげる。FINE_STEP_MMによる機械的な追加細分化(r020〜r027)は廃止した。
+  function emitLayer(zTop, zBot, topContours, botContours){
+    const hasTop=topContours.length>0, hasBot=botContours.length>0;
+    if(!hasTop && !hasBot) return;
+    if(hasTop && hasBot){
+      topContours.forEach(topItem=>{
+        const uCx=topItem.outer.reduce((s,p)=>s+p.x,0)/topItem.outer.length;
+        const uCy=topItem.outer.reduce((s,p)=>s+p.y,0)/topItem.outer.length;
+        let bestBot=null, bestDist=Infinity;
+        botContours.forEach(botItem=>{
+          const lCx=botItem.outer.reduce((s,p)=>s+p.x,0)/botItem.outer.length;
+          const lCy=botItem.outer.reduce((s,p)=>s+p.y,0)/botItem.outer.length;
+          const d=Math.hypot(uCx-lCx,uCy-lCy);
+          if(d<bestDist){bestDist=d;bestBot=botItem;}
+        });
+        if(bestBot) addLoftWall(topItem.outer, bestBot.outer, zTop, zBot);
+      });
+    } else if(hasTop && !hasBot){
+      topContours.forEach(item=>addFace(item.outer, item.holes, zTop, true));
+    } else {
+      botContours.forEach(item=>addFace(item.outer, item.holes, zBot, false));
+    }
+  }
+  for(let i=0;i<sortedDepths.length-1;i++){
+    emitLayer(sortedDepths[i], sortedDepths[i+1], layerContours[i], layerContours[i+1]);
+  }
+
+  // ── ⑤ 最深端で重複が残っている場合、下蓋を追加(③と対称のエッジケース)
+  const lastZ=sortedDepths[sortedDepths.length-1];
+  const bottomContours=layerContours[layerContours.length-1];
+  bottomContours.forEach(item=>addFace(item.outer, item.holes, lastZ, true));
+
+  if(!positions.length) return null;
+
+  const geom=new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions),3));
+  geom.setIndex(new THREE.BufferAttribute(new Uint32Array(indices),1));
+  geom.computeVertexNormals();
+  return geom;
+}
+
+// 【診断用・段階1検証後に撤去】メッシュの符号付き体積を発散定理で算出(mm³→m³)
+function _diagMeshVolume(geom){
+  if(!geom) return 0;
+  const pos = geom.attributes.position.array;
+  const idx = geom.index.array;
+  let vol = 0;
+  for(let i=0;i<idx.length;i+=3){
+    const a=idx[i]*3, b=idx[i+1]*3, c=idx[i+2]*3;
+    const ax=pos[a],ay=pos[a+1],az=pos[a+2];
+    const bx=pos[b],by=pos[b+1],bz=pos[b+2];
+    const cx=pos[c],cy=pos[c+1],cz=pos[c+2];
+    vol += (ax*(by*cz-bz*cy) - ay*(bx*cz-bz*cx) + az*(bx*cy-by*cx)) / 6;
+  }
+  return Math.abs(vol) / 1e9;
+}
+
+// ────────────────────────────────────────────────────────────────
 //  図形 → フラスタム変換
 // ────────────────────────────────────────────────────────────────
 function getJSTDateStr(){
@@ -1110,6 +1479,25 @@ function getVoldiaTimestamp(){
   const jst=new Date(d.getTime()+9*60*60*1000);
   const s=jst.toISOString(); // "YYYY-MM-DDTHH:MM:SS.sssZ"
   return s.slice(2,4)+s.slice(5,7)+s.slice(8,10)+s.slice(11,13)+s.slice(14,16)+s.slice(17,19);
+}
+// r025(30回目セッション、マスター指摘対応): ZIP内の各ファイルの更新日時(JSZipが
+// エクスプローラー等に表示する内部タイムスタンプ)が、フォルダ名(=getVoldiaTimestamp()の
+// JST時刻)より9時間ズレる不具合の修正用。原因: JSZipはzip.file()の第3引数{date:...}を
+// 省略するとnew Date()を渡した扱いになり、そのDateオブジェクトのローカルgetter
+// (getFullYear/getHours等)でZIP内部の日時を作る。getVoldiaTimestamp()は
+// 「d.getTime()+9時間」したDateをtoISOString()(常にUTC表記)で読むトリックなので
+// ホストのシステムタイムゾーン設定に関係なく常に正しいJST文字列になるが、
+// これをそのままzip.file()のdateオプションに渡すと、ホストのシステムタイムゾーンが
+// 本当にJSTだった場合に「+9時間のトリック」と「ローカルgetterによる本来のJST変換」が
+// 二重に効いてしまい、逆にズレる。今回の実機ではズレが「-9時間」（UTC時刻がそのまま
+// 出ていた）だったので、このホストのシステムタイムゾーンはJSTではなくUTC設定だったと
+// 判明した。d.getTimezoneOffset()（UTCとの差を分単位で返す。UTCなら0、JSTなら-540）を
+// 使えば、ホストの実際のタイムゾーン設定が何であっても「ローカルgetterで読むと
+// 必ずJST時刻になる」Dateオブジェクトを作れるので、それをこの関数で提供し、
+// ZIP出力側(voldia_export.js)のzip.file()全箇所でdateオプションとして使うようにする。
+function getVoldiaZipDate(){
+  const d=new Date();
+  return new Date(d.getTime()+9*60*60*1000+d.getTimezoneOffset()*60*1000);
 }
 function getConcThick(){
   const v = parseFloat(document.getElementById('conc-thick')?.value);
@@ -1861,9 +2249,16 @@ async function runCalc(mode){
   // マスター実機検証(GL±1000で既存躯体のtl/Dが本当に無変化なことをログで確認済み)を
   // 受けての指摘: 「2Dで描いた下端が正解値であり、GLが変わったら他のオブジェクトと
   // 同じ数値だけ全オブジェクトが上下するべき。既存躯体だけ動かないのはおかしい」との
-  // 仕様確定。天端の強制ゼロ化(バグ本体、上記の理由で除外を維持)とGLオフセットの反映は
-  // 別物として切り分け、GLオフセットは青(掘削)と全く同じ式(D+=glOff)を既存躯体にも
-  // 適用する(letに変更、doboku・GLオフセット指定時のみ下記で追加調整)。
+  // 仕様確定を受け、天端の強制ゼロ化(バグ本体、除外を維持)とGLオフセットの反映を
+  // 切り分け、GLオフセットは青(掘削)と全く同じ式(D+=glOff)を既存躯体にも適用した。
+  // r016(28回目セッション、r015の訂正): しかしr015の式は「天端0固定・下端側が動く」
+  // 青の内部実装をそのまま既存躯体に流用したため、絶対に動いてはいけない下端まで
+  // 動いてしまい、「地中に埋まっている予定の既存躯体の大きさが変わる」誤りだと
+  // マスターが指摘。最終仕様: 既存躯体は天端・下端とも「描いた値を厳守」。ただし
+  // 天端が現況地盤GLの値より上にある場合だけ、GLより上(地上に露出している扱いの
+  // 部分)を天端側から切り落とす(下端方向へ伸ばすことは絶対にしない、片側クリップ
+  // のみ)。具体的な計算式は下記GLオフセット適用ブロック内(letに変更、doboku・
+  // GLオフセット指定時のみ調整)。
   let _grayFsUntouched = fs.filter(f=>f.color==='gray')
     .map(f=>({...f, D: f.D - concVal}))
     .filter(f=>f.D>0);
@@ -1914,11 +2309,21 @@ async function runCalc(mode){
         if(f.D <= 0){ excludedGL.push(f.name || '(無名)'); return false; }
         return true;
       });
-      // r015: 既存躯体(グレー)にも青と全く同じ式でGLオフセットを反映する。
-      // 天端(tl)は_grayFsUntouched生成時点で既に「描いた通り」のまま保持されて
-      // いる(強制ゼロ化は受けていない)ので、ここではDにglOffを足すだけでよい。
-      _grayFsUntouched = _grayFsUntouched.map(f => ({...f, D: f.D + glOff})).filter(f=>{
-        if(f.D <= 0){ excludedGL.push(f.name || '(無名)'); return false; }
+      // r016(28回目セッション): r015で「青と全く同じ式(D+=glOff)」を既存躯体にも
+      // 適用したところ、マスター実機検証で「地中に埋まっている予定の既存躯体の
+      // 大きさが変わってしまう」誤りが発覚。青のD+=glOffは天端を0固定にした状態で
+      // 下端側を動かす実装のため、既存躯体にそのまま適用すると絶対に動かしてはいけない
+      // 下端まで動いてしまっていた。マスター確定仕様: 既存躯体は天端・下端とも
+      // 「描いた値を厳守」。ただし天端が現況地盤GLの値より上にある場合だけは、
+      // GLより上の部分は現況地盤面より外(地上)にあり土量計算上の掘削対象外の
+      // 領域なので、天端をGLの値まで切り下げる(＝GLより下側にはみ出させて
+      // 伸ばすことはしない。切るだけの片側クリップ)。下端は常に不動。
+      _grayFsUntouched = _grayFsUntouched.map(f => {
+        const bottom = (f.tl||0) - f.D; // 描いた通りの不動の下端
+        const clippedTl = Math.min(f.tl||0, glOff);
+        return {...f, tl: clippedTl, D: clippedTl - bottom};
+      }).filter(f=>{
+        if(f.D <= 0){ excludedGL.push(f.name || '(無名、既存躯体)'); return false; }
         return true;
       });
       if(excludedGL.length){
@@ -1990,6 +2395,13 @@ async function runCalc(mode){
     const unionM3 = mm3ToM3(result.unionVol);
     const overM3  = Math.max(0, sumM3 - unionM3);
     const ratio   = sumM3 > 0 ? (overM3 / sumM3 * 100) : 0;
+    // r017(28回目セッション): マスター要望対応。「単独合計/重複削減」は掘削同士の
+    // 重なりを見るための従来指標(既存躯体は元々除外済み)で意味が違うため、
+    // 既存躯体の内訳は別立てで新設する。(A)=既存躯体を考慮しない掘削のみの
+    // 合計、(B)=掘削と重なる既存躯体の体積。最終値(≒{unionM3})は従来通りA-B。
+    const excavOnlyM3 = mm3ToM3(result.excavOnlyVol);
+    const existingOverlapM3 = mm3ToM3(result.existingStructOverlapVol);
+    window._lastCalcABBreakdown = { excavOnlyM3, existingOverlapM3, totalM3: unionM3 };
 
     _lastGeoms = result.unionGeoms;
     _lastExistingStructGeoms = result.existingStructGeoms || [];
@@ -2007,6 +2419,9 @@ async function runCalc(mode){
         <div class="di"><span>単独合計</span><span class="dv">${sumM3.toFixed(3)} m³</span></div>
         <div class="di"><span>重複削減</span><span class="dv warn">-${overM3.toFixed(3)} m³</span></div>
         <div class="di"><span>重複率</span><span class="dv warn">${ratio.toFixed(1)} %</span></div>
+        ${existingOverlapM3>0 ? `
+        <div class="di"><span>(A)掘削のみ合計</span><span class="dv">${excavOnlyM3.toFixed(3)} m³</span></div>
+        <div class="di"><span>(B)既存躯体重複</span><span class="dv warn">-${existingOverlapM3.toFixed(3)} m³</span></div>` : ''}
         <div class="di"><span>捨コン+砕石</span><span class="dv hi">+${concVal}mm 適用済</span></div>
         ${window._glOffsetMm ? `<div class="di"><span>現状地盤GL</span><span class="dv hi">${window._glOffsetMm>=0?'+':''}${window._glOffsetMm}mm 適用済</span></div>` : ''}`;
       document.getElementById('rect-table-wrap').style.display='none';
@@ -3190,7 +3605,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r010(base:VoldiaM r069)";
+const VOLDIA3D_VER = "Voldia-3D-r029(base:VoldiaM r069)";
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

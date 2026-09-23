@@ -126,7 +126,15 @@ async function applyVoldData(data){
   } else if(data.scale){
     applyScale(data.scale); // scaleDenom未保存の旧形式ファイル向けフォールバック
   }
-  if(data.concThick)document.getElementById('conc-thick').value=data.concThick;
+  // r026(30回目セッション、マスター指摘対応): if(data.concThick)だと
+  // concThick===0(捨てコン+砕石=0mm、今回のマスターのテストデータがまさにこれ)が
+  // JSでは falsy 扱いになり、条件がfalseになって復元がスキップされていた
+  // (保存自体はr013時点からできていた=voldia_export.jsのsave側は元々正しい)。
+  // globalOverdig/slopeAngleDeg側は既にtypeof+isNaNの正しい書き方だったので、
+  // それに合わせる。
+  if(typeof data.concThick==='number' && !isNaN(data.concThick)){
+    document.getElementById('conc-thick').value = data.concThick;
+  }
   // r074マスター指示: 余掘り・法面角度(勾配)もVoldファイルから復元する。
   // 旧バージョンのVoldファイル(これらのキーが無い)を読んでも壊れないよう、値が
   // 無い場合はUIのデフォルト値(#global-overdigのvalue属性・45°)をそのまま維持する。
@@ -372,7 +380,25 @@ function encodeMultiGLB(meshes){
   let binOffset=0;
   const bufViews=[],accessors=[],gltfMeshes=[],nodes=[],binParts=[];
   meshes.forEach((m,i)=>{
-    const posB=m.positions.buffer.byteLength,idxB=m.indices.buffer.byteLength;
+    const posB=m.positions.buffer.byteLength;
+    // r030(30回目セッション、マスター指示「(A)は内側テクスチャ・(B)は外側テクスチャに
+    // したい」への対応): エクスポート専用の巻き方向反転オプション。m.flipWindingが
+    // trueの三角形は、頂点位置はそのままにindices内の2番目・3番目を入れ替えるだけで
+    // 巻き方向(=法線の表裏)を反転できる。エビル(_evRunAnalysis)は面分類のために
+    // 法線の向きを利用しているため、体積計算に使うGLB(buildVoldiaGLBBytes/
+    // buildExistingStructureOverlapGLBBytesがそのまま返すglb/glbB)自体はここでは
+    // 一切変更せず、ZIPに書き出す「見た目専用」のGLBだけをrunEvidenceAnalysis側で
+    // 別途もう一度encodeMultiGLBに通して作る(meshesA/meshesBの生配列はr024で
+    // 既に露出済みなので、そのコピーにflipWinding:trueを立てるだけで済む)。
+    const srcIdx = m.indices;
+    let outIdx = srcIdx;
+    if(m.flipWinding){
+      outIdx = new srcIdx.constructor(srcIdx.length);
+      for(let t=0;t<srcIdx.length;t+=3){
+        outIdx[t]=srcIdx[t]; outIdx[t+1]=srcIdx[t+2]; outIdx[t+2]=srcIdx[t+1];
+      }
+    }
+    const idxB=outIdx.buffer.byteLength;
     let mnX=Infinity,mnY=Infinity,mnZ=Infinity,mxX=-Infinity,mxY=-Infinity,mxZ=-Infinity;
     for(let j=0;j<m.positions.length;j+=3){const x=m.positions[j],y=m.positions[j+1],z=m.positions[j+2];if(x<mnX)mnX=x;if(x>mxX)mxX=x;if(y<mnY)mnY=y;if(y>mxY)mxY=y;if(z<mnZ)mnZ=z;if(z>mxZ)mxZ=z;}
     bufViews.push({buffer:0,byteOffset:binOffset,byteLength:posB,target:34962});
@@ -383,8 +409,8 @@ function encodeMultiGLB(meshes){
     if(posPad>0){binOffset+=posPad;binParts.push(new Uint8Array(posPad));}
     bufViews.push({buffer:0,byteOffset:binOffset,byteLength:idxB,target:34963});
     // Uint32インデックス → componentType 5125
-    accessors.push({bufferView:bufViews.length-1,componentType:5125,count:m.indices.length,type:'SCALAR'});
-    binOffset+=idxB;binParts.push(new Uint8Array(m.indices.buffer));
+    accessors.push({bufferView:bufViews.length-1,componentType:5125,count:outIdx.length,type:'SCALAR'});
+    binOffset+=idxB;binParts.push(new Uint8Array(outIdx.buffer));
     const idxPad=(4-idxB%4)%4;
     if(idxPad>0){binOffset+=idxPad;binParts.push(new Uint8Array(idxPad));}
     const pA=accessors.length-2,iA=accessors.length-1;
@@ -406,7 +432,14 @@ function encodeMultiGLB(meshes){
 }
 
 // Voldia版: GLB生成ロジックを共通化（GLB保存ボタンと配置モード起動の両方から使う）
-async function buildVoldiaGLBBytes(progressCb){
+async function buildVoldiaGLBBytes(progressCb, excludeExistingStruct){
+  // r019(29回目セッション): excludeExistingStructパラメータ追加。マスター実測データで、
+  // このパラメータが実装漏れ(コメントにはr018で追加済みと記載されていたが実コードに
+  // 存在せず)のまま既存躯体が常にGLBへ混入していたことが判明。エビル(_evRunAnalysis)は
+  // ノード名を区別せず全メッシュの面を一律解析するため、既存躯体の底面が「掘削底」として
+  // 加算され、かつ掘削(青)と既存躯体(グレー)の隣接境界に生じる余分な傾斜面まで
+  // 「入隅部」として誤集計されていた(27回目セッションで特定済みの①②と同一の再発)。
+  // runEvidenceAnalysis側でmode==='earthwork'の時だけtrueを渡す。
   const fs=getAllFrustums();if(!fs.length)throw new Error('図形がありません');
   let exportGeoms=null;
   let existingStructGeoms=null;
@@ -430,7 +463,7 @@ async function buildVoldiaGLBBytes(progressCb){
   // 配置モードの既存躯体だけ下端が捨てコン厚さ分(既定110mm)深くなり、地形の床面と
   // 高さが一致してz-fighting(白い板が浮いて見える不具合)を起こしていた。
   const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
-  existingStructGeoms = fs.filter(f=>f.color==='gray')
+  existingStructGeoms = excludeExistingStruct ? [] : fs.filter(f=>f.color==='gray')
     .map(f => buildFrustumGeometry({...f, D: f.D - _concVal, noSlope:true, OD:0}))
     .filter(g => g.positions && g.positions.length);
   if(!exportGeoms||!exportGeoms.length)throw new Error('先に「計算」ボタンを押してください');
@@ -468,7 +501,66 @@ async function buildVoldiaGLBBytes(progressCb){
   }
   if(progressCb)progressCb(85,'バイナリ生成中...');
   const glb=encodeMultiGLB(meshes);
-  return {glb, totalVerts, totalTris, offsetX: fs._offsetX||0, offsetY: fs._offsetY||0};
+  // r024(30回目セッション、マスター指示): (A)+(B)合体GLBを別途組み立てられるよう、
+  // エンコード前の生メッシュ配列(meshes)もそのまま返す。encodeMultiGLBは何度呼んでも
+  // 副作用がない純粋関数なので、ここで返したmeshesと(B)側のmeshesを連結してもう一度
+  // 呼べば合体GLBが作れる(バイナリ同士を後から結合するより安全・低リスク)。
+  return {glb, meshes, totalVerts, totalTris, offsetX: fs._offsetX||0, offsetY: fs._offsetY||0};
+}
+
+// r019(29回目セッション、段階2): (B)専用 — 掘削∩既存躯体の重複ソリッドのみを
+// 単体GLB化する。マスター方針(2026-09-15)により3D側の計算(_calcExistingStructureOverlapVolume
+// など)とは完全に独立させ、voldia3d.js側で新設したbuildExistingStructureOverlapMesh
+// (表示用オフセット非継承、実断面そのまま)をそのままGLB化するだけ。
+// エビルの2パス目(B)用の入力として使う想定。重複が実在しない場合(overlap無し)はnullを返す。
+// r020(29回目セッション): マスター実測データで発覚した2件のバグを修正。
+// ①buildVoldiaGLBBytes(r011)と同じ理由で、getAllFrustums()が返す既存躯体のDは
+//   D=tl-b+捨てコン厚さのままなので、捨てコン分を差し引いてD=tl-bに戻す必要が
+//   あったのに、前回(段階2)は素通しにしていた
+// ②もっと重大な見落とし: runCalc()内では計算モード(normal/doboku)に応じて
+//   fs全体にnoSlope/OD(法面・余掘り)の上書きが適用されている(1970行目・1976行目)。
+//   ところがこの関数はgetAllFrustums()の生フラスタムを直接使っていたため、
+//   実際の掘削形状(法面あり・OD=200mm等)と全く違う、生データそのまま
+//   (noSlope:true・OD:0)の形状で重複計算してしまっていた。マスターが実機で
+//   「B側GLBが根切形状の外まではみ出て見える」と報告したのはこれが原因。
+//   window._lastCalcModeForPlacementに直近runCalc()時のmodeが残るので、
+//   同じ上書きロジックをここでも再現する(計算未実行でnullの場合は上書きなし)。
+async function buildExistingStructureOverlapGLBBytes(progressCb){
+  const fsRaw=getAllFrustums(); if(!fsRaw.length) return null;
+  const calcMode = window._lastCalcModeForPlacement;
+  let fs = fsRaw;
+  if(calcMode==='normal'){
+    fs = fs.map(f=>({...f, noSlope:true}));
+  } else if(calcMode==='doboku'){
+    const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value));
+    fs = fs.map(f=>({...f, noSlope:(f.color==='purple'), OD:globalOD}));
+  }
+  fs._offsetX = fsRaw._offsetX; fs._offsetY = fsRaw._offsetY;
+
+  const excavFrustums = fs.filter(f=>f.color!=='gray');
+  const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const structFrustums = fs.filter(f=>f.color==='gray').map(f=>({...f, D: f.D - _concVal}));
+  if(!structFrustums.length) return null;
+  if(progressCb) progressCb(20,'(B)重複ソリッドを計算中...');
+  const geom = buildExistingStructureOverlapMesh(excavFrustums, structFrustums, fs._offsetX||0, fs._offsetY||0);
+  if(!geom || !geom.attributes || !geom.attributes.position || !geom.attributes.position.count) return null;
+  const rawPos = geom.attributes.position.array;
+  const rawIdx = geom.index.array;
+  const positions = new Float32Array(rawPos.length);
+  for(let j=0;j<rawPos.length;j++) positions[j]=rawPos[j]*S;
+  if(progressCb) progressCb(70,'(B)GLBエンコード中...');
+  const meshes=[{name:'Voldia_OverlapForExcel', positions, indices: rawIdx}];
+  const glb=encodeMultiGLB(meshes);
+  // 【診断用・段階2検証後に撤去】既存躯体表示に使う正式な基準値
+  // (window._lastCalcABBreakdown.existingOverlapM3、r017でrunCalc()内に既に用意されている
+  // ものを流用)とこのGLBの体積を突き合わせ、法面込みでも一致するか確認する
+  try{
+    const _diagVol = _diagMeshVolume(geom);
+    const _refVol = window._lastCalcABBreakdown ? window._lastCalcABBreakdown.existingOverlapM3 : null;
+    console.log('[DIAG-B-GLB] 基準値(_lastCalcABBreakdown.existingOverlapM3)='+(_refVol==null?'未計算':_refVol.toFixed(4))+'m³ / (B)GLBメッシュ体積='+_diagVol.toFixed(4)+'m³'+(_refVol==null?'':' / 差='+(_diagVol-_refVol).toFixed(4)+'m³'));
+  }catch(e){ console.warn('[DIAG-B-GLB] 検証ログでエラー:', e); }
+  // r024(30回目セッション、マスター指示): (A)+(B)合体GLB組み立て用に生meshesも返す
+  return {glb, meshes, totalVerts: positions.length/3, totalTris: rawIdx.length/3};
 }
 
 // r075: 通常計算後に配置モードを開く専用のGLB生成。
@@ -1267,7 +1359,64 @@ function _evGenerateExcelData(){
   const ws=XLSX.utils.aoa_to_sheet(sheetData);
   ws['!cols']=[{wch:8},{wch:22},{wch:28},{wch:14},{wch:16},{wch:12},{wch:14},{wch:45}];
   XLSX.utils.book_append_sheet(wb, ws, "求積計算書 (明細ツリー)");
-  return XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  // r028(30回目セッション、マスター指摘対応「Excelのオシャレ感が直ってない」・真因特定):
+  // r027で_evMergeABExcel側にXLSX.read(...,{cellStyles:true})を追加したが、実際には
+  // xlsx-js-style(v1.2.0)はcellStyles:trueを付けても読み込み時にfill色の一部しか
+  // 復元できず、font(太字・文字色)やborder(罫線)は最初から失われる。しかも一度
+  // read()で読み直した後にもう一度XLSX.write()すると、そのfillすら消えることを
+  // Node.jsで実証確認した(xlsx-js-styleのread⇄writeはスタイルの往復に対応していない)。
+  // つまり「バイナリに一度書き出してから読み直して束ねる」という設計自体がスタイル
+  // 崩壊の原因であり、cellStyles:trueはその場しのぎにしかならない。
+  // 対策: この関数の計算・スタイル定義(sheetData/headerStyle等)は一切変更せず、
+  // 組み立て済みの生のワークシートオブジェクト(ws)自体も一緒に返すようにした。
+  // 呼び出し元(_evMergeABExcel)はこのwsをそのまま新しいworkbookに追加するだけで
+  // 済むため、バイナリへのシリアライズ→デシリアライズを一度も経由せず、
+  // スタイルの欠落が原理的に起こり得ない。
+  return {buffer: XLSX.write(wb,{bookType:'xlsx',type:'array'}), ws};
+}
+
+// r019(29回目セッション、段階2): (A)(B)2つのxlsxバイナリ(それぞれ_evGenerateExcelData()の
+// 戻り値そのまま)を1ワークブックにマージし、(A)-(B)の総合計シートを追加する。
+// _evGenerateExcelData自体(エビル本体)は一切変更せず、出来上がった完成品を
+// XLSX.read()で読み直して束ねるだけの、orchestrator層(呼び出し元)での組み立て処理。
+// r028(30回目セッション、マスター指摘対応): 上記の「バイナリを読み直して束ねる」設計が
+// スタイル崩壊の真因だったため、read()を廃止。_evGenerateExcelData()が計算と同時に
+// 返すようになった生のワークシートオブジェクト(wsA/wsB)をそのまま受け取って
+// 新しいworkbookに追加するだけにした。
+function _evMergeABExcel(wsA, wsB, totalA, totalB, finalTotal){
+  const summaryData = [
+    ['項目', '体積(m³)'],
+    ['(A) 基本形状', totalA],
+    ['(B) 既存躯体重複(控除)', totalB],
+    ['総合計 (A)-(B)', finalTotal]
+  ];
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+  wsSummary['!cols']=[{wch:24},{wch:14}];
+  // r029(30回目セッション、マスター報告「Excelに色が無い」の残り分・原因特定):
+  // r028で(A)(B)シート自体のスタイル欠落は直っていたが、このメソッドが新規に組み立てる
+  // 「総合計」シートには元々一度もスタイルを設定していなかった(単純な見落とし)。
+  // マスターがブラウザ版で開いた時に最初に目に入るのはこの総合計シートである可能性が高く、
+  // それで「色が無い」と見えていたと思われる。(A)(B)シートの見出し行と揃えたスタイルを
+  // ここで新規に定義する(_evGenerateExcelData側のスタイル定義には一切触れていない)。
+  const headerStyle = {
+    fill:{fgColor:{rgb:"FF2C3E50"}},
+    font:{bold:true, color:{rgb:"FFFFFFFF"}, sz:10, name:"メイリオ"},
+    alignment:{horizontal:'center', vertical:'center'},
+    border:{top:{style:'thin'}, bottom:{style:'thin'}}
+  };
+  const totalRowStyle = {
+    fill:{fgColor:{rgb:"FFE8F8F5"}},
+    font:{bold:true, sz:10, name:"メイリオ"},
+    border:{top:{style:'thin'}, bottom:{style:'thin'}}
+  };
+  ['A1','B1'].forEach(ref=>{ if(wsSummary[ref]) wsSummary[ref].s = headerStyle; });
+  ['A4','B4'].forEach(ref=>{ if(wsSummary[ref]) wsSummary[ref].s = totalRowStyle; });
+
+  const merged = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(merged, wsSummary, "総合計");
+  XLSX.utils.book_append_sheet(merged, wsA, "(A)基本形状");
+  XLSX.utils.book_append_sheet(merged, wsB, "(B)既存躯体重複");
+  return XLSX.write(merged, {bookType:'xlsx', type:'array'});
 }
 
 // エビル generatePDFData() の移植版
@@ -1346,7 +1495,9 @@ async function runEvidenceAnalysis(mode){
   epSet(0,'Union水密メッシュを準備中...');
   await new Promise(r=>setTimeout(r,20));
   try{
-    const {glb, totalVerts, totalTris}=await buildVoldiaGLBBytes(epSet);
+    // r019(29回目セッション): 土量計算(earthwork)モードの時だけ既存躯体をGLBから除外。
+    // 躯体解析(structure)モードは用途未確認のため従来通り(除外しない)を維持。
+    const {glb, meshes: meshesA, totalVerts, totalTris}=await buildVoldiaGLBBytes(epSet, mode==='earthwork');
     epSet(45,'メッシュ解析中（面分類・グルーピング）...');
     await new Promise(r=>setTimeout(r,20));
     const {totalVolume, count}=await _evRunAnalysis(mode, glb);
@@ -1355,28 +1506,117 @@ async function runEvidenceAnalysis(mode){
     }
     epSet(60,'Excel計算書を生成中...');
     await new Promise(r=>setTimeout(r,20));
-    const excelData=_evGenerateExcelData();
+    const {buffer: excelDataA, ws: wsExcelA} = _evGenerateExcelData();
 
     epSet(75,'配置図(PNG)を生成中...');
     await new Promise(r=>setTimeout(r,20));
-    const pngDataUrl=_evRenderPlanView(2048,false);
-    const pngBase64=pngDataUrl.split(',')[1];
+    const pngDataUrlA=_evRenderPlanView(2048,false);
+    const pngBase64A=pngDataUrlA.split(',')[1];
 
     epSet(88,'全明細CAD図面(PDF)を生成中...');
     await new Promise(r=>setTimeout(r,20));
-    const pdfData=_evGeneratePDFData();
+    const pdfDataA=_evGeneratePDFData();
+
+    // r019(29回目セッション、段階2): マスター方針(2026-09-15)に基づき、earthworkモードのみ
+    // (B)既存躯体重複ソリッドを別GLB・別パスでエビル解析し、Excel/PNG/PDFを(A)(B)の2系統で
+    // 出力、最終合計は(A)-(B)とする。_evRunAnalysis/_evGenerateExcelData/_evRenderPlanView/
+    // _evGeneratePDFDataなどエビル本体は一切変更せず、同じAPIを2回叩くだけに留めている。
+    // (B)側でエラーが出た場合はexcelData等をログに残しつつ(A)のみの出力にフォールバックする。
+    //
+    // r020(29回目セッション、緊急停止): マスター実測データで buildExistingStructureOverlapMesh
+    // 自体の体積計算に系統的な誤差(法面区間で最大30〜40%の過小評価)があることが確定した。
+    // 原因は「輪郭が区間内で連続的に変形するのに2端点だけ、または中点固定の押し出しで
+    // loftしている」ことにあると特定できたが、修正版(細分化・段差スタック方式)も
+    // 実データ検証(期待6.864m³に対し4.59〜5.60m³)でまだ合わず、今回のセッション内では
+    // 直しきれなかった。誤った数値をExcelに出すのは「対処療法」そのものであり、
+    // (A)のみの出力(r019で二重カウントは解消済み・信頼できる)にフォールバックする方が
+    // 安全と判断し、(B)パイプライン全体を一時的に無効化する。
+    // r021(30回目セッション): voldia3d.js側のbuildExistingStructureOverlapMesh内
+    // emitLayer()にあった二重計上バグ(段差面の追加が不要かつ有害だった)を特定・修正した。
+    // Node.jsでの合成データ検証(線形/非線形テーパーとも)では収束を確認できたが、
+    // マスターの実測データ(法面あり・doboku)での最終確認はまだ済んでいない。
+    // テストのためtrueに戻すが、[DIAG-B](voldia3d.js)と[DIAG-B-GLB](本ファイル)の
+    // コンソールログで基準値6.864m³との一致を必ず確認してから本採用とすること。
+    // 一致しない場合は速やかにfalseへ戻すこと(過去2回、机上の修正が実機で誤りと
+    // 判明した実績があるため)。
+    const B_PIPELINE_ENABLED = true;
+    let totalVolumeB=0, glbB=null, meshesB=null, excelDataB=null, wsExcelB=null, pngBase64B=null, pdfDataB=null;
+    if(B_PIPELINE_ENABLED && mode==='earthwork'){
+      try{
+        epSet(90,'(B)既存躯体重複を解析中...');
+        const bResult = await buildExistingStructureOverlapGLBBytes(epSet);
+        if(bResult && bResult.glb){
+          glbB = bResult.glb;
+          meshesB = bResult.meshes;
+          const evB = await _evRunAnalysis(mode, glbB);
+          if(evB.count>0){
+            totalVolumeB = evB.totalVolume;
+            const excelResultB = _evGenerateExcelData();
+            excelDataB = excelResultB.buffer;
+            wsExcelB = excelResultB.ws;
+            const pngDataUrlB=_evRenderPlanView(2048,false);
+            pngBase64B = pngDataUrlB.split(',')[1];
+            pdfDataB = _evGeneratePDFData();
+          }
+        }
+      }catch(e){
+        console.warn('[B側] 既存躯体重複の解析に失敗、(A)のみで続行します:', e);
+        totalVolumeB=0; glbB=null; meshesB=null; excelDataB=null; wsExcelB=null; pngBase64B=null; pdfDataB=null;
+      }
+    }
+    const finalTotal = totalVolume - totalVolumeB;
 
     epSet(95,'ZIPに圧縮中...');
     await new Promise(r=>setTimeout(r,20));
     // r072マスター指定の命名規則: 「YYMMDDHHMMSS_Voldia_○○export」(○○=Structure/Earthwork)
     const modeWord=(mode==='structure')?'Structure':'Earthwork';
     const baseName=`${getVoldiaTimestamp()}_Voldia_${modeWord}export`;
+    // r025(30回目セッション、マスター指摘対応): ZIP内の各ファイルの更新日時をフォルダ名と
+    // 同じJST時刻に揃える(voldia3d.js側のgetVoldiaZipDate()のコメント参照)
+    const _zipDate=getVoldiaZipDate();
 
     const zip=new JSZip();
-    zip.file(`${baseName}.xlsx`, excelData);
-    zip.file(`${baseName}.png`, pngBase64, {base64:true});
-    zip.file(`${baseName}.pdf`, pdfData);
-    zip.file(`${baseName}.glb`, glb); // r070(マスター指示): GLBも一緒に出力
+    // r030(30回目セッション、マスター指示「(A)は内側テクスチャ(すり鉢状)・(B)は
+    // 外側テクスチャ(個体)にしたい」への対応): 実際にGLBをバイナリ解析し、発散定理で
+    // 符号付き体積を計算して現状の巻き方向を確認した結果、(A)=Voldia_Unionは現状
+    // OUTWARD(標準的な立体=外側から見える)、(B)=Voldia_OverlapForExcelは現状
+    // INWARD(法線が反転=内側からしか見えない)と判明。マスターの要望とはちょうど逆
+    // だったので、ZIPに書き出す表示用GLBだけ両方ともflipWinding:trueで反転する。
+    // 体積計算(_evRunAnalysis)に使った glb/glbB 自体はここでは一切触れておらず、
+    // ZIP用に meshesA/meshesB からもう一度encodeMultiGLBを呼び直しているだけなので、
+    // 検証済みの体積の値には影響しない。
+    const glbForZipA = meshesA ? encodeMultiGLB(meshesA.map(m=>({...m, flipWinding:true}))) : glb;
+    const glbForZipB = meshesB ? encodeMultiGLB(meshesB.map(m=>({...m, flipWinding:true}))) : glbB;
+    // r027(30回目セッション、マスター指示): ファイル名を日本語化。(A)=通常体積、
+    // (B)=減算分。JSZipはUTF-8ファイル名をデフォルトで正しく扱う(Pythonのzipfileと
+    // 違ってエンコーディングフラグを別途立てる必要はない)。
+    if(excelDataB){
+      const mergedExcel=_evMergeABExcel(wsExcelA, wsExcelB, totalVolume, totalVolumeB, finalTotal);
+      zip.file(`${baseName}.xlsx`, mergedExcel, {date:_zipDate});
+      zip.file(`${baseName}_通常体積.png`, pngBase64A, {base64:true, date:_zipDate});
+      zip.file(`${baseName}_減算分.png`, pngBase64B, {base64:true, date:_zipDate});
+      zip.file(`${baseName}_通常体積.pdf`, pdfDataA, {date:_zipDate});
+      zip.file(`${baseName}_減算分.pdf`, pdfDataB, {date:_zipDate});
+      zip.file(`${baseName}_通常体積.glb`, glbForZipA, {date:_zipDate});
+      zip.file(`${baseName}_減算分.glb`, glbForZipB, {date:_zipDate});
+      // r024(30回目セッション、マスター指示): (A)+(B)合体GLBを追加。既存の2つの
+      // encodeMultiGLB呼び出し結果(バイナリ)を後から結合するのではなく、それぞれが
+      // 使った生メッシュ配列(meshesA/meshesB、ノード名で区別済み)をそのまま連結して
+      // encodeMultiGLBをもう一度呼ぶだけ。エビル本体・(A)(B)個別の計算ロジックには
+      // 一切触れていない(組み立て層のみの追加)。
+      // r030: 合体版も表示用なので同様に両方flipWinding:trueで統一する。
+      if(meshesA && meshesB){
+        const glbCombined = encodeMultiGLB([...meshesA, ...meshesB].map(m=>({...m, flipWinding:true})));
+        zip.file(`${baseName}.glb`, glbCombined, {date:_zipDate});
+      }else{
+        zip.file(`${baseName}.glb`, glbForZipA, {date:_zipDate}); // 万一meshesが取れなかった場合は(A)のみで代替
+      }
+    }else{
+      zip.file(`${baseName}.xlsx`, excelDataA, {date:_zipDate});
+      zip.file(`${baseName}.png`, pngBase64A, {base64:true, date:_zipDate});
+      zip.file(`${baseName}.pdf`, pdfDataA, {date:_zipDate});
+      zip.file(`${baseName}.glb`, glbForZipA, {date:_zipDate}); // r070(マスター指示): GLBも一緒に出力。(B)未使用時は(A)がそのまま唯一のGLB。r030でflipWinding適用
+    }
 
     const zipBlob=await zip.generateAsync({type:'blob'});
     epSet(100,'完了！');
@@ -1386,7 +1626,7 @@ async function runEvidenceAnalysis(mode){
 
     document.getElementById('exp-prog').classList.remove('show');
     if(btn)btn.disabled=false;
-    _evShowCompleteDialog(`${count}ブロック / 総合計 ${totalVolume.toFixed(2)} m³ / ${totalVerts}頂点`);
+    _evShowCompleteDialog(`${count}ブロック / 総合計 ${finalTotal.toFixed(2)} m³ / ${totalVerts}頂点`);
   }catch(e){
     console.error(e);
     document.getElementById('exp-prog').classList.remove('show');
