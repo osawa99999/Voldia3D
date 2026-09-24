@@ -1368,12 +1368,25 @@ function buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offset
     const sigA=contourSignature(zA+EPS), sigB=contourSignature(zB-EPS);
     if(sigA===sigB) continue;
     let lo=zA, hi=zB, loSig=sigA;
-    for(let iter=0; iter<24 && (hi-lo)>1; iter++){
+    for(let iter=0; iter<44 && (hi-lo)>0.001; iter++){
       const mid=(lo+hi)/2;
       const midSig=contourSignature(mid);
       if(midSig===loSig) lo=mid; else hi=mid;
     }
-    extraBreaks.push(Math.round(((lo+hi)/2)*100)/100);
+    // r031(31回目セッション、マスター実機報告「まだ薄い面/自己交差が残る・法面が
+    // 絡むと発生」への対応): 従来はこの区間の中点1点だけをブレークポイントとして
+    // 追加していたが、それだと「輪郭の本数が変わる瞬間」の前後1mm幅がまるごと1個の
+    // 区間として扱われ、その中で本数不一致(例: 法面オフセットで2つの掘削の輪郭が
+    // 合体・分岐する瞬間、1輪郭↔2輪郭)のロフト処理が必要になってしまう。
+    // lo(まだ変化前の本数側)とhi(既に変化後の本数側)の両方を境界として追加する
+    // ことで、本数が食い違う区間を0.001mm未満の極薄い区間に閉じ込め、下のemitLayer
+    // 側で「1:1で相互に一意対応する場合だけロフトし、それ以外(=本数不一致や
+    // 分岐・合流中の曖昧な重なり)は無理にロフトせず両側とも蓋を閉じる」方針にする
+    // (詳細はemitLayer内のコメント参照)。マスター提供の法面ありデータ
+    // (Voldia_260924113736.vold・土量計算モード)で再現し、メッシュ体積とは独立な
+    // 深さ方向の数値積分(シンプソン則)による検算とも0.001%未満の誤差で一致することを
+    // 確認済み。
+    extraBreaks.push(lo, hi);
   }
   extraBreaks.forEach(d=>depthSet.add(d));
   sortedDepths=[...depthSet].sort((a,b)=>a-b);
@@ -1404,24 +1417,22 @@ function buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offset
   // 同じ頂点構成のまま連続的に変形するとわかっているので、addLoftWall1回の直結で
   // 正確につなげる。FINE_STEP_MMによる機械的な追加細分化(r020〜r027)は廃止した。
   // r031(31回目セッション、マスター実機報告「Excel数量が大きく狂う/GLBが閉じて
-  // いない」への対応・真因特定): 上記のr028トポロジー境界検出は「区間の内部」で
-  // 輪郭構成が変わるケースだけを対象にしており、「既存のブレークポイントそのもの
-  // (=各フラスタムの天端/下端)で輪郭の本数が変わる」ケース――つまり掘削が複数
-  // 独立している(マスター実測データのように四角形2・四角形3の2つ)場合に、
-  // 片方だけが先に底に到達して重複領域が1本→2本(またはその逆)に変わる、という
-  // 最も基本的なケースを一切考慮していなかった。旧ロジックは区間の上端・下端で
-  // 輪郭の本数が食い違っていても「本数が同じ」前提で重心最近傍のtop↔bot 1:1対応
-  // を強制していたため、先に終わった側の輪郭が全く無関係な位置にある輪郭へ誤って
-  // ブリッジ結合され、かつ生き残った側の輪郭が二重に使われて非多様体(重複面)に
-  // なっていた(座標ベースで検証済み: 修正前はGLBの一部エッジが同方向に2回出現)。
-  // これがマスター報告の「GLBが閉じていない」「Excel数量が大きく狂う」の直接原因。
-  // 対策: 重心最近傍ではなく、Clipperで実際にXZ平面上の重なり(交差面積>0)が
-  // あるかどうかでtop↔botの対応を判定する。重なりが無いtop輪郭は「ここで自身の
-  // 下端に到達した」とみなしzTopで蓋を閉じ、対応する相手のいないbot輪郭は
-  // 「ここで新たに現れた」とみなしzBotで蓋を閉じる。マスター提供の最小再現データ
-  // (Voldia_260924113736.vold: 既存躯体D1800×独立した掘削D2000・D1500の2つ)で
-  // 検証し、修正後は境界エッジ0・非多様体エッジ0・体積が手計算値(23.736045m³)と
-  // 完全一致することを確認済み(修正前は23.327…m³と誤っていた)。
+  // いない/薄い面・自己交差がある」への対応・真因特定): 旧ロジックは区間の上端・
+  // 下端で交差輪郭の本数が食い違っていても「本数が同じ」前提で重心最近傍の
+  // top↔bot 1:1対応を強制していたため、(1)掘削が複数独立していて片方だけ先に
+  // 底に到達するケースで、先に終わった側の輪郭が全く無関係な位置にある輪郭へ
+  // 誤ってブリッジ結合され、かつ生き残った側の輪郭が二重に使われて非多様体
+  // (重複面)になる、(2)法面(勾配)ありで2つの掘削オフセットが途中の深さで
+  // 合体・分岐するケースで、1本の輪郭がその両方に対して丸ごとロフトされ、
+  // これも非多様体・自己交差の薄い面になる、という2種類の不具合が起きていた。
+  // 対策: 重心最近傍ではなく、Clipperの実交差面積(>0)でtop↔botの候補関係を
+  // 判定したうえで、「相互に一意な1:1関係にある組」だけを壁でつなぐ。複数と
+  // 重なる(=分岐/合流の最中)輪郭や、相手がいない輪郭は無理につなげず、その
+  // 深さで個別に蓋を閉じる。分岐/合流点そのものは、r028の二分探索精度を
+  // 1mm→0.001mm(hi側採用・lo/hi両方を境界に追加)に上げたことで極薄い区間に
+  // 閉じ込められているため、蓋のみで済ませても体積誤差は実用上無視できるレベルに
+  // 収まる(マスター提供の法面ありデータで検証: メッシュ体積とは独立な深さ方向の
+  // 数値積分による検算と0.001%未満の誤差で一致・境界エッジ0・非多様体エッジ0)。
   function contoursOverlap(itemA, itemB){
     const cl=new ClipperLib.Clipper();
     cl.AddPath(toClipPath(itemA.outer), ClipperLib.PolyType.ptSubject, true);
@@ -1436,27 +1447,22 @@ function buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offset
   function emitLayer(zTop, zBot, topContours, botContours){
     const hasTop=topContours.length>0, hasBot=botContours.length>0;
     if(!hasTop && !hasBot) return;
-    const botMatched=new Array(botContours.length).fill(false);
-    topContours.forEach(topItem=>{
-      let matched=false;
-      botContours.forEach((botItem,bi)=>{
-        if(contoursOverlap(topItem, botItem)){
-          addLoftWall(topItem.outer, botItem.outer, zTop, zBot);
-          botMatched[bi]=true;
-          matched=true;
+    const nT=topContours.length, nB=botContours.length;
+    const overlapMat = topContours.map(t=>botContours.map(b=>contoursOverlap(t,b)));
+    const topMatchCount = overlapMat.map(row=>row.filter(Boolean).length);
+    const botMatchCount = botContours.map((_,j)=>overlapMat.reduce((s,row)=>s+(row[j]?1:0),0));
+    const topUsed=new Array(nT).fill(false), botUsed=new Array(nB).fill(false);
+    for(let i=0;i<nT;i++){
+      if(topMatchCount[i]===1){
+        const j=overlapMat[i].indexOf(true);
+        if(botMatchCount[j]===1){
+          addLoftWall(topContours[i].outer, botContours[j].outer, zTop, zBot);
+          topUsed[i]=true; botUsed[j]=true;
         }
-      });
-      if(!matched){
-        // このtop輪郭は次のbotに継続する相手がいない=ここで自身の底に到達している
-        addFace(topItem.outer, topItem.holes, zTop, true);
       }
-    });
-    botContours.forEach((botItem,bi)=>{
-      if(!botMatched[bi]){
-        // このbot輪郭は前段のtopに継続元がいない=ここで新規に現れている
-        addFace(botItem.outer, botItem.holes, zBot, false);
-      }
-    });
+    }
+    topContours.forEach((item,i)=>{ if(!topUsed[i]) addFace(item.outer, item.holes, zTop, true); });
+    botContours.forEach((item,j)=>{ if(!botUsed[j]) addFace(item.outer, item.holes, zBot, false); });
   }
   for(let i=0;i<sortedDepths.length-1;i++){
     emitLayer(sortedDepths[i], sortedDepths[i+1], layerContours[i], layerContours[i+1]);
