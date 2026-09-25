@@ -1031,6 +1031,29 @@ function _evRunAnalysis(mode, glbArrayBuffer){
             else f.type='IGNORE';
             f.calcHeight=z0-f.avgY;
           }
+
+          // 【問題A・31回目セッション追記・マスター実機報告「山留面の角に②③のような
+          // 極小スリバーが出る」への対応・真因特定】上記のSLOPE_NORMAL_Y_THRESHOLDは
+          // 「テーパー分の傾き(深さDに対して15mm)」を前提に、辺沿いの疑似壁面を弾いて
+          // いたが、山留(noSlope)オブジェクトの"角"だけは事情が違う。GL(z=0)蓋除去の
+          // 数値安定化ハック(DOBOKU_VERTICAL_TAPER_FIXED_MM)が角の頂点だけ対角線状に
+          // (X,Y,Z)三方向へ均等にズレるため、そこに生じる縫合三角形は「深さDに対する
+          // 緩やかな傾き」ではなく、辺長10〜15mm程度の縮退した「くさび」になり、法線が
+          // たまたま45度前後(=SLOPE_NORMAL_Y_THRESHOLDを普通に超える値)を向いてしまう。
+          // 実機GLB(260925164720_Voldia_Earthworkexport.glb)をNode.jsで数値解析し、
+          // この手の角の縫合三角形は最短辺が一律17.32mm(=√(10²+10²+10²)mm、ハックの
+          // オフセット定数そのもの)である一方、本物の法面三角形は同じデータ中で最短辺
+          // 740mm以上と、3桁違うことを確認した。この桁違いの差を利用し、法面/上向き
+          // 法面/下向き法面と判定された面のうち、最短辺が極端に短い(=角の縫合三角形と
+          // 断定できる)ものだけをIGNOREへ格下げする。メッシュ生成・Manifold・体積計算
+          // ロジック自体には一切触れず、Excel集計とPDF/PNG平面図(共に本関数のfaces配列を
+          // 元にしている)の両方から同時に除外できる。
+          const SLIVER_MIN_EDGE_MM = 100; // ハック由来(17.32mm)と本物の法面(740mm以上)の間、桁違いの余裕を持たせた安全な閾値
+          if(f.type==='SLOPE' || f.type==='UPWARD_SLOPE' || f.type==='DOWNWARD_SLOPE'){
+            const e1=f.v0.distanceTo(f.v1), e2=f.v1.distanceTo(f.v2), e3=f.v2.distanceTo(f.v0);
+            const minEdgeMm=Math.min(e1,e2,e3)*1000;
+            if(minEdgeMm < SLIVER_MIN_EDGE_MM) f.type='IGNORE';
+          }
         });
 
         if(mode==='structure'){
