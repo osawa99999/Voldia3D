@@ -1048,20 +1048,56 @@ function _evRunAnalysis(mode, glbArrayBuffer){
           // 断定できる)ものだけをIGNOREへ格下げする。メッシュ生成・Manifold・体積計算
           // ロジック自体には一切触れず、Excel集計とPDF/PNG平面図(共に本関数のfaces配列を
           // 元にしている)の両方から同時に除外できる。
-          const SLIVER_MIN_EDGE_MM = 100; // ハック由来(17.32mm)と本物の法面(740mm以上)の間、桁違いの余裕を持たせた安全な閾値
+          // 【問題A・31回目セッション追記2回目・マスター実機報告「旧2がまだ残る、
+          // 3は別の場所を指すようになった」への対応】前回(最短辺100mm未満)の基準は
+          // 「対角オフセットで3辺とも短くなる角の楔」は捕まえられたが、実機データで
+          // 新たに見つかった別パターン——「1辺だけ本来の長さ(数m〜十数m)を保ったまま、
+          // 残りがハックのオフセット分だけしかない、面積がほぼ0の"細長い"縮退三角形」
+          // (今回のGLBの三角形15番、投影面積0.0625m²・最長辺12.5m・最短辺5.7m)は
+          // 最短辺基準ではすり抜けてしまっていた。これは「辺の長さ」ではなく
+          // 「面積÷最長辺²」という縮退度(アスペクト比の逆数相当)で見るべき問題。
+          // 実機GLB(260925195829)の全SLOPE判定三角形をNode.js/Pythonで数値解析した
+          // ところ、ハック由来の縮退三角形(9枚、今回新たに見つかった15番含む)は
+          // この比が0.00057〜0.0028に collect し、本物の法面三角形(24枚)は最小でも
+          // 0.0250と、約10倍の安全マージンを持って明確に分離することを確認した。
+          const SLIVER_MIN_EDGE_MM = 100; // 角の楔(3辺とも短い)を弾く一次フィルタ(念のため残置)
+          const SLIVER_AREA_RATIO = 0.01; // 面積/最長辺^2。実機データで縮退三角形0.0028以下・本物0.025以上と確認(10倍近いマージン)
           if(f.type==='SLOPE' || f.type==='UPWARD_SLOPE' || f.type==='DOWNWARD_SLOPE'){
             const e1=f.v0.distanceTo(f.v1), e2=f.v1.distanceTo(f.v2), e3=f.v2.distanceTo(f.v0);
             const minEdgeMm=Math.min(e1,e2,e3)*1000;
-            if(minEdgeMm < SLIVER_MIN_EDGE_MM) f.type='IGNORE';
+            const maxEdge=Math.max(e1,e2,e3);
+            const triArea=new THREE.Vector3().crossVectors(
+              new THREE.Vector3().subVectors(f.v1,f.v0),
+              new THREE.Vector3().subVectors(f.v2,f.v0)
+            ).length()*0.5;
+            const areaRatio = maxEdge>1e-9 ? (triArea/(maxEdge*maxEdge)) : 0;
+            // 【問題A・32回目セッション追記・マスター実機報告「②と⑤は同一平面のはずなのに
+            // 別クラスタになる」への対応・真因特定】上のスリバー判定はtypeを直接'IGNORE'に
+            // 書き換えていたため、この面が丸ごとfaces配列から消え、後続の辺共有隣接グラフ
+            // (Union-Find)からも同時に消えていた。ところが実機データを解析したところ、
+            // このスリバー面が「本物の同一平面上の2つの面(例:②③)を繋ぐ唯一の辺」を
+            // 担っているケースがあり、スリバーを消すと同時にその2面の隣接関係も失われ、
+            // 本来1つにまとまるべき面が孤立クラスタとして取り残されていた。
+            // 「面積・数量には数えない」ことと「隣接グラフから消す」ことを同じ1回の操作
+            // (type書き換え→配列除外)でやっていたのが構造的な原因。この2つの役割を
+            // isSliverフラグで分離し、スリバー面はtypeをSLOPE系のまま維持して隣接グラフの
+            // 「橋」としては機能させつつ、面積・高さ集計とサブフェイス表示からは除外する。
+            if(minEdgeMm < SLIVER_MIN_EDGE_MM || areaRatio < SLIVER_AREA_RATIO) f.isSliver=true;
           }
         });
 
+        // ★変更: スリバー面(isSliver)はtypeをSLOPE系のまま残すため、ここでのフィルタは
+        // 従来通り「本物のIGNORE(法面としての傾き自体がない疑似壁など)」だけを除外する。
+        // スリバー面は隣接グラフ構築のためにこの時点ではまだ含めておく。
+        let facesForGraph;
         if(mode==='structure'){
-          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
+          facesForGraph=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
         }else{
-          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
+          facesForGraph=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
         }
-        faces.forEach(f=>_evTotalModelArea+=f.projArea);
+        faces=facesForGraph;
+        // ★変更: 総面積にはスリバー面(橋渡し用に残しているだけの面)を含めない。
+        faces.forEach(f=>{ if(!f.isSliver) _evTotalModelArea+=f.projArea; });
 
         const edges={};
         faces.forEach(f=>{
@@ -1088,7 +1124,11 @@ function _evRunAnalysis(mode, glbArrayBuffer){
                 }else{
                   uf.union(f1.id,f2.id);
                 }
-              }else if(f1.type.includes('SLOPE')){
+              }else if(f1.type.includes('SLOPE') && !f1.isSliver && !f2.isSliver){
+                // ★変更: スリバー面(退化三角形)は法線・辺方向のノイズが大きく、これを
+                // 使って隣の本物の面の入隅/出隅を判定すると誤判定の元になるため、
+                // どちらかがスリバーの場合はこの判定自体をスキップする(dot>0.99による
+                // 上のマージ判定は影響を受けない=橋渡しは従来通り機能する)。
                 const inPlaneVec=new THREE.Vector3().crossVectors(f1.normal,list[0].vDir).normalize();
                 const sign=f2.normal.dot(inPlaneVec);
                 if(sign<-0.001){ f1.hasConcave=true; f2.hasConcave=true; }
@@ -1101,8 +1141,19 @@ function _evRunAnalysis(mode, glbArrayBuffer){
         const clusters={};
         faces.forEach(f=>{
           const rootId=uf.find(f.id);
-          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[]};
+          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[], renderFaces:[]};
           const c=clusters[rootId];
+          // ★32回目セッション追記2: マスター実機報告「PNGで4-2と4-3の間に分割線が
+          // 残る」への対応。前回の修正は「面積・高さ集計」と「隣接グラフの橋渡し」の
+          // 役割は分離したが、「3D描画用ジオメトリ」からもスリバー面を一緒に除外して
+          // いたため、スリバー面が元々埋めていた場所に本物の小さな隙間(穴)ができ、
+          // EdgesGeometryがその穴の縁を正直に境界線として描いてしまっていた
+          // (②と③が同一平面という事実自体には変わりなく、r072が想定していた
+          // 「coplanarな内部辺は自動省略される」仕組みが、隙間のせいで機能しなかった
+          // だけ)。renderFacesにはスリバーも含めて隙間なく埋め、面積・高さ集計と
+          // Excel/PDFのサブフェイス行(groupedFaces)からは引き続き除外する。
+          c.renderFaces.push(f);
+          if(f.isSliver) return;
           c.projArea+=f.projArea; c.hSum+=f.calcHeight*f.projArea; c.faceCount++;
           c.groupedFaces.push(f);
           if(f.hasConvex) c.hasConvex=true;
@@ -1133,7 +1184,10 @@ function _evRunAnalysis(mode, glbArrayBuffer){
           const hexColor='#'+highlightColor.getHexString();
 
           const positions=[];
-          c.groupedFaces.forEach(f=>{
+          // ★変更: 描画ジオメトリはgroupedFaces(数量集計用・スリバー除外済み)ではなく
+          // renderFaces(スリバーも含む・隙間なし)から作る。数量・サブフェイス行への
+          // 影響はゼロ(そちらは引き続きgroupedFacesを参照)。
+          c.renderFaces.forEach(f=>{
             positions.push(f.v0.x,f.v0.y,f.v0.z, f.v1.x,f.v1.y,f.v1.z, f.v2.x,f.v2.y,f.v2.z);
           });
           const geom=new THREE.BufferGeometry();
