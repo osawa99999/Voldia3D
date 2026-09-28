@@ -1444,25 +1444,382 @@ function buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offset
     sol.forEach(p=>{ let a=0; for(let i=0;i<p.length;i++){const j=(i+1)%p.length; a+=p[i].X*p[j].Y-p[j].X*p[i].Y;} area+=Math.abs(a); });
     return area>1e-3; // SF換算後のごく微小な誤差ノイズだけ弾く
   }
+  // r032(33回目セッション、「2階建て問題」対応・Aプラン): 点pから多角形poly(境界線)までの最短距離
+  function pointToPolyDist(p, poly){
+    let best=Infinity;
+    for(let i=0;i<poly.length;i++){
+      const a=poly[i], b=poly[(i+1)%poly.length];
+      const abx=b.x-a.x, aby=b.y-a.y;
+      const apx=p.x-a.x, apy=p.y-a.y;
+      const lenSq=abx*abx+aby*aby;
+      let t = lenSq>1e-12 ? (apx*abx+apy*aby)/lenSq : 0;
+      if(t<0) t=0; else if(t>1) t=1;
+      const d=Math.hypot(p.x-(a.x+t*abx), p.y-(a.y+t*aby));
+      if(d<best) best=d;
+    }
+    return best;
+  }
+  // r032(33回目セッション、「2階建て問題」対応・Aプラン、最終版):
+  //
+  // 【最初の実装(削除済み)が誤っていた理由】
+  // 当初は「1個側の輪郭をN個の弧に分割し、各弧をaddLoftWallで"疑似的に閉じたループ"
+  // として対応するN個側の輪郭にロフトする(閉じ目はピンチ点同士の小さな橋渡しになる
+  // はず)」という設計だった。しかし実際にNode.jsで検証したところ、この「閉じ目」が
+  // 全く小さくならないケースが実データに存在し、その閉じ目自体が水平に近い巨大な
+  // 面(=新たな偽の「床」)になってしまい、体積(発散定理)まで狂わせるバグを
+  // 作り込んでしまった(境界エッジ3・非多様体エッジ1、体積28.9m3 vs 正解33.47m3)。
+  //
+  // 原因: このデータは円ではなく矩形(掘削1=blue、掘削2=blue、構造物=gray、いずれも
+  // 4頂点の長方形)。2つの掘削のオフセット矩形が合体/分岐する瞬間、実際には
+  // 「点」でタンジェントになるのではなく「辺の一部」がタンジェントになる(直線同士が
+  // 平行に触れる)。このため、合体時に隠れる/分離時に現れる境界は短い"点"ではなく
+  // 長さのある"辺"(このデータでは約2.65m)になる。この「隠れた辺」の両端点
+  // (crossP・crossQ)は本来top側輪郭(oneOuter)にも存在するはずの点だが、
+  // Clipperのcollinear(同一直線上の点)簡略化によって片方が消えてしまっていた
+  // ため、「1個の弧が自分自身に閉じる」という単純化が成り立たなかった。
+  //
+  // 【正しい設計】
+  // 1. まずtop側輪郭とbot側輪郭のペア(m0,m1)から、辺同士が逆向き平行かつ位置が
+  //    重なる「隠れた共有辺」を探す(findSharedHiddenEdge)。これがcrossP・crossQの
+  //    実座標(mm)になる。
+  // 2. crossP・crossQをm0・m1それぞれの輪郭に挿入する(既存頂点に十分近ければ
+  //    挿入せず流用)。これでm0・m1はそれぞれ「露出している弧(oneOuter側と直結する
+  //    部分)」と「隠れた辺(crossP-crossQを結ぶ1辺)」に明確に分かれる。
+  // 3. crossP・crossQをoneOuter側にも同様に挿入する(oneOuterの境界のどこかに
+  //    必ず乗っているはず。乗っていなければフォールバック)。
+  // 4. oneOuterにもcrossP・crossQを挿入し、その2点でoneOuterを単純に2分割する
+  //    (最近傍owner判定は使わない。P・Qは元々m0・m1双方の境界からの距離が
+  //    ちょうど0になる点なので、「最も近いowner」判定に頼るとタイブレークの
+  //    都合で意図しない側に取り込まれてしまうことがある。実データで確認・修正済み)。
+  //    どちらの弧がmanyOuters[0]/[1]どちらに対応するかは、各弧の中間点で改めて
+  //    最近傍判定する(中間点なら通常タイにならない)。
+  // 5. 各弧(開いた鎖)と対応するm_k側の露出部分(開いた鎖)を、addLoftWallのような
+  //    「両端を素直に対応させる」ロフト(openChainLoft、始点↔始点・終点↔終点を
+  //    強制するのでbestOffset探索や閉じ目の追加は行わない)で直結する。
+  //    → 蓋を一切作らず、水平面(BOTTOM/SLOPE誤分類)を生まない。
+  // 6. 「隠れた辺」自体は、oneOuter側のcrossP-crossQという2点(zTop、oneOuterの
+  //    実際の辺ではなく内部の仮想弦)と、実際の隠れた辺(zBot、2点)をopenChainLoft
+  //    で直結する。この壁はxがほぼ一定・y(奥行き方向ではなくもう一方の平面軸)が
+  //    変化する形になるため、ほぼ垂直(法線はSLOPE/IGNORE分類になる水平以外の
+  //    向き)になり、Excel側で「床」として二重計上されることはない。
+  //
+  // 【対応範囲】このデータで確認されている「1個↔2個」のケースのみを正確に処理する。
+  // 3個以上が絡む複雑なケースは、上記の共有辺検出やowner分割が期待通りにならない
+  // 可能性が高いため、安全側フォールバック(従来の両側キャップ)に委ねる
+  // (ドキュメント記載の許容範囲どおり)。
+  function edgesAntiParallelOverlap(a1,a2,b1,b2,tol){
+    const dax=a2.x-a1.x, day=a2.y-a1.y;
+    const dbx=b2.x-b1.x, dby=b2.y-b1.y;
+    const la=Math.hypot(dax,day), lb=Math.hypot(dbx,dby);
+    if(la<1e-6||lb<1e-6) return null;
+    const ux=dax/la, uy=day/la;
+    const vx=dbx/lb, vy=dby/lb;
+    const dot=ux*vx+uy*vy;
+    if(dot > -0.995) return null; // ほぼ逆向き平行でなければ対象外
+    function distToLine(p){ return Math.abs((p.x-a1.x)*uy - (p.y-a1.y)*ux); }
+    if(distToLine(b1)>tol || distToLine(b2)>tol) return null;
+    function proj(p){ return (p.x-a1.x)*ux + (p.y-a1.y)*uy; }
+    const tb1=proj(b1), tb2=proj(b2);
+    const lo=Math.max(0, Math.min(tb1,tb2)), hi=Math.min(la, Math.max(tb1,tb2));
+    if(hi-lo < tol) return null; // 重なりがほぼ無い
+    return [ {x:a1.x+ux*lo, y:a1.y+uy*lo}, {x:a1.x+ux*hi, y:a1.y+uy*hi} ];
+  }
+  function findSharedHiddenEdge(polyA, polyB, tol){
+    for(let i=0;i<polyA.length;i++){
+      const a1=polyA[i], a2=polyA[(i+1)%polyA.length];
+      for(let j=0;j<polyB.length;j++){
+        const b1=polyB[j], b2=polyB[(j+1)%polyB.length];
+        const seg=edgesAntiParallelOverlap(a1,a2,b1,b2,tol);
+        if(seg) return seg; // [P,Q]
+      }
+    }
+    return null;
+  }
+  // pt を poly の境界上に挿入する(既存頂点に十分近ければ挿入せずそのindexを返す)。
+  // 戻り値: {poly:新しい頂点配列, index:ptに対応するindex} または null(境界上にない)
+  function insertPointOnPoly(poly, pt, tol){
+    const n=poly.length;
+    for(let i=0;i<n;i++){
+      const a=poly[i], b=poly[(i+1)%n];
+      if(Math.hypot(pt.x-a.x,pt.y-a.y)<tol) return {poly:poly.slice(), index:i};
+      const abx=b.x-a.x, aby=b.y-a.y;
+      const lenSq=abx*abx+aby*aby;
+      if(lenSq<1e-9) continue;
+      let t=((pt.x-a.x)*abx+(pt.y-a.y)*aby)/lenSq;
+      if(t<0||t>1) continue;
+      const projx=a.x+t*abx, projy=a.y+t*aby;
+      if(Math.hypot(pt.x-projx,pt.y-projy)>tol) continue;
+      if(Math.hypot(pt.x-b.x,pt.y-b.y)<tol) return {poly:poly.slice(), index:(i+1)%n};
+      const newPoly=poly.slice(0,i+1).concat([{x:projx,y:projy}], poly.slice(i+1));
+      return {poly:newPoly, index:i+1};
+    }
+    return null;
+  }
+  // idxP・idxQ(隠れた辺の両端、poly内で隣接しているはず)を除いた「露出run」を
+  // 長い方の経路として取り出す(開いた鎖、idxPまたはidxQのどちらから始まるかは
+  // startAtQで指定)
+  function exposedRunExcludingEdge(poly, idxP, idxQ, startAtQ){
+    const n=poly.length;
+    const start = startAtQ ? idxQ : idxP;
+    const end = startAtQ ? idxP : idxQ;
+    const pts=[];
+    let i=start;
+    while(true){
+      pts.push(poly[i]);
+      if(i===end) break;
+      i=(i+1)%n;
+    }
+    return pts;
+  }
+  function openChainLoft(upperPts, lowerPts, upperDepth, lowerDepth){
+    if(!upperPts||!lowerPts) return;
+    const nu=upperPts.length, nl=lowerPts.length;
+    if(nu<1||nl<1) return;
+    const uBase=positions.length/3;
+    upperPts.forEach(p=>addVertex(p.x,p.y,upperDepth));
+    const lBase=positions.length/3;
+    lowerPts.forEach(p=>addVertex(p.x,p.y,lowerDepth));
+    if(nu===1 && nl===1) return; // 縮退(実際には発生しない想定)
+    let ui=0, li=0;
+    const totalSteps=(nu-1)+(nl-1);
+    for(let step=0; step<totalSteps; step++){
+      if(ui<nu-1 && li<nl-1){
+        const uNext=ui+1, lNext=li+1;
+        const du=Math.hypot(upperPts[uNext].x-lowerPts[li].x, upperPts[uNext].y-lowerPts[li].y);
+        const dl=Math.hypot(upperPts[ui].x-lowerPts[lNext].x, upperPts[ui].y-lowerPts[lNext].y);
+        if(du<=dl){ indices.push(uBase+ui, lBase+li, uBase+uNext); ui++; }
+        else{ indices.push(uBase+ui, lBase+li, lBase+lNext); li++; }
+      } else if(ui<nu-1){ indices.push(uBase+ui, lBase+li, uBase+ui+1); ui++; }
+      else if(li<nl-1){ indices.push(uBase+ui, lBase+li, lBase+li+1); li++; }
+      else break;
+    }
+  }
+  // manyOuters(ちょうど2個)とoneOuterから、隠れた共有辺を検出してcrossP/crossQを
+  // 両側に挿入し、露出弧(oneOuter側2本・many側2本、計4本)と隠れた辺(1本)の
+  // 開いた鎖ペアを組み立てる。成功時は{ arcsForOne:[open鎖0,1], arcsForMany:[open鎖0,1],
+  //   hiddenOne:[crossP,crossQ], hiddenMany:[P,Q] }を返す。失敗時はnull。
+  function buildTwoWaySplit(oneOuter, manyOuters){
+    if(manyOuters.length!==2) return null;
+    const TOL=5; // mm。実データで観測された0.001〜1mm程度のズレを吸収する
+    const seg=findSharedHiddenEdge(manyOuters[0], manyOuters[1], TOL);
+    if(!seg) return null;
+    const [P,Q]=seg;
+    const ins0P=insertPointOnPoly(manyOuters[0], P, TOL); if(!ins0P) return null;
+    const ins0Q=insertPointOnPoly(ins0P.poly, Q, TOL); if(!ins0Q) return null;
+    const ins1P=insertPointOnPoly(manyOuters[1], P, TOL); if(!ins1P) return null;
+    const ins1Q=insertPointOnPoly(ins1P.poly, Q, TOL); if(!ins1Q) return null;
+    // ins0Q.poly はins0P挿入後の配列に対する追加挿入なので、Pのindexがずれている
+    // 可能性がある(Qがinsert時にPより手前に入った場合+1される)。安全のため
+    // 挿入後の配列に対して再度Pの位置を特定し直す。
+    function reindex(poly, pt, tol){
+      for(let i=0;i<poly.length;i++){ if(Math.hypot(poly[i].x-pt.x,poly[i].y-pt.y)<tol) return i; }
+      return -1;
+    }
+    const idx0P=reindex(ins0Q.poly, P, TOL), idx0Q=reindex(ins0Q.poly, Q, TOL);
+    const idx1P=reindex(ins1Q.poly, P, TOL), idx1Q=reindex(ins1Q.poly, Q, TOL);
+    if(idx0P<0||idx0Q<0||idx1P<0||idx1Q<0) return null;
+    const poly0=ins0Q.poly, poly1=ins1Q.poly;
+    // P・Qは m0/m1/oneOuter という3つの別々の輪郭にそれぞれ挿入するため、各輪郭
+    // 自身の辺への射影計算(insertPointOnPoly内のt計算)の丸め誤差により、
+    // 「同じはずのP」「同じはずのQ」が輪郭ごとにサブミクロン〜0.001mm程度ずれた
+    // 別々の浮動小数点値になる。この差はfloat64では無害だが、最終メッシュの
+    // 座標がFloat32Array(有効桁数7桁程度)に格納される際、独立に丸められた
+    // 近接2値が別々のfloat32値に丸まってしまい、本来1本であるべき辺が別の頂点
+    // 扱いになって境界エッジ(水密性エラー)として検出されてしまう不具合があった
+    // (実データで確認・修正)。P・Qを使う全ての箇所で厳密に同一の座標(このP・Q
+    // オブジェクトそのもの)を使うよう、各輪郭に挿入した箇所を後から上書きする。
+    poly0[idx0P]=P; poly0[idx0Q]=Q; poly1[idx1P]=P; poly1[idx1Q]=Q;
+    // P・Qがそれぞれの輪郭上で隣接しているか確認(隠れた辺そのもの)
+    const n0=poly0.length, n1=poly1.length;
+    const adj0PQ=((idx0P+1)%n0===idx0Q), adj0QP=((idx0Q+1)%n0===idx0P);
+    const adj1PQ=((idx1P+1)%n1===idx1Q), adj1QP=((idx1Q+1)%n1===idx1P);
+    if(!(adj0PQ||adj0QP) || !(adj1PQ||adj1QP)) return null; // 想定外の形状、フォールバック
+    // 露出run: 隠れた辺(P→QまたはQ→P)を除いた長い経路
+    const exposed0 = adj0PQ ? exposedRunExcludingEdge(poly0, idx0P, idx0Q, true)  // Q→...→P
+                             : exposedRunExcludingEdge(poly0, idx0P, idx0Q, false); // P→...→Q
+    const exposed1 = adj1PQ ? exposedRunExcludingEdge(poly1, idx1P, idx1Q, true)
+                             : exposedRunExcludingEdge(poly1, idx1P, idx1Q, false);
+    // exposed0は必ずP,Qのどちらかで始まりもう片方で終わる。exposed1と向きを
+    // 揃える(exposed0がQ始まりP終わりなら、exposed1もQ始まりP終わりにする)
+    function startsWithQ(run){ return Math.hypot(run[0].x-Q.x, run[0].y-Q.y) < TOL; }
+    const e0StartsQ=startsWithQ(exposed0), e1StartsQ=startsWithQ(exposed1);
+    const exposed1Aligned = (e0StartsQ===e1StartsQ) ? exposed1 : exposed1.slice().reverse();
+
+    // oneOuter側にもP・Qを挿入する。r032初版はここでsplitContourByOwners
+    // (最近傍owner判定)を再利用していたが、P・QはM0/M1双方の境界からの距離が
+    // ちょうど0(タイ)になる点であるため、「最も近いowner」判定ではタイブレークの
+    // 都合でP・Qのどちらか一方が本来の反対側の弧に取り込まれてしまい、弧の長さが
+    // 合わなくなる不具合があった(実データで確認・修正)。P・Qは既に(many側の
+    // 共有辺検出から)厳密な座標が分かっているので、owner判定に頼らず、oneOuter
+    // 上のP・Qの位置で単純に2分割する(区間の途中にある代表点だけをowner判定して
+    // どちらの弧がmanyOuters[0]/[1]どちらに対応するか決める)。
+    const insOneP=insertPointOnPoly(oneOuter, P, TOL); if(!insOneP) return null;
+    const insOneQ=insertPointOnPoly(insOneP.poly, Q, TOL); if(!insOneQ) return null;
+    const oneOuterAug=insOneQ.poly;
+    function reindexOne(pt){
+      for(let i=0;i<oneOuterAug.length;i++){ if(Math.hypot(oneOuterAug[i].x-pt.x,oneOuterAug[i].y-pt.y)<TOL) return i; }
+      return -1;
+    }
+    const idxOneP=reindexOne(P), idxOneQ=reindexOne(Q);
+    if(idxOneP<0||idxOneQ<0||idxOneP===idxOneQ) return null;
+    oneOuterAug[idxOneP]=P; oneOuterAug[idxOneQ]=Q; // 上と同じ理由でoneOuter側も厳密に同一座標へ上書き
+    function pathForward(from,to){
+      const n=oneOuterAug.length; const pts=[]; let i=from;
+      while(true){ pts.push(oneOuterAug[i]); if(i===to) break; i=(i+1)%n; }
+      return pts;
+    }
+    const pathQtoP=pathForward(idxOneQ, idxOneP); // Q→...→P
+    const pathPtoQ=pathForward(idxOneP, idxOneQ); // P→...→Q
+    if(pathQtoP.length<2 || pathPtoQ.length<2) return null; // どちらかが縮退(P,Qが隣接=弧が無い)
+    // 代表点(各経路の中間点)がmanyOuters[0]/[1]のどちらに近いかでどちらの弧か判定
+    function ownerOfPath(path){
+      const mid=path[Math.floor(path.length/2)];
+      const d0=pointToPolyDist(mid, manyOuters[0]), d1=pointToPolyDist(mid, manyOuters[1]);
+      return d0<=d1 ? 0 : 1;
+    }
+    const ownerQtoP=ownerOfPath(pathQtoP), ownerPtoQ=ownerOfPath(pathPtoQ);
+    if(ownerQtoP===ownerPtoQ) return null; // 2つの経路が同じowner側と判定=想定外
+    // arc0はmanyOuters[0](=exposed0)に対応する弧、arc1はmanyOuters[1]に対応する弧。
+    // 各経路はQ始まりまたはP始まりなので、対応するexposed側の始点(Q始まりかP始まりか)
+    // に揃える。
+    const pathByOwner=[ownerQtoP===0?pathQtoP:pathPtoQ, ownerQtoP===0?pathPtoQ:pathQtoP];
+    function alignArcToExposed(arc, exposedRun){
+      const arcStartsQ = Math.hypot(arc[0].x-Q.x, arc[0].y-Q.y) < TOL;
+      const expStartsQ = startsWithQ(exposedRun);
+      return (arcStartsQ===expStartsQ) ? arc : arc.slice().reverse();
+    }
+    const arc0=alignArcToExposed(pathByOwner[0], exposed0);
+    const arc1=alignArcToExposed(pathByOwner[1], exposed1Aligned);
+    if(!arc0||!arc1) return null;
+    return {
+      arcsForOne:[arc0, arc1],
+      arcsForMany:[exposed0, exposed1Aligned],
+      hiddenOne: e0StartsQ ? [Q,P] : [P,Q],
+      hiddenMany: e0StartsQ ? [Q,P] : [P,Q],
+      // r032追記: oneOuter・m0・m1それぞれのcrossP/crossQ挿入後の「フル」頂点配列。
+      // 呼び出し側が、層境界を跨いで共有されているlayerContoursの実体(.outer)を
+      // これで上書きするために使う(下記の事前パス参照)。
+      oneOuterAug, manyAug:[poly0, poly1],
+    };
+  }
+  // r032(33回目セッション、「2階建て問題」対応・Aプラン): 従来はtopMatchCount===1
+  // かつbotMatchCount===1の「完全な1:1」だけをaddLoftWallで直結し、それ以外の
+  // N:M不一致は問答無用で両側とも蓋(addFace)を閉じていた。しかし31回目セッションで
+  // confinement区間(トポロジー変化点)を0.001mm未満に極薄化した結果、この
+  // 「両側に蓋」自体が、水平投影面積を持つ余計な「床」ペアとしてExcel/PDFに
+  // 二重・三重計上される直接原因になっていた(発散定理ベースの3D体積計算では
+  // 上向き/下向きの蓋が符号で相殺されるため見えない。verify_like_excel.js参照。
+  // 32回目セッションではこの検証方法の誤りに気づけず「直った」と誤診断した)。
+  // 対策: overlapMat(top×botの重なり有無)を辺とする二部グラフの連結成分ごとに
+  // 処理する方式に変更する。
+  //   ・成分が「top1個・bot1個」→ 従来通りaddLoftWallで直結(蓋なし)
+  //   ・成分が「top1個・bot2個」または「top2個・bot1個」→ buildTwoWaySplitで
+  //     露出弧同士をopenChainLoftで直結し、隠れた辺(内部の仮想的な分離壁)も
+  //     openChainLoftで直結する(蓋を一切作らない)
+  //   ・それ以外(3個以上絡む複雑なケース、buildTwoWaySplitが失敗するケース)は、
+  //     安全側フォールバックとして従来の「両側に蓋」を維持する(体積(発散定理)は
+  //     破綻しないため安全。ただしExcel数量の過大計上リスクは残るため警告ログを
+  //     出す。今回の再現データでは発生しない)
   function emitLayer(zTop, zBot, topContours, botContours){
     const hasTop=topContours.length>0, hasBot=botContours.length>0;
     if(!hasTop && !hasBot) return;
     const nT=topContours.length, nB=botContours.length;
     const overlapMat = topContours.map(t=>botContours.map(b=>contoursOverlap(t,b)));
-    const topMatchCount = overlapMat.map(row=>row.filter(Boolean).length);
-    const botMatchCount = botContours.map((_,j)=>overlapMat.reduce((s,row)=>s+(row[j]?1:0),0));
+
+    const parent=[];
+    for(let i=0;i<nT+nB;i++) parent.push(i);
+    function find(x){ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; }
+    function union(a,b){ const ra=find(a), rb=find(b); if(ra!==rb) parent[ra]=rb; }
+    for(let i=0;i<nT;i++) for(let j=0;j<nB;j++) if(overlapMat[i][j]) union(i, nT+j);
+
+    const compMap=new Map(); // root -> {tops:[i...], bots:[j...]}
+    for(let i=0;i<nT;i++){ const r=find(i); if(!compMap.has(r)) compMap.set(r,{tops:[],bots:[]}); compMap.get(r).tops.push(i); }
+    for(let j=0;j<nB;j++){ const r=find(nT+j); if(!compMap.has(r)) compMap.set(r,{tops:[],bots:[]}); compMap.get(r).bots.push(j); }
+
     const topUsed=new Array(nT).fill(false), botUsed=new Array(nB).fill(false);
-    for(let i=0;i<nT;i++){
-      if(topMatchCount[i]===1){
-        const j=overlapMat[i].indexOf(true);
-        if(botMatchCount[j]===1){
-          addLoftWall(topContours[i].outer, botContours[j].outer, zTop, zBot);
-          topUsed[i]=true; botUsed[j]=true;
-        }
+
+    compMap.forEach(comp=>{
+      const {tops, bots}=comp;
+      if(tops.length===1 && bots.length===1){
+        addLoftWall(topContours[tops[0]].outer, botContours[bots[0]].outer, zTop, zBot);
+        topUsed[tops[0]]=true; botUsed[bots[0]]=true;
+        return;
       }
-    }
+      if(tops.length===1 && bots.length===2){
+        const oneOuter=topContours[tops[0]].outer;
+        const manyOuters=[botContours[bots[0]].outer, botContours[bots[1]].outer];
+        const split=buildTwoWaySplit(oneOuter, manyOuters);
+        if(split){
+          openChainLoft(split.arcsForOne[0], split.arcsForMany[0], zTop, zBot);
+          openChainLoft(split.arcsForOne[1], split.arcsForMany[1], zTop, zBot);
+          // r032: 「隠れた辺」(crossP-crossQ)自体をここで別途ロフトする壁は
+          // 不要(むしろ有害)だった。理由: このzBotの2つのbot輪郭(m0・m1)は
+          // 事前パスでcrossP/crossQを挿入済みのため、次の層(このzBotをtopとして
+          // 使う下段のaddLoftWall)がm0・m1それぞれの完全な閉ループを下向きに
+          // ロフトする際、m0側・m1側の両方が「自分自身の一部として」この
+          // crossP-crossQ辺を作る(m0とm1はこの辺で隣接している別々の実体なので、
+          // それぞれが独立してこの辺を1回ずつ計上する)。この2回で既にちょうど
+          // 水密(edge multiplicity=2)になっており、ここでさらに3本目の橋渡し面を
+          // 追加すると非多様体(3重使用)になってしまう(実データで確認・修正)。
+          topUsed[tops[0]]=true; botUsed[bots[0]]=true; botUsed[bots[1]]=true;
+          return;
+        }
+        console.warn('[既存躯体重複メッシュ] 1→2分岐の構築に失敗、両側キャップにフォールバック');
+      } else if(bots.length===1 && tops.length===2){
+        const oneOuter=botContours[bots[0]].outer;
+        const manyOuters=[topContours[tops[0]].outer, topContours[tops[1]].outer];
+        const split=buildTwoWaySplit(oneOuter, manyOuters);
+        if(split){
+          openChainLoft(split.arcsForMany[0], split.arcsForOne[0], zTop, zBot);
+          openChainLoft(split.arcsForMany[1], split.arcsForOne[1], zTop, zBot);
+          // r032: 上と対称の理由で、ここも「隠れた辺」の橋渡し面は追加しない
+          // (このzTopの2つのtop輪郭自身が、それぞれ上の層への接続で
+          // crossP-crossQ辺を1回ずつ計上し、合計2回で水密になる)。
+          topUsed[tops[0]]=true; topUsed[tops[1]]=true; botUsed[bots[0]]=true;
+          return;
+        }
+        console.warn('[既存躯体重複メッシュ] 2→1合流の構築に失敗、両側キャップにフォールバック');
+      } else if(tops.length>1 && bots.length>1){
+        console.warn('[既存躯体重複メッシュ] N:M(N>1,M>1)の複雑な合流/分岐、両側キャップにフォールバック(top×'+tops.length+', bot×'+bots.length+')');
+      } else if(tops.length===1 && bots.length>2){
+        console.warn('[既存躯体重複メッシュ] 1→'+bots.length+'(3個以上)の分岐、両側キャップにフォールバック');
+      } else if(bots.length===1 && tops.length>2){
+        console.warn('[既存躯体重複メッシュ] '+tops.length+'→1(3個以上)の合流、両側キャップにフォールバック');
+      }
+      // フォールバック: ここに来たtops/botsは未使用のまま残し、ループ後の
+      // 「未使用分は蓋」処理(従来の挙動)に委ねる
+    });
+
     topContours.forEach((item,i)=>{ if(!topUsed[i]) addFace(item.outer, item.holes, zTop, true); });
     botContours.forEach((item,j)=>{ if(!botUsed[j]) addFace(item.outer, item.holes, zBot, false); });
+  }
+  // r032(33回目セッション、「2階建て問題」対応・Aプラン、事前パス):
+  // layerContours[i]は「層iの下蓋」と「層i+1の上蓋」の両方から共有参照される
+  // オブジェクトである(r029のキャッシュ設計)。1↔2分岐/合流が絡む層をemitLayer
+  // (メインループ)の中でその場処理すると、crossP/crossQの挿入がその場限りの
+  // ローカル配列に留まり、「隣の単純な1:1区間」がまだ未augmented(挿入前)の
+  // 輪郭を使ってしまう。その結果、本来1本であるべき辺が「未挿入側の直接の1本」と
+  // 「挿入後側の2本に分かれた辺」という食い違う形になり、境界エッジ・非多様体エッジ
+  // が発生することをNode.jsで確認した(実データで再現・修正)。
+  // 対策: メインループの前に全層を一度スキャンし、1↔2分岐/合流が見つかった時点で
+  // buildTwoWaySplitを呼び、成功したらcrossP/crossQ挿入後の頂点配列で
+  // layerContours内の実体(.outer)を直接書き換えておく。これにより、隣接する
+  // 単純な1:1区間のaddLoftWallも、メインループ側のbuildTwoWaySplit呼び出しも、
+  // 常に同じ(挿入済みの)頂点配列を参照することになり、辺が正しく2回ずつ使われる
+  // (水密になる)。
+  for(let i=0;i<sortedDepths.length-1;i++){
+    const topC=layerContours[i], botC=layerContours[i+1];
+    if(topC.length===1 && botC.length===2){
+      if(contoursOverlap(topC[0], botC[0]) && contoursOverlap(topC[0], botC[1])){
+        const split=buildTwoWaySplit(topC[0].outer, [botC[0].outer, botC[1].outer]);
+        if(split){ topC[0].outer=split.oneOuterAug; botC[0].outer=split.manyAug[0]; botC[1].outer=split.manyAug[1]; }
+      }
+    } else if(topC.length===2 && botC.length===1){
+      if(contoursOverlap(topC[0], botC[0]) && contoursOverlap(topC[1], botC[0])){
+        const split=buildTwoWaySplit(botC[0].outer, [topC[0].outer, topC[1].outer]);
+        if(split){ botC[0].outer=split.oneOuterAug; topC[0].outer=split.manyAug[0]; topC[1].outer=split.manyAug[1]; }
+      }
+    }
   }
   for(let i=0;i<sortedDepths.length-1;i++){
     emitLayer(sortedDepths[i], sortedDepths[i+1], layerContours[i], layerContours[i+1]);
