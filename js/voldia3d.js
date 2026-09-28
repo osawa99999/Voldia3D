@@ -5298,14 +5298,25 @@ async function buildSimpleExtrudeGeom(frustums){
     // 天端・底面とも実体として残し、union結果の全三角形をそのままcyanへ出力する。
     const pos = resultMesh.vertProperties;
     const tv  = resultMesh.triVerts;
+    let removedDegenerate = 0; // r033b(34回目セッション、item3「通常計算側の同型不具合」対応):
+    // 29〜30回目セッションでbuildManifoldUnionGeom(配置モード側)にだけ入れていた
+    // 「regV()の量子化(mm丸め)で複数頂点が同一座標に吸着し、頂点IDが重複した
+    // 面積ゼロの縮退三角形が生まれることがある」ガードを、通常計算側(この関数)にも
+    // 同じパターンで追加する。this関数はfillInteriorHolesAtGLを通らないため
+    // item12本来の症状(穴埋め漏れ)は出ないはずで、Excel/PDF側もvoldia_export.jsの
+    // 縮退三角形フィルタ(最短辺100mm未満・面積/最長辺²<0.01のIGNORE化、31回目
+    // セッションr033)がほぼ確実に無害化してくれる想定だが、「同じコードパターンに
+    // 片方だけガードが無い」非対称自体をLandXML化の前提条件として解消しておく
+    // (マスター指示、34回目セッション)。
     for(let i=0;i<tv.length;i+=3){
       const i0=tv[i], i1=tv[i+1], i2=tv[i+2];
       const gi0 = regV(pos[i0*3], pos[i0*3+1], pos[i0*3+2]);
       const gi1 = regV(pos[i1*3], pos[i1*3+1], pos[i1*3+2]);
       const gi2 = regV(pos[i2*3], pos[i2*3+1], pos[i2*3+2]);
+      if(gi0===gi1 || gi1===gi2 || gi2===gi0){ removedDegenerate++; continue; }
       cyanIdx.push(gi0, gi1, gi2);
     }
-    console.log(`[MANIFOLD] union後三角形(通常計算)=${tv.length/3} 最終三角形=${cyanIdx.length/3}`);
+    console.log(`[MANIFOLD] union後三角形(通常計算)=${tv.length/3} 縮退除去=${removedDegenerate} 最終三角形=${cyanIdx.length/3}`);
   } finally {
     // WASMオブジェクトは自動GCされないため明示的に解放（メモリリーク防止）
     manifoldObjs.forEach(m => { try{ m.delete(); }catch(e){} });
