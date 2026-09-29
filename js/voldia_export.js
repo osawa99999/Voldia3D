@@ -749,15 +749,24 @@ async function openPlacementMode(){
       iframeEl.contentWindow.postMessage({type:'voldia-survey-points', points:__svPts_reopen,
         northAngleDeg: (typeof northAngleDeg==='number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0}, '*');
       // r044: 山留ラインも配置モードへ送る(測点と同じオフセット/スケール変換)
-      if(typeof yamadome !== 'undefined' && yamadome && yamadome.pts && yamadome.pts.length>=3){
-        const __ydLine_reopen = yamadome.pts.map(p=>({x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}));
-        // 追加2(2026-08-24 引継ぎ18回目): 配置モード側の地形レイキャストによる
-        // 高さ推測(同じ形状のオブジェクトと重なると誤ヒットして山留が消える不具合の
-        // 原因だった)をやめ、本体側の実寸値をそのまま渡す。
-        iframeEl.contentWindow.postMessage({type:'voldia-yamadome-line', points:__ydLine_reopen,
-          realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
-          batterDeg: window._lastYamadomeBatterDeg}, '*');
-      }
+      // r096(34回目セッション、マスター報告「山留を消しても配置モードにテクスチャが
+      // 残留する」不具合対応): [FIX 19回目]で紫壁面(purple-walls)に施した修正と
+      // 全く同じ原因だった——対象が無くなった(yamadome===null)場合にここの
+      // postMessage自体をスキップしていたため、配置モード側に「もう無い」という
+      // 情報が一度も届かず、古いテクスチャが消えずに残っていた。しかも[FIX 19回目]
+      // のコメント自身が「以前は再計算時のみ更新される山留の反省を活かす」と
+      // 書いていたにもかかわらず、山留自身はその教訓を反映されないまま放置されて
+      // いた。purple-wallsと同じく、山留の有無にかかわらず必ず送り、無ければ
+      // points:[]を送って配置モード側で確実にクリアさせる。
+      const __ydLine_reopen = (typeof yamadome !== 'undefined' && yamadome && yamadome.pts && yamadome.pts.length>=3)
+        ? yamadome.pts.map(p=>({x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}))
+        : [];
+      // 追加2(2026-08-24 引継ぎ18回目): 配置モード側の地形レイキャストによる
+      // 高さ推測(同じ形状のオブジェクトと重なると誤ヒットして山留が消える不具合の
+      // 原因だった)をやめ、本体側の実寸値をそのまま渡す。
+      iframeEl.contentWindow.postMessage({type:'voldia-yamadome-line', points:__ydLine_reopen,
+        realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
+        batterDeg: window._lastYamadomeBatterDeg}, '*');
       // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示→26回目セッションで紫に移設): 紫壁面ハッチも
       // 山留と同じ考え方で配置モードへ送る。座標は既にfrustum正規化mm(=山留と同じ
       // 基準)なのでSを掛けるだけで良い(SC*p.x等、送信側で変換済み)。
@@ -786,12 +795,14 @@ async function openPlacementMode(){
         iframeEl.contentWindow.postMessage({type:'voldia-survey-points', points:__svPts_first,
           northAngleDeg: (typeof northAngleDeg==='number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0}, '*');
         // r044: 山留ラインも配置モードへ送る(測点と同じオフセット/スケール変換)
-        if(typeof yamadome !== 'undefined' && yamadome && yamadome.pts && yamadome.pts.length>=3){
-          const __ydLine_first = yamadome.pts.map(p=>({x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}));
-          iframeEl.contentWindow.postMessage({type:'voldia-yamadome-line', points:__ydLine_first,
-            realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
-            batterDeg: window._lastYamadomeBatterDeg}, '*');
-        }
+        // r096(34回目セッション): 上のreopen側と同じ理由で、初回オープン時も
+        // 山留の有無にかかわらず必ず送る(無ければpoints:[])。
+        const __ydLine_first = (typeof yamadome !== 'undefined' && yamadome && yamadome.pts && yamadome.pts.length>=3)
+          ? yamadome.pts.map(p=>({x:(pxToMm(p.x)-offsetX)*S, z:(pxToMm(p.y)-offsetY)*S}))
+          : [];
+        iframeEl.contentWindow.postMessage({type:'voldia-yamadome-line', points:__ydLine_first,
+          realYTop: window._lastYamadomeRealYTop, realYBot: window._lastYamadomeRealYBot,
+          batterDeg: window._lastYamadomeBatterDeg}, '*');
         // 6D配置モード反映(2026-08-29 引継ぎ18回目マスター指示)
         // [FIX 19回目] 上と同じ理由で、空でも必ず送る。
         iframeEl.contentWindow.postMessage({type:'voldia-purple-walls', positions: (window._lastPurpleWalls&&window._lastPurpleWalls.positions)||[], uv: (window._lastPurpleWalls&&window._lastPurpleWalls.uv)||[]}, '*');
@@ -1071,33 +1082,16 @@ function _evRunAnalysis(mode, glbArrayBuffer){
               new THREE.Vector3().subVectors(f.v2,f.v0)
             ).length()*0.5;
             const areaRatio = maxEdge>1e-9 ? (triArea/(maxEdge*maxEdge)) : 0;
-            // 【問題A・32回目セッション追記・マスター実機報告「②と⑤は同一平面のはずなのに
-            // 別クラスタになる」への対応・真因特定】上のスリバー判定はtypeを直接'IGNORE'に
-            // 書き換えていたため、この面が丸ごとfaces配列から消え、後続の辺共有隣接グラフ
-            // (Union-Find)からも同時に消えていた。ところが実機データを解析したところ、
-            // このスリバー面が「本物の同一平面上の2つの面(例:②③)を繋ぐ唯一の辺」を
-            // 担っているケースがあり、スリバーを消すと同時にその2面の隣接関係も失われ、
-            // 本来1つにまとまるべき面が孤立クラスタとして取り残されていた。
-            // 「面積・数量には数えない」ことと「隣接グラフから消す」ことを同じ1回の操作
-            // (type書き換え→配列除外)でやっていたのが構造的な原因。この2つの役割を
-            // isSliverフラグで分離し、スリバー面はtypeをSLOPE系のまま維持して隣接グラフの
-            // 「橋」としては機能させつつ、面積・高さ集計とサブフェイス表示からは除外する。
-            if(minEdgeMm < SLIVER_MIN_EDGE_MM || areaRatio < SLIVER_AREA_RATIO) f.isSliver=true;
+            if(minEdgeMm < SLIVER_MIN_EDGE_MM || areaRatio < SLIVER_AREA_RATIO) f.type='IGNORE';
           }
         });
 
-        // ★変更: スリバー面(isSliver)はtypeをSLOPE系のまま残すため、ここでのフィルタは
-        // 従来通り「本物のIGNORE(法面としての傾き自体がない疑似壁など)」だけを除外する。
-        // スリバー面は隣接グラフ構築のためにこの時点ではまだ含めておく。
-        let facesForGraph;
         if(mode==='structure'){
-          facesForGraph=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
+          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
         }else{
-          facesForGraph=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
+          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
         }
-        faces=facesForGraph;
-        // ★変更: 総面積にはスリバー面(橋渡し用に残しているだけの面)を含めない。
-        faces.forEach(f=>{ if(!f.isSliver) _evTotalModelArea+=f.projArea; });
+        faces.forEach(f=>_evTotalModelArea+=f.projArea);
 
         const edges={};
         faces.forEach(f=>{
@@ -1124,11 +1118,7 @@ function _evRunAnalysis(mode, glbArrayBuffer){
                 }else{
                   uf.union(f1.id,f2.id);
                 }
-              }else if(f1.type.includes('SLOPE') && !f1.isSliver && !f2.isSliver){
-                // ★変更: スリバー面(退化三角形)は法線・辺方向のノイズが大きく、これを
-                // 使って隣の本物の面の入隅/出隅を判定すると誤判定の元になるため、
-                // どちらかがスリバーの場合はこの判定自体をスキップする(dot>0.99による
-                // 上のマージ判定は影響を受けない=橋渡しは従来通り機能する)。
+              }else if(f1.type.includes('SLOPE')){
                 const inPlaneVec=new THREE.Vector3().crossVectors(f1.normal,list[0].vDir).normalize();
                 const sign=f2.normal.dot(inPlaneVec);
                 if(sign<-0.001){ f1.hasConcave=true; f2.hasConcave=true; }
@@ -1141,19 +1131,8 @@ function _evRunAnalysis(mode, glbArrayBuffer){
         const clusters={};
         faces.forEach(f=>{
           const rootId=uf.find(f.id);
-          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[], renderFaces:[]};
+          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[]};
           const c=clusters[rootId];
-          // ★32回目セッション追記2: マスター実機報告「PNGで4-2と4-3の間に分割線が
-          // 残る」への対応。前回の修正は「面積・高さ集計」と「隣接グラフの橋渡し」の
-          // 役割は分離したが、「3D描画用ジオメトリ」からもスリバー面を一緒に除外して
-          // いたため、スリバー面が元々埋めていた場所に本物の小さな隙間(穴)ができ、
-          // EdgesGeometryがその穴の縁を正直に境界線として描いてしまっていた
-          // (②と③が同一平面という事実自体には変わりなく、r072が想定していた
-          // 「coplanarな内部辺は自動省略される」仕組みが、隙間のせいで機能しなかった
-          // だけ)。renderFacesにはスリバーも含めて隙間なく埋め、面積・高さ集計と
-          // Excel/PDFのサブフェイス行(groupedFaces)からは引き続き除外する。
-          c.renderFaces.push(f);
-          if(f.isSliver) return;
           c.projArea+=f.projArea; c.hSum+=f.calcHeight*f.projArea; c.faceCount++;
           c.groupedFaces.push(f);
           if(f.hasConvex) c.hasConvex=true;
@@ -1184,10 +1163,7 @@ function _evRunAnalysis(mode, glbArrayBuffer){
           const hexColor='#'+highlightColor.getHexString();
 
           const positions=[];
-          // ★変更: 描画ジオメトリはgroupedFaces(数量集計用・スリバー除外済み)ではなく
-          // renderFaces(スリバーも含む・隙間なし)から作る。数量・サブフェイス行への
-          // 影響はゼロ(そちらは引き続きgroupedFacesを参照)。
-          c.renderFaces.forEach(f=>{
+          c.groupedFaces.forEach(f=>{
             positions.push(f.v0.x,f.v0.y,f.v0.z, f.v1.x,f.v1.y,f.v1.z, f.v2.x,f.v2.y,f.v2.z);
           });
           const geom=new THREE.BufferGeometry();
