@@ -2849,6 +2849,13 @@ async function runCalc(mode){
     // r075: 通常計算後にも配置モードボタンを表示できるようにする(GL平面+押し出しオブジェクトの固定配置モード)
     { const _bp2=document.getElementById('btn-placement'); if(_bp2)_bp2.classList.add('show'); }
     window._lastCalcModeForPlacement = mode; // r075: openPlacementMode()がどちらのGLB生成経路を使うか判定するために保持
+    // r098(34回目セッション、Land Logic用): LandXML向け試験出力(js/voldia_landlogic.js、
+    // Shift+Lトリガー)が、この土量計算で確定したfrustum一式(法面勾配込み)と
+    // 正規化オフセットをそのまま再利用できるよう、ここでキャッシュしておく。
+    // 既存の表示/積算ロジック自体には一切影響しない(参照するだけの追加行)。
+    window._lastCalcFrustumsForLandLogic = fs;
+    window._lastCalcOffsetXForLandLogic = _yamadomeOffsetX;
+    window._lastCalcOffsetYForLandLogic = _yamadomeOffsetY;
     // r070: エビル統合 — 通常計算/土量計算それぞれに対応するデータ出力解析ボタンを表示
     if(mode==='normal'){ const _ba=document.getElementById('btn-analyze-structure'); if(_ba)_ba.classList.add('show'); }
     if(mode==='doboku'){ const _be=document.getElementById('btn-analyze-earthwork'); if(_be)_be.classList.add('show'); }
@@ -4484,8 +4491,14 @@ function _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC)
   }
   return { positions: new Float32Array(positions), uv: new Float32Array(uvs) };
 }
-async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY){
+async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
   if(!frustums || !frustums.length) return null;
+  // r098(34回目セッション、Land Logic用): 通常はGL(y=0)の蓋を除去する(土量計算の
+  // 「上から覗き込む」表示仕様)が、Land Logic側は既存躯体グループに対して
+  // 「蓋は残し、床を消す」の逆仕様が必要なため、opts.removeGLCap=falseで
+  // 除去そのものをスキップできるようにする。省略時(既存の全呼び出し)は
+  // これまで通りtrue扱いなので、既存の表示/積算ロジックへの影響は無い。
+  const _removeGLCap = !(opts && opts.removeGLCap === false);
 
   // r042: r041では frustums._offsetX/_offsetY (配列に生やしたプロパティ)を頼りに
   // していたが、runCalc内でfsが何度もfs=fs.map(...)/filter(...)で再代入される
@@ -4842,7 +4855,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     for(let i=0;i<tv.length;i+=3){
       const i0=tv[i], i1=tv[i+1], i2=tv[i+2];
       const y0=pos[i0*3+1], y1=pos[i1*3+1], y2=pos[i2*3+1];
-      if(Math.abs(y0)<EPS_Y && Math.abs(y1)<EPS_Y && Math.abs(y2)<EPS_Y){ removedCap++; continue; }
+      if(_removeGLCap && Math.abs(y0)<EPS_Y && Math.abs(y1)<EPS_Y && Math.abs(y2)<EPS_Y){ removedCap++; continue; }
       const gi0 = regV(pos[i0*3], pos[i0*3+1], pos[i0*3+2]);
       const gi1 = regV(pos[i1*3], pos[i1*3+1], pos[i1*3+2]);
       const gi2 = regV(pos[i2*3], pos[i2*3+1], pos[i2*3+2]);
