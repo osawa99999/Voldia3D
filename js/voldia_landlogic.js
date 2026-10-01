@@ -64,12 +64,25 @@
 
     // 通常(blue)+山留(purple): 傾斜を強制ON(土量計算では山留のみ強制垂直になっているため上書き)
     const excavGroup = fs.filter(f=>f.color!=='gray').map(f=>Object.assign({}, f, {noSlope:false}));
-    // 既存躯体(gray): 傾斜を強制ON + 下端をサイト最深+マージンまで延長
+    // 既存躯体(gray): 「元の高さ分だけ傾斜」+「そこから下は元の断面のまま垂直に延長」の2段構成。
+    // r003(実機検証で判明・修正): 単純にDを全体最深まで拡大すると、傾斜オフセット計算式
+    // (offsetDist = OD + ratio*D*勾配比)のDにもその巨大な値が使われてしまい、天端の
+    // オフセットが実際の構造物の高さに対して不釣り合いに巨大化し、「逆勾配」に見える
+    // 異常な形になっていた。傾斜は元のD(実際の高さ)のまま計算させ、元の下端から先は
+    // noSlope:trueの別frustumとして元の断面(OD)のまま垂直に延長する。
     const grayGroupSrc = fs.filter(f=>f.color==='gray');
-    const grayGroup = grayGroupSrc.map(f=>Object.assign({}, f, {
-      noSlope:false,
-      D: siteMaxDepthMm + MARGIN_MM + (f.tl||0)
-    }));
+    const grayGroup = [];
+    grayGroupSrc.forEach(f=>{
+      const origTl = f.tl||0, origD = f.D;
+      const origBotMm = origD - origTl; // 元の下端(GLからの深さmm)
+      const targetBotMm = siteMaxDepthMm + MARGIN_MM;
+      grayGroup.push(Object.assign({}, f, { noSlope:false })); // ①元の高さ分、傾斜あり、Dは元のまま
+      if(targetBotMm > origBotMm){
+        const extTl = origTl - origD; // 延長パーツの天端=元の下端の位置になるようtlを設定
+        const extD  = targetBotMm + extTl;
+        grayGroup.push(Object.assign({}, f, { noSlope:true, OD:f.OD, tl:extTl, D:extD })); // ②元の断面のまま垂直延長
+      }
+    });
 
     if(!excavGroup.length){
       console.warn('[LAND-LOGIC] 通常/山留オブジェクトが1つもありません');
@@ -77,7 +90,12 @@
     }
     console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayGroup.length}個 (下端延長=${siteMaxDepthMm+MARGIN_MM}mm)`);
 
-    const retExcav = await buildManifoldUnionGeom(excavGroup, true, offsetX, offsetY);
+    // r002(実機検証で判明・修正): Manifold-3Dの`Manifold`クラスは完全に閉じた
+    // ソリッドしか受け付けない。GL蓋を除去した「上から覗き込む」表示用の開いた
+    // 器のままdifferenceに渡すと即座に"Not manifold"で例外になる。差分演算は
+    // 必ず閉じたソリッド同士(removeGLCap:false)で行い、蓋の除去は差分結果に
+    // 対して最後にこちらで手動で行う。
+    const retExcav = await buildManifoldUnionGeom(excavGroup, true, offsetX, offsetY, {removeGLCap:false});
     if(!retExcav){
       console.warn('[LAND-LOGIC] 通常+山留グループのビルドに失敗しました');
       return;
@@ -109,15 +127,19 @@
       }
     }
 
-    // 縮退三角形(頂点ID重複)の簡易除外(item3と同じ考え方の安全網)
+    // 差分完了後、最後にGL(y=0)の蓋だけ落として「上から覗き込む」表示にする
+    // (buildManifoldUnionGeom側の自動除去は使わず、ここで手動で行う)
+    const EPS_Y = 1e-5;
     const cleanIdx = [];
-    let removedDegenerate = 0;
+    let removedCapFinal = 0, removedDegenerate = 0;
     for(let i=0;i<finalIndices.length;i+=3){
       const a=finalIndices[i], b=finalIndices[i+1], c=finalIndices[i+2];
       if(a===b || b===c || c===a){ removedDegenerate++; continue; }
+      const y0=finalPositions[a*3+1], y1=finalPositions[b*3+1], y2=finalPositions[c*3+1];
+      if(Math.abs(y0)<EPS_Y && Math.abs(y1)<EPS_Y && Math.abs(y2)<EPS_Y){ removedCapFinal++; continue; }
       cleanIdx.push(a,b,c);
     }
-    console.log(`[LAND-LOGIC] 最終三角形=${cleanIdx.length/3} (縮退除去=${removedDegenerate})`);
+    console.log(`[LAND-LOGIC] 最終三角形=${cleanIdx.length/3} (蓋除去=${removedCapFinal} 縮退除去=${removedDegenerate})`);
 
     const glbBytes = encodeMultiGLB([{
       positions: finalPositions,
