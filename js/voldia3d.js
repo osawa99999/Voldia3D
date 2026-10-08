@@ -49,8 +49,9 @@ function isPointInsideFrustumExcavation(pt, f) {
   // 【問題B対応】以前はここだけ window._vertexQuantMm+1 という独自の固定値を
   // 使っていたが、buildManifoldUnionGeom側のcontourOf()と値が食い違う余地が
   // あったため、共有定数DOBOKU_VERTICAL_TAPER_FIXED_MMに統一。
+  // r099: frustum個別のテーパー量(f.taperMm)があればそれを優先(Land Logic用。既定は従来どおり共有定数)
   const taper = f.noSlope
-    ? DOBOKU_VERTICAL_TAPER_FIXED_MM
+    ? (typeof f.taperMm === 'number' ? f.taperMm : DOBOKU_VERTICAL_TAPER_FIXED_MM)
     : f.D * getSlopeRatio();
   let offsetDist = f.OD + ratio * taper;
   if(offsetDist < 0) offsetDist = 0;
@@ -2046,6 +2047,72 @@ function getAllFrustums(){
   result._offsetY=minY;
   return result;
 }
+// ============================================================
+// r100(36回目): 既存躯体(グレー)「底面∞」の共通関数群
+// 仕様(マスター合意): 3Dイメージの土量計算(doboku)系統のみ、既存躯体の下端を
+// 「サイト最深の下端」にちょうど(余白0)揃えて延長する。通常計算には適用しない。
+// 余白0にする理由: (1)_calcExistingStructureOverlapVolumeは全frustumのmaxDepthまで
+// 10mm刻みでスライスするため、最深より深く延ばすと最終スライスの切れ方が変わり
+// 体積がズレうる (2)buildExistingStructureOverlapMeshのブレークポイントはSetで
+// 許容誤差なしの重複排除なので、下端が最深とビット一致していないと極薄区間ができる。
+// → extendGrayToBottomMmで「D-(tl||0)===最深」のビット一致を作る(小数mmで丸め誤差により
+//   不可能な場合のみ+0.01mmの保険。整数mmでは常に完全一致)。
+// 体積計算本体(_calcVolumeFallback等)は一切変更していない(入力のDを延ばすだけ)。
+// 呼び出し元: runCalc(doboku) / voldia_export.js の buildVoldiaGLBBytes・
+// buildExistingStructureOverlapGLBBytes。最深値の算出規則はここに一本化する。
+// ============================================================
+// list: 「botDepth = f.D-(f.tl||0)」が成り立つ座標系に揃ったfrustum配列
+function siteDeepestBottomMm(list){
+  let deepest = 0;
+  (list||[]).forEach(f=>{
+    const d = f.D - (f.tl||0);
+    if(d > deepest) deepest = d;
+  });
+  return deepest;
+}
+// 既存躯体1個の下端をdeepestまで延長(浅い場合のみ)。D-(tl||0)===deepestを保証する
+function extendGrayToBottomMm(f, deepest){
+  const tl = f.tl||0;
+  if(!(deepest > f.D - tl)) return f;
+  let D = deepest + tl;
+  for(let i=0; i<4 && (D - tl) !== deepest; i++) D += deepest - (D - tl);
+  if((D - tl) === deepest) return {...f, D};
+  // 小数mm入力(0.1mm刻み等)では、浮動小数の丸めで「D-tl」を最深と完全一致させられない
+  // ケースがある(36回目のNode検証で0.1mm刻み入力の約1.3%。整数mmは0件)。その場合に
+  // 1e-13級の近接ブレークポイントができると輪郭評価(EPS=1e-3)が壊れるため、確実に
+  // 別の深さと見なせる0.01mmだけ深くする。体積への影響は最大でも0.01mm×重複面積程度。
+  const D2 = deepest + tl + GRAY_INF_FALLBACK_MARGIN_MM;
+  return {...f, D: D2, _grayInfMargin: true};
+}
+const GRAY_INF_FALLBACK_MARGIN_MM = 0.01;
+// 生frustum(getAllFrustums直後)から、runCalc(doboku)と同じ規則で最深値を求める
+// (buildVoldiaGLBBytes用。runCalc本体は処理済みfsをsiteDeepestBottomMmに直接渡す)
+function computeDobokuSiteBottomFromRaw(rawFs, concVal, glOffMm){
+  const glOff = glOffMm || 0;
+  const list = [];
+  (rawFs||[]).forEach(f=>{
+    const tl = f.tl||0;
+    if(f.color === 'gray'){
+      const Dg = f.D - concVal;                 // 描いた形状そのまま(捨てコンなし)
+      if(!(Dg > 0)) return;
+      let tlg = tl, Dgg = Dg;
+      if(glOff){
+        tlg = Math.min(tl, glOff);
+        Dgg = tlg - (tl - Dg);                  // 下端は不動(r016)
+        if(!(Dgg > 0)) return;
+      }
+      list.push({D: Dgg, tl: tlg});
+    }else{
+      if(!(tl - f.D + concVal < 0)) return;     // runCalc同様: 下端がGLより上は除外
+      let d = (tl === 0) ? f.D : f.D - tl;
+      if(!(d > 0)) return;
+      if(glOff){ d = d + glOff; if(!(d > 0)) return; }
+      list.push({D: d, tl: 0});
+    }
+  });
+  return siteDeepestBottomMm(list);
+}
+
 function mm3ToM3(v){return v/1e9;}
 
 // 解析的単独体積（錐台公式）
@@ -2735,6 +2802,14 @@ async function runCalc(mode){
   }
   // r003: 上記モード別調整から除外しておいた既存躯体(グレー)をここで合流。
   // 自己交差チェックなど、色を問わず必要な後続処理はここから先で通常通り適用される。
+  // r100(36回目): 既存躯体の底面∞。土量計算(doboku)のみ、既存躯体の下端を
+  // サイト最深の下端(余白0)まで延長する。ここで延ばしたfsから体積計算(A)(B)・
+  // 3D表示・_lastGeoms系が全て派生するため、この1箇所で本体側は完結する。
+  if(mode==='doboku' && _grayFsUntouched.length){
+    const _siteBot = siteDeepestBottomMm(fs.concat(_grayFsUntouched));
+    _grayFsUntouched = _grayFsUntouched.map(f=>extendGrayToBottomMm(f, _siteBot));
+    console.log('[GRAY-INF] 既存躯体の底面を最深まで延長 最深=' + _siteBot + 'mm 既存躯体=' + _grayFsUntouched.length + '個(うち丸め誤差回避の+0.01mm適用=' + _grayFsUntouched.filter(f=>f._grayInfMargin).length + '個)');
+  }
   fs = fs.concat(_grayFsUntouched);
   // r013: 自己交差の事前検出（第二段：計算モード別の最終OD/D/noSlopeが
   // 確定した後の本判定）。ここまでのfsは、mode==='doboku'ならnoSlope強制
@@ -2768,6 +2843,13 @@ async function runCalc(mode){
   // 「値は参考値です」トーストはres-box常設の.vol-cautionに一本化するため廃止。
   // 代わりに、土量計算で紫(垂直面強制)オブジェクトが存在する場合のみ、起動
   // (ページ読み込み)毎に1回だけ目立つ横長トーストで注意喚起する。
+  // r100(36回目マスター仕様): 土量計算の実行時、既存躯体が1個以上あれば毎回トーストを出す。
+  // 紫の初回警告と同時に出る場合は、共有toastが上書きされないよう上部専用toastTopに出す。
+  if(mode==='doboku' && fs.some(f=>f.color==='gray')){
+    const _grayMsg = '既存躯体の底面は、最深の掘削底まで∞(延長)として扱われます';
+    if(!_purpleCalcWarnShown && fs.some(f=>f.color==='purple')) toastTop(_grayMsg, 4000);
+    else toast(_grayMsg, 3600, 'graystruct');
+  }
   if(mode==='doboku' && !_purpleCalcWarnShown && fs.some(f=>f.color==='purple')){
     _purpleCalcWarnShown = true;
     toast('紫色に設定したオブジェクトは強制的に垂直面となります。', 4800, 'large');
@@ -4008,7 +4090,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r029(base:VoldiaM r069)";
+const VOLDIA3D_VER = "Voldia-3D-r100(base:VoldiaM r069)"; // r100(36回目): 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -4581,7 +4663,10 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     const top = -(f.tl||0);
     const fromTop = zMm - top;
     const ratio = 1.0 - fromTop / f.D; // 天端でratio=1.0、底面でratio=0
-    const taper = f.noSlope ? DOBOKU_VERTICAL_TAPER_FIXED_MM : f.D * getSlopeRatio();
+    // r099(35回目): frustum個別のテーパー量f.taperMm(数値)があれば優先。未指定なら従来どおり
+    // 共有定数DOBOKU_VERTICAL_TAPER_FIXED_MM(15mm)。Land Logicが「微テーパー量=頂点量子化単位の
+    // 整数倍」にして、格子丸めで10mm/20mmに割れるのを避けるために使う。既存の呼び出しは無影響。
+    const taper = f.noSlope ? (typeof f.taperMm === 'number' ? f.taperMm : DOBOKU_VERTICAL_TAPER_FIXED_MM) : f.D * getSlopeRatio();
     const dist = Math.max(0, f.OD + ratio * taper);
     const q = window._vertexQuantMm;
     const minOffsetMm = (f.noSlope && q > 0 && ratio > 0.999) ? (q / 2 + 1) : 0;

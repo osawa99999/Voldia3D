@@ -28,6 +28,88 @@
 // ════════════════════════════════════════════════════════════
 
 (function(){
+  // r004(実機検証で判明・修正): 既存躯体を「傾斜frustum」+「noSlope:true延長frustum」の
+  // 2個をbuildManifoldUnionGeomのUnionで繋ぐ方式は、noSlope全般に自動で乗る
+  // DOBOKU_VERTICAL_TAPER_FIXED_MM(数値安定化用の固定15mmテーパー)が延長パーツ側にも
+  // 独立にかかってしまい、傾斜パーツの下端(offset=OD)と延長パーツの上端
+  // (offset=OD+15mm)の間に15mm程度のズレが生まれ、Unionでの溶接が甘くなって
+  // 「2つの物体」に見える不具合があった(マスター実機報告・2026-09-29)。
+  // 対策: Unionに頼らず、offsetPolygon()を直接2回呼んで(天端用・元の下端用)
+  // 1つの頂点配列で「天端キャップ→傾斜側面→元の下端(=延長部の断面と共有、継ぎ目なし)
+  // →垂直側面→深い底キャップ」を直接縫う、単一の水密メッシュとして構築する。
+  function buildGrayPlugMesh(f, targetBotMm){
+    if(f.holesMm && f.holesMm.length){
+      console.warn('[LAND-LOGIC] 穴(holesMm)を持つ既存躯体は今回未対応のため、このオブジェクトはスキップします');
+      return null;
+    }
+    const SC = 0.001; // mm→m
+    const origD = f.D, origTl = f.tl||0;
+    
+    // 【AIS修正】CSG演算での共平面（重なり）干渉を防ぐため、1mmのブーリアンマージンを追加
+    const BOOLEAN_MARGIN = 1.0; 
+    const topOffset = (f.OD||0) + origD * getSlopeRatio() + BOOLEAN_MARGIN;
+    const botOffset = (f.OD||0) + BOOLEAN_MARGIN;
+    const topRing = offsetPolygon(f.ptsMm, topOffset);
+    const botRing = offsetPolygon(f.ptsMm, botOffset); // 元の下端。延長部の断面としてそのまま共有する
+    const n = topRing.length;
+    if(botRing.length !== n){
+      console.warn('[LAND-LOGIC] 天端/下端オフセットで頂点数が変化した(自己交差)ため、このオブジェクトはスキップします');
+      return null;
+    }
+    
+    // 【AIS修正】天端も確実に突き抜けさせるために上方向へマージンを追加
+    const yTop  = (-origTl - BOOLEAN_MARGIN) * SC;
+    const yBot  = (origD - origTl) * SC;
+    const yDeep = (targetBotMm - origTl) * SC;
+
+    const positions = [];
+    topRing.forEach(p=>positions.push(p.x*SC, yTop, p.y*SC));
+    botRing.forEach(p=>positions.push(p.x*SC, yBot, p.y*SC));
+    botRing.forEach(p=>positions.push(p.x*SC, yDeep, p.y*SC)); // 深い底(XYはbotRingと同一)
+    
+    // 【AIS修正】側面①のねじれ解消用。四角形の重心(Center)の頂点インデックス開始位置を定義
+    const T=0, B=n, D=2*n, C=3*n; 
+    
+    // 重心(Center)頂点の計算と追加 (側面①用)
+    for(let i=0; i<n; i++){
+        const j = (i+1)%n;
+        const px = (topRing[i].x + topRing[j].x + botRing[j].x + botRing[i].x) / 4 * SC;
+        const py = (yTop + yTop + yBot + yBot) / 4;
+        const pz = (topRing[i].y + topRing[j].y + botRing[j].y + botRing[i].y) / 4 * SC;
+        positions.push(px, py, pz);
+    }
+
+    const idx = [];
+
+    const flatTop=[]; topRing.forEach(p=>flatTop.push(p.x,p.y));
+    const flatBot=[]; botRing.forEach(p=>flatBot.push(p.x,p.y));
+
+    // 天端キャップ(上向き)
+    const capTop = earcut(flatTop, null, 2);
+    for(let i=0;i<capTop.length;i+=3){ idx.push(T+capTop[i], T+capTop[i+2], T+capTop[i+1]); }
+
+    // 側面①: 天端→元の下端(傾斜) - 【AIS修正】対角線分割をやめ、重心(Center)に向かう4分割でねじれを殺す
+    for(let i=0;i<n;i++){ const j=(i+1)%n;
+      const c_idx = C + i;
+      // 面の表裏を維持するため、外周のループ順 (T+i -> T+j -> B+j -> B+i -> T+i) に沿って三角形を張る
+      idx.push(T+i, T+j, c_idx);
+      idx.push(T+j, B+j, c_idx);
+      idx.push(B+j, B+i, c_idx);
+      idx.push(B+i, T+i, c_idx);
+    }
+    
+    // 側面②: 元の下端→深い底(垂直延長、上下でXYが完全に同一なためねじれは生じない。元のまま)
+    for(let i=0;i<n;i++){ const j=(i+1)%n;
+      idx.push(B+i, D+j, D+i);
+      idx.push(B+i, B+j, D+j);
+    }
+    // 深い底キャップ(下向き)
+    const capDeep = earcut(flatBot, null, 2);
+    for(let i=0;i<capDeep.length;i+=3){ idx.push(D+capDeep[i], D+capDeep[i+1], D+capDeep[i+2]); }
+
+    return { vertProperties: new Float32Array(positions), triVerts: new Uint32Array(idx), numProp: 3 };
+  }
+
   function _llReady(){
     const modal = document.getElementById('calc-modal');
     return !!(modal && modal.classList.contains('show') && window._lastCalcModeForPlacement === 'doboku');
@@ -64,31 +146,17 @@
 
     // 通常(blue)+山留(purple): 傾斜を強制ON(土量計算では山留のみ強制垂直になっているため上書き)
     const excavGroup = fs.filter(f=>f.color!=='gray').map(f=>Object.assign({}, f, {noSlope:false}));
-    // 既存躯体(gray): 「元の高さ分だけ傾斜」+「そこから下は元の断面のまま垂直に延長」の2段構成。
-    // r003(実機検証で判明・修正): 単純にDを全体最深まで拡大すると、傾斜オフセット計算式
-    // (offsetDist = OD + ratio*D*勾配比)のDにもその巨大な値が使われてしまい、天端の
-    // オフセットが実際の構造物の高さに対して不釣り合いに巨大化し、「逆勾配」に見える
-    // 異常な形になっていた。傾斜は元のD(実際の高さ)のまま計算させ、元の下端から先は
-    // noSlope:trueの別frustumとして元の断面(OD)のまま垂直に延長する。
+    // 既存躯体(gray): r004(実機検証で判明・修正)。buildGrayPlugMeshで1個ずつ、
+    // Unionに頼らない単一の水密メッシュとして直接構築する(詳細は関数のコメント参照)。
+    const targetBotMm = siteMaxDepthMm + MARGIN_MM;
     const grayGroupSrc = fs.filter(f=>f.color==='gray');
-    const grayGroup = [];
-    grayGroupSrc.forEach(f=>{
-      const origTl = f.tl||0, origD = f.D;
-      const origBotMm = origD - origTl; // 元の下端(GLからの深さmm)
-      const targetBotMm = siteMaxDepthMm + MARGIN_MM;
-      grayGroup.push(Object.assign({}, f, { noSlope:false })); // ①元の高さ分、傾斜あり、Dは元のまま
-      if(targetBotMm > origBotMm){
-        const extTl = origTl - origD; // 延長パーツの天端=元の下端の位置になるようtlを設定
-        const extD  = targetBotMm + extTl;
-        grayGroup.push(Object.assign({}, f, { noSlope:true, OD:f.OD, tl:extTl, D:extD })); // ②元の断面のまま垂直延長
-      }
-    });
+    const grayMeshes = grayGroupSrc.map(f=>buildGrayPlugMesh(f, targetBotMm)).filter(Boolean);
 
     if(!excavGroup.length){
       console.warn('[LAND-LOGIC] 通常/山留オブジェクトが1つもありません');
       return;
     }
-    console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayGroup.length}個 (下端延長=${siteMaxDepthMm+MARGIN_MM}mm)`);
+    console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayMeshes.length}個 (下端延長=${targetBotMm}mm)`);
 
     // r002(実機検証で判明・修正): Manifold-3Dの`Manifold`クラスは完全に閉じた
     // ソリッドしか受け付けない。GL蓋を除去した「上から覗き込む」表示用の開いた
@@ -104,27 +172,27 @@
     let finalPositions = retExcav.positions;
     let finalIndices = retExcav.cyanIndices;
 
-    if(grayGroup.length){
-      const retGray = await buildManifoldUnionGeom(grayGroup, true, offsetX, offsetY, {removeGLCap:false});
-      if(!retGray){
-        console.warn('[LAND-LOGIC] 既存躯体グループのビルドに失敗しました。通常+山留のみで出力します');
+    if(grayMeshes.length){
+      const wasm = await _getManifoldWasm();
+      const { Manifold, Mesh } = wasm;
+      const manExcav = new Manifold(new Mesh({vertProperties:retExcav.positions, triVerts:retExcav.cyanIndices, numProp:3}));
+      const manGrayList = grayMeshes.map(m=>new Manifold(new Mesh(m)));
+      console.log('[LAND-LOGIC] 通常+山留 status=', manExcav.status(), ' 既存躯体 status=', manGrayList.map(m=>m.status()));
+      // 既存躯体が複数ある場合はまずそれらをUnion(別々の実体同士の結合なので、
+      // 1個の実体内で継ぎ目を作る今回の問題とは別物で、Union自体は問題ない)
+      const manGrayUnioned = manGrayList.length>1 ? Manifold.union(manGrayList) : manGrayList[0];
+      const diff = Manifold.difference([manExcav, manGrayUnioned]);
+      console.log('[LAND-LOGIC] difference status=', diff.status());
+      if(diff.status() !== 'NoError'){
+        console.warn('[LAND-LOGIC] difference演算がエラーを返したため、通常+山留のみで出力します:', diff.status());
       }else{
-        const wasm = await _getManifoldWasm();
-        const { Manifold, Mesh } = wasm;
-        const manExcav = new Manifold(new Mesh({vertProperties:retExcav.positions, triVerts:retExcav.cyanIndices, numProp:3}));
-        const manGray  = new Manifold(new Mesh({vertProperties:retGray.positions,  triVerts:retGray.cyanIndices,  numProp:3}));
-        console.log('[LAND-LOGIC] 通常+山留 status=', manExcav.status(), ' 既存躯体 status=', manGray.status());
-        const diff = Manifold.difference([manExcav, manGray]);
-        console.log('[LAND-LOGIC] difference status=', diff.status());
-        if(diff.status() !== 'NoError'){
-          console.warn('[LAND-LOGIC] difference演算がエラーを返したため、通常+山留のみで出力します:', diff.status());
-        }else{
-          const rm = diff.getMesh();
-          finalPositions = rm.vertProperties;
-          finalIndices = rm.triVerts;
-        }
-        manExcav.delete(); manGray.delete(); diff.delete();
+        const rm = diff.getMesh();
+        finalPositions = rm.vertProperties;
+        finalIndices = rm.triVerts;
       }
+      manExcav.delete(); manGrayList.forEach(m=>m.delete());
+      if(manGrayList.length>1) manGrayUnioned.delete();
+      diff.delete();
     }
 
     // 差分完了後、最後にGL(y=0)の蓋だけ落として「上から覗き込む」表示にする

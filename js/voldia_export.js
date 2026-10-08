@@ -1,4 +1,5 @@
 // ============================================================
+// 現行バージョン: r035 (36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -463,8 +464,16 @@ async function buildVoldiaGLBBytes(progressCb, excludeExistingStruct){
   // 配置モードの既存躯体だけ下端が捨てコン厚さ分(既定110mm)深くなり、地形の床面と
   // 高さが一致してz-fighting(白い板が浮いて見える不具合)を起こしていた。
   const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  // r035(36回目): 土量計算(doboku)後のみ、既存躯体の底面を最深まで延長(底面∞)。
+  // 通常計算後(structure解析等)は従来通り。最深値の算出は共通関数に一本化(voldia3d.js r100)。
+  const _siteBotEs = (window._lastCalcModeForPlacement === 'doboku')
+    ? computeDobokuSiteBottomFromRaw(fs, _concVal, window._glOffsetMm||0) : null;
   existingStructGeoms = excludeExistingStruct ? [] : fs.filter(f=>f.color==='gray')
-    .map(f => buildFrustumGeometry({...f, D: f.D - _concVal, noSlope:true, OD:0}))
+    .map(f => {
+      let g = {...f, D: f.D - _concVal, noSlope:true, OD:0};
+      if(_siteBotEs !== null) g = extendGrayToBottomMm(g, _siteBotEs);
+      return buildFrustumGeometry(g);
+    })
     .filter(g => g.positions && g.positions.length);
   if(!exportGeoms||!exportGeoms.length)throw new Error('先に「計算」ボタンを押してください');
   if(progressCb)progressCb(40,'メッシュを結合中...');
@@ -539,8 +548,14 @@ async function buildExistingStructureOverlapGLBBytes(progressCb){
 
   const excavFrustums = fs.filter(f=>f.color!=='gray');
   const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
-  const structFrustums = fs.filter(f=>f.color==='gray').map(f=>({...f, D: f.D - _concVal}));
+  let structFrustums = fs.filter(f=>f.color==='gray').map(f=>({...f, D: f.D - _concVal}));
   if(!structFrustums.length) return null;
+  // r035(36回目): 土量計算(doboku)後のみ、既存躯体の底面∞。この関数のfsは生frustum系の座標
+  // (botDepth=D-tl)なので、同じ座標系の掘削+既存躯体から最深を求めて余白0で揃える。
+  if(window._lastCalcModeForPlacement === 'doboku'){
+    const _siteBotB = siteDeepestBottomMm(excavFrustums.concat(structFrustums));
+    structFrustums = structFrustums.map(f => extendGrayToBottomMm(f, _siteBotB));
+  }
   if(progressCb) progressCb(20,'(B)重複ソリッドを計算中...');
   const geom = buildExistingStructureOverlapMesh(excavFrustums, structFrustums, fs._offsetX||0, fs._offsetY||0);
   if(!geom || !geom.attributes || !geom.attributes.position || !geom.attributes.position.count) return null;
@@ -692,6 +707,11 @@ async function openPlacementMode(){
     const {glb, offsetX, offsetY} = _isNormalPlacement
       ? await buildNormalCalcPlacementGLB()
       : await buildVoldiaGLBBytes(null); // encodeMultiGLB()は素のArrayBufferを返す
+    // r035(36回目マスター仕様): 土量計算後の配置モードへ移動するたび、既存躯体が1個以上あれば
+    // 毎回トーストを出す(底面∞の適用を知らせる。オブジェクトごとの印は付けない)。
+    if(!_isNormalPlacement && getAllFrustums().some(f=>f.color==='gray')){
+      toast('既存躯体の底面は、最深の掘削底まで∞(延長)として扱われます', 3600, 'graystruct');
+    }
 
     // Voldia版: 同一ページ内にiframeでオーバーレイ表示（別タブ方式はポップアップブロック等が
     // 面倒なため見送り。iframeなら別タブと同じくJSのグローバル変数が衝突せず、テストも1画面で完結する）
@@ -1082,16 +1102,33 @@ function _evRunAnalysis(mode, glbArrayBuffer){
               new THREE.Vector3().subVectors(f.v2,f.v0)
             ).length()*0.5;
             const areaRatio = maxEdge>1e-9 ? (triArea/(maxEdge*maxEdge)) : 0;
-            if(minEdgeMm < SLIVER_MIN_EDGE_MM || areaRatio < SLIVER_AREA_RATIO) f.type='IGNORE';
+            // 【問題A・32回目セッション追記・マスター実機報告「②と⑤は同一平面のはずなのに
+            // 別クラスタになる」への対応・真因特定】上のスリバー判定はtypeを直接'IGNORE'に
+            // 書き換えていたため、この面が丸ごとfaces配列から消え、後続の辺共有隣接グラフ
+            // (Union-Find)からも同時に消えていた。ところが実機データを解析したところ、
+            // このスリバー面が「本物の同一平面上の2つの面(例:②③)を繋ぐ唯一の辺」を
+            // 担っているケースがあり、スリバーを消すと同時にその2面の隣接関係も失われ、
+            // 本来1つにまとまるべき面が孤立クラスタとして取り残されていた。
+            // 「面積・数量には数えない」ことと「隣接グラフから消す」ことを同じ1回の操作
+            // (type書き換え→配列除外)でやっていたのが構造的な原因。この2つの役割を
+            // isSliverフラグで分離し、スリバー面はtypeをSLOPE系のまま維持して隣接グラフの
+            // 「橋」としては機能させつつ、面積・高さ集計とサブフェイス表示からは除外する。
+            if(minEdgeMm < SLIVER_MIN_EDGE_MM || areaRatio < SLIVER_AREA_RATIO) f.isSliver=true;
           }
         });
 
+        // ★変更: スリバー面(isSliver)はtypeをSLOPE系のまま残すため、ここでのフィルタは
+        // 従来通り「本物のIGNORE(法面としての傾き自体がない疑似壁など)」だけを除外する。
+        // スリバー面は隣接グラフ構築のためにこの時点ではまだ含めておく。
+        let facesForGraph;
         if(mode==='structure'){
-          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
+          facesForGraph=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001);
         }else{
-          faces=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
+          facesForGraph=faces.filter(f=>f.type!=='IGNORE' && f.projArea>0.001 && f.calcHeight>0.01);
         }
-        faces.forEach(f=>_evTotalModelArea+=f.projArea);
+        faces=facesForGraph;
+        // ★変更: 総面積にはスリバー面(橋渡し用に残しているだけの面)を含めない。
+        faces.forEach(f=>{ if(!f.isSliver) _evTotalModelArea+=f.projArea; });
 
         const edges={};
         faces.forEach(f=>{
@@ -1118,7 +1155,11 @@ function _evRunAnalysis(mode, glbArrayBuffer){
                 }else{
                   uf.union(f1.id,f2.id);
                 }
-              }else if(f1.type.includes('SLOPE')){
+              }else if(f1.type.includes('SLOPE') && !f1.isSliver && !f2.isSliver){
+                // ★変更: スリバー面(退化三角形)は法線・辺方向のノイズが大きく、これを
+                // 使って隣の本物の面の入隅/出隅を判定すると誤判定の元になるため、
+                // どちらかがスリバーの場合はこの判定自体をスキップする(dot>0.99による
+                // 上のマージ判定は影響を受けない=橋渡しは従来通り機能する)。
                 const inPlaneVec=new THREE.Vector3().crossVectors(f1.normal,list[0].vDir).normalize();
                 const sign=f2.normal.dot(inPlaneVec);
                 if(sign<-0.001){ f1.hasConcave=true; f2.hasConcave=true; }
@@ -1131,8 +1172,19 @@ function _evRunAnalysis(mode, glbArrayBuffer){
         const clusters={};
         faces.forEach(f=>{
           const rootId=uf.find(f.id);
-          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[]};
+          if(!clusters[rootId]) clusters[rootId]={type:f.type, projArea:0, hSum:0, hasConvex:false, hasConcave:false, faceCount:0, groupedFaces:[], renderFaces:[]};
           const c=clusters[rootId];
+          // ★32回目セッション追記2: マスター実機報告「PNGで4-2と4-3の間に分割線が
+          // 残る」への対応。前回の修正は「面積・高さ集計」と「隣接グラフの橋渡し」の
+          // 役割は分離したが、「3D描画用ジオメトリ」からもスリバー面を一緒に除外して
+          // いたため、スリバー面が元々埋めていた場所に本物の小さな隙間(穴)ができ、
+          // EdgesGeometryがその穴の縁を正直に境界線として描いてしまっていた
+          // (②と③が同一平面という事実自体には変わりなく、r072が想定していた
+          // 「coplanarな内部辺は自動省略される」仕組みが、隙間のせいで機能しなかった
+          // だけ)。renderFacesにはスリバーも含めて隙間なく埋め、面積・高さ集計と
+          // Excel/PDFのサブフェイス行(groupedFaces)からは引き続き除外する。
+          c.renderFaces.push(f);
+          if(f.isSliver) return;
           c.projArea+=f.projArea; c.hSum+=f.calcHeight*f.projArea; c.faceCount++;
           c.groupedFaces.push(f);
           if(f.hasConvex) c.hasConvex=true;
@@ -1163,7 +1215,10 @@ function _evRunAnalysis(mode, glbArrayBuffer){
           const hexColor='#'+highlightColor.getHexString();
 
           const positions=[];
-          c.groupedFaces.forEach(f=>{
+          // ★変更: 描画ジオメトリはgroupedFaces(数量集計用・スリバー除外済み)ではなく
+          // renderFaces(スリバーも含む・隙間なし)から作る。数量・サブフェイス行への
+          // 影響はゼロ(そちらは引き続きgroupedFacesを参照)。
+          c.renderFaces.forEach(f=>{
             positions.push(f.v0.x,f.v0.y,f.v0.z, f.v1.x,f.v1.y,f.v1.z, f.v2.x,f.v2.y,f.v2.z);
           });
           const geom=new THREE.BufferGeometry();

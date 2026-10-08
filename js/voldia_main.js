@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 
 let sortMode = 'no';
@@ -2399,7 +2399,8 @@ function updSidebar(){
           style="width:38px;flex-shrink:0;background:#1a1a2e;color:#e0e0e0;border:1px solid #2a2a3e;border-radius:3px;padding:1px 3px;font-size:.72em;text-align:right;font-family:'Consolas',monospace;">
         <span style="font-size:.62em;color:#999;white-space:nowrap;flex-shrink:0;">下端</span>
         <input type="text" class="depth-inp" data-idx="${idx}" data-key="depthBeam"
-          value="${fmtSigned(parseInt(botVal)||(-1800),true)}"
+          value="${sh.color==='gray' ? '\u221e' : fmtSigned(parseInt(botVal)||(-1800),true)}"
+          ${sh.color==='gray' ? `data-gray-inf="1" title="既存躯体: 土量計算(3Dイメージ)では、下端が最深の掘削底まで延長されます(描いた下端: ${fmtSigned(parseInt(botVal)||(-1800))})。クリックで描いた下端の値を編集できます"` : ''}
           style="width:38px;flex-shrink:0;background:#1a1a2e;color:#e0e0e0;border:1px solid #2a2a3e;border-radius:3px;padding:1px 3px;font-size:.72em;text-align:right;font-family:'Consolas',monospace;">
       </div>`;
 
@@ -2468,6 +2469,35 @@ function updSidebar(){
       if(shapes[i].area<=0){pushUndo();shapes.splice(i,1);updSidebar();redraw();toast('⚠ 面積0のオブジェクトを削除しました');return;}
     };
     inp.addEventListener('change',commit);
+    // r036(36回目マスター要望): グレー(既存躯体)の下端欄は見た目だけ「∞」表示。実値(depthBeam)は
+    // 通常計算でそのまま使うため不変。編集時だけ実値を出し、離れたら∞へ戻す。
+    // 他の色へ変更するとupdSidebar()の再描画で通常の数値表示に戻る。
+    if(inp.dataset.grayInf==='1'){
+      // 「∞」はConsolasだと極小に描かれ読めないため、∞表示中だけ大きめ+記号に強いフォントにする。
+      // 行の高さが変わらないよう、変更前の高さを固定する。編集中(実値表示)は元の見た目に戻す。
+      const numFont=inp.style.fontFamily, numSize=inp.style.fontSize;
+      const h=inp.offsetHeight;
+      const showInf=()=>{
+        inp.value='\u221e';
+        inp.style.fontFamily='"Segoe UI Symbol","Arial Unicode MS",Arial,sans-serif';
+        inp.style.fontSize='1.45em';
+        inp.style.fontWeight='700';
+        inp.style.lineHeight='1';
+        if(h>0){inp.style.boxSizing='border-box';inp.style.height=h+'px';}
+      };
+      const showNum=()=>{
+        inp.style.fontFamily=numFont; inp.style.fontSize=numSize;
+        inp.style.fontWeight=''; inp.style.lineHeight='';
+      };
+      showInf();
+      inp.addEventListener('focus',()=>{
+        const i=parseInt(inp.dataset.idx);
+        showNum();
+        inp.value=fmtSigned(parseInt(shapes[i].depthBeam)||(-1800));
+        inp.select();
+      });
+      inp.addEventListener('blur',showInf);
+    }
     // (24回目・項目5): テキスト確定のEnterがdocumentまで伝播すると、
     // inp.blur()でactiveElementが変わった「後」にグローバルkeydownリスナーの
     // isFormFocusチェックが走ってしまい(blur済みなのでinputと判定されない)、
