@@ -1,5 +1,14 @@
 // ════════════════════════════════════════════════════════════
-//  Land Logic (r001, 34回目セッション新設)
+//  Land Logic  ★現行バージョン: r011 (36回目セッション)
+//   r001: 34回目新設 / r006: Y軸符号修正 / r007: 既存躯体を本番buildManifoldUnionGeom+noSlope微テーパー方式へ変更
+//   r008: 微テーパーを10mm(頂点量子化単位の整数倍)に確定。voldia3d.js r099のf.taperMm対応が前提
+//   r009: 紫(山留)は法面ではなく微テーパー垂直のまま出力 / 既存躯体の引き算でGL蓋に内側の穴(ドーナツ)ができたら蓋をする
+//   r010(36回目): 頂点量子化(10mm格子)が微テーパー(10mm)を潰して「完全に垂直な面」(同一XZでYだけ違う頂点)を
+//         作っていたため、Land Logicの構築時だけ頂点量子化を0にして微テーパーを保つ。
+//         根拠(Node再現): 量子化10mm→完全垂直面が10枚(紫の露出壁・山留バッチ壁の上部)、量子化0→0枚(NoError)。
+//         量子化0で構築/Manifold化に失敗した場合は従来の量子化で組み直し(警告ログ)。
+//   r011(36回目): 微テーパー量(10mm)を、固定値ではなくvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(window経由)から読む。
+//         変更は voldia3d.js の数値1か所だけでよい。量子化へフォールバックした時だけ、量子化単位の整数倍に切り上げて使う。
 //  ------------------------------------------------------------
 //  目的: LandXML(TIN)出力に向けた試験用GLBを生成する、既存の表示/積算ロジック
 //  (buildShellMesh・buildManifoldUnionGeom・buildExistingStructureOverlapMesh等)
@@ -28,86 +37,117 @@
 // ════════════════════════════════════════════════════════════
 
 (function(){
-  // r004(実機検証で判明・修正): 既存躯体を「傾斜frustum」+「noSlope:true延長frustum」の
-  // 2個をbuildManifoldUnionGeomのUnionで繋ぐ方式は、noSlope全般に自動で乗る
-  // DOBOKU_VERTICAL_TAPER_FIXED_MM(数値安定化用の固定15mmテーパー)が延長パーツ側にも
-  // 独立にかかってしまい、傾斜パーツの下端(offset=OD)と延長パーツの上端
-  // (offset=OD+15mm)の間に15mm程度のズレが生まれ、Unionでの溶接が甘くなって
-  // 「2つの物体」に見える不具合があった(マスター実機報告・2026-09-29)。
-  // 対策: Unionに頼らず、offsetPolygon()を直接2回呼んで(天端用・元の下端用)
-  // 1つの頂点配列で「天端キャップ→傾斜側面→元の下端(=延長部の断面と共有、継ぎ目なし)
-  // →垂直側面→深い底キャップ」を直接縫う、単一の水密メッシュとして構築する。
-  function buildGrayPlugMesh(f, targetBotMm){
-    if(f.holesMm && f.holesMm.length){
-      console.warn('[LAND-LOGIC] 穴(holesMm)を持つ既存躯体は今回未対応のため、このオブジェクトはスキップします');
-      return null;
+  // r007(35回目セッション): 既存躯体(gray)の手組みメッシュ(buildGrayPlugMesh、
+  // r004〜r006)は廃止。理由: (1)傾斜が法面(getSlopeRatio)になっていたが、マスター
+  // 仕様の「LandXML対応の傾斜」は山留・紫と同じ固定微テーパー
+  // (DOBOKU_VERTICAL_TAPER_FIXED_MM=15mm、天端側のみ・深さ非依存)であり別物、
+  // (2)手組みはY軸符号・巻き方向を2回間違えた(r005: 巻き方向、r006: Y軸符号)。
+  // 本番の buildManifoldUnionGeom に noSlope:true のまま通す方式に変更した。
+  // noSlopeの15mmは深さに依存しないため、深さだけを最深まで延長しても
+  // 旧#3(巨大オフセット)は起きない。既存躯体は「引き算」される側(Manifold.difference)。
+
+
+  // r009: GL(y=0)蓋の「内側の穴(ドーナツ)」を検出し、穴の蓋(下向きの面)を作る。
+  //  - 既存躯体を引くと、GL蓋のうち既存躯体の天端の位置が抜ける。それが蓋の外周の内側に
+  //    完全に囲まれた穴(ドーナツ)になった場合だけ蓋をする。外周に食い込むだけの欠け(穴でない)
+  //    には蓋をしない。
+  //  - 蓋は穴の輪郭の頂点をそのまま使う(新しい頂点を作らない)ので、隣の壁と辺が完全に一致する。
+  //  - 向き: 最終出力ではGL蓋を落とすため、壁の上端の辺は壁側が(b→a)方向を使う。蓋はこれと
+  //    逆の(a→b)方向で辺をたどる=面の向きは下向き(床と同じ向き)になる。
+  //  戻り値: {tris:[頂点indexの3つ組の並び], holes:穴の数}
+  function buildGLHoleLids(positions, indices){
+    const EPS = 1e-5;
+    const N = positions.length/3;
+    const Y = i=>positions[i*3+1], X = i=>positions[i*3], Z = i=>positions[i*3+2];
+    const shoe = (a,b,c)=> 0.5*((X(b)-X(a))*(Z(c)-Z(a)) - (Z(b)-Z(a))*(X(c)-X(a)));
+    // 上向きGL蓋の三角形
+    const edges = new Map();           // key(a*N+b) -> [a,b]
+    let tSign = 0;
+    for(let i=0;i<indices.length;i+=3){
+      const a=indices[i], b=indices[i+1], c=indices[i+2];
+      if(Math.abs(Y(a))>=EPS || Math.abs(Y(b))>=EPS || Math.abs(Y(c))>=EPS) continue;
+      const ny = (Z(b)-Z(a))*(X(c)-X(a)) - (X(b)-X(a))*(Z(c)-Z(a));
+      if(!(ny>0)) continue;                       // 下向き/縮退はGL蓋ではない
+      if(tSign===0) tSign = Math.sign(shoe(a,b,c));
+      edges.set(a*N+b,[a,b]); edges.set(b*N+c,[b,c]); edges.set(c*N+a,[c,a]);
     }
-    const SC = 0.001; // mm→m
-    const origD = f.D, origTl = f.tl||0;
-    
-    // 【AIS修正】CSG演算での共平面（重なり）干渉を防ぐため、1mmのブーリアンマージンを追加
-    const BOOLEAN_MARGIN = 1.0; 
-    const topOffset = (f.OD||0) + origD * getSlopeRatio() + BOOLEAN_MARGIN;
-    const botOffset = (f.OD||0) + BOOLEAN_MARGIN;
-    const topRing = offsetPolygon(f.ptsMm, topOffset);
-    const botRing = offsetPolygon(f.ptsMm, botOffset); // 元の下端。延長部の断面としてそのまま共有する
-    const n = topRing.length;
-    if(botRing.length !== n){
-      console.warn('[LAND-LOGIC] 天端/下端オフセットで頂点数が変化した(自己交差)ため、このオブジェクトはスキップします');
-      return null;
+    if(!edges.size) return {tris:[], holes:0};
+    // 境界辺(逆向きの相方が無い辺)
+    const out = new Map();                       // a -> [b,...]
+    edges.forEach(([a,b])=>{
+      if(!edges.has(b*N+a)){ if(!out.has(a)) out.set(a,[]); out.get(a).push(b); }
+    });
+    // 輪郭をたどる
+    const loops = [];
+    const used = new Set();
+    out.forEach((bs,a0)=>{
+      bs.forEach(b0=>{
+        if(used.has(a0*N+b0)) return;
+        const loop=[a0]; let a=a0, b=b0, guard=0;
+        while(guard++ < 100000){
+          used.add(a*N+b);
+          if(b===a0) break;
+          loop.push(b);
+          const nexts = out.get(b) || [];
+          let nb = -1;
+          for(const c of nexts){ if(!used.has(b*N+c)){ nb=c; break; } }
+          if(nb<0) break;
+          a=b; b=nb;
+        }
+        loops.push(loop);
+      });
+    });
+    // 穴 = GL蓋の三角形と符号が逆の輪郭
+    const tris = []; let holes = 0;
+    loops.forEach(loop=>{
+      if(loop.length<3) return;
+      let A=0;
+      for(let i=0;i<loop.length;i++){ const p=loop[i], q=loop[(i+1)%loop.length]; A += X(p)*Z(q)-X(q)*Z(p); }
+      A *= 0.5;
+      if(Math.abs(A)<1e-9) return;
+      if(Math.sign(A) === tSign) return;        // 外周(欠けを含む)。蓋は不要
+      const flat=[]; loop.forEach(v=>flat.push(X(v),Z(v)));
+      const tr = earcut(flat, null, 2);
+      for(let k=0;k<tr.length;k+=3){
+        let a=loop[tr[k]], b=loop[tr[k+1]], c=loop[tr[k+2]];
+        if(Math.sign(shoe(a,b,c)) !== Math.sign(A)){ const t=b; b=c; c=t; }   // 輪郭と同じ向きに揃える
+        tris.push(a,b,c);
+      }
+      holes++;
+    });
+    return {tris, holes};
+  }
+
+  // r010: Land Logic専用の構築。頂点量子化を一時的に0にして微テーパーを保つ(終わったら必ず元へ戻す)。
+  // 量子化0の結果がManifold(水密)として成立しない/例外の場合だけ、従来の量子化(window._vertexQuantMm)で組み直す。
+  async function _buildLL(group, offsetX, offsetY, label){
+    const saved = window._vertexQuantMm;
+    let ret = null;
+    if(saved !== 0){
+      window._vertexQuantMm = 0;
+      try{
+        ret = await buildManifoldUnionGeom(group, true, offsetX, offsetY, {removeGLCap:false});
+        if(ret){
+          const { Manifold, Mesh } = await _getManifoldWasm();
+          const m = new Manifold(new Mesh({vertProperties:ret.positions, triVerts:ret.cyanIndices, numProp:3}));
+          const st = m.status(); m.delete();
+          if(st !== 'NoError'){ console.warn(`[LAND-LOGIC] ${label}: 量子化0の結果がManifoldとして不正(${st})のため、従来の量子化で組み直します`); ret = null; }
+        }
+      }catch(e){
+        console.warn(`[LAND-LOGIC] ${label}: 量子化0での構築に失敗(${e && e.message})。従来の量子化で組み直します`);
+        ret = null;
+      }finally{
+        window._vertexQuantMm = saved;
+      }
+      if(ret) console.log(`[LAND-LOGIC] ${label}: 頂点量子化0mmで構築(微テーパーを潰さないため。元の量子化=${saved}mm)`);
     }
-    
-    // 【AIS修正】天端も確実に突き抜けさせるために上方向へマージンを追加
-    const yTop  = (-origTl - BOOLEAN_MARGIN) * SC;
-    const yBot  = (origD - origTl) * SC;
-    const yDeep = (targetBotMm - origTl) * SC;
-
-    const positions = [];
-    topRing.forEach(p=>positions.push(p.x*SC, yTop, p.y*SC));
-    botRing.forEach(p=>positions.push(p.x*SC, yBot, p.y*SC));
-    botRing.forEach(p=>positions.push(p.x*SC, yDeep, p.y*SC)); // 深い底(XYはbotRingと同一)
-    
-    // 【AIS修正】側面①のねじれ解消用。四角形の重心(Center)の頂点インデックス開始位置を定義
-    const T=0, B=n, D=2*n, C=3*n; 
-    
-    // 重心(Center)頂点の計算と追加 (側面①用)
-    for(let i=0; i<n; i++){
-        const j = (i+1)%n;
-        const px = (topRing[i].x + topRing[j].x + botRing[j].x + botRing[i].x) / 4 * SC;
-        const py = (yTop + yTop + yBot + yBot) / 4;
-        const pz = (topRing[i].y + topRing[j].y + botRing[j].y + botRing[i].y) / 4 * SC;
-        positions.push(px, py, pz);
+    if(!ret){
+      // 従来の量子化で組み直す時だけ、微テーパーを量子化単位qの整数倍に切り上げる(格子に丸められて潰れないように)
+      const q = window._vertexQuantMm;
+      const g2 = (q > 0) ? group.map(f => (typeof f.taperMm === 'number') ? Object.assign({}, f, {taperMm: Math.ceil(f.taperMm / q) * q}) : f) : group;
+      ret = await buildManifoldUnionGeom(g2, true, offsetX, offsetY, {removeGLCap:false});
     }
-
-    const idx = [];
-
-    const flatTop=[]; topRing.forEach(p=>flatTop.push(p.x,p.y));
-    const flatBot=[]; botRing.forEach(p=>flatBot.push(p.x,p.y));
-
-    // 天端キャップ(上向き)
-    const capTop = earcut(flatTop, null, 2);
-    for(let i=0;i<capTop.length;i+=3){ idx.push(T+capTop[i], T+capTop[i+2], T+capTop[i+1]); }
-
-    // 側面①: 天端→元の下端(傾斜) - 【AIS修正】対角線分割をやめ、重心(Center)に向かう4分割でねじれを殺す
-    for(let i=0;i<n;i++){ const j=(i+1)%n;
-      const c_idx = C + i;
-      // 面の表裏を維持するため、外周のループ順 (T+i -> T+j -> B+j -> B+i -> T+i) に沿って三角形を張る
-      idx.push(T+i, T+j, c_idx);
-      idx.push(T+j, B+j, c_idx);
-      idx.push(B+j, B+i, c_idx);
-      idx.push(B+i, T+i, c_idx);
-    }
-    
-    // 側面②: 元の下端→深い底(垂直延長、上下でXYが完全に同一なためねじれは生じない。元のまま)
-    for(let i=0;i<n;i++){ const j=(i+1)%n;
-      idx.push(B+i, D+j, D+i);
-      idx.push(B+i, B+j, D+j);
-    }
-    // 深い底キャップ(下向き)
-    const capDeep = earcut(flatBot, null, 2);
-    for(let i=0;i<capDeep.length;i+=3){ idx.push(D+capDeep[i], D+capDeep[i+1], D+capDeep[i+2]); }
-
-    return { vertProperties: new Float32Array(positions), triVerts: new Uint32Array(idx), numProp: 3 };
+    return ret;
   }
 
   function _llReady(){
@@ -145,25 +185,44 @@
     const MARGIN_MM = 1000; // サイト最深よりさらに1m深くまで延長し、確実に「突き抜け」させる
 
     // 通常(blue)+山留(purple): 傾斜を強制ON(土量計算では山留のみ強制垂直になっているため上書き)
-    const excavGroup = fs.filter(f=>f.color!=='gray').map(f=>Object.assign({}, f, {noSlope:false}));
-    // 既存躯体(gray): r004(実機検証で判明・修正)。buildGrayPlugMeshで1個ずつ、
-    // Unionに頼らない単一の水密メッシュとして直接構築する(詳細は関数のコメント参照)。
+    // 微テーパー量(マスター仕様=10mm)。頂点量子化(window._vertexQuantMm)の格子に丸められても
+    // 崩れないよう、必ず量子化単位qの整数倍にする(q=10なら10、q=5なら10、q=20なら20)。
+    const _q = window._vertexQuantMm;
+    // r011: 微テーパー量はvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(1か所管理)。読めない時だけ従来の10mm。
+    const taperMm = (typeof window.LANDXML_MICRO_TAPER_MM === 'number' && window.LANDXML_MICRO_TAPER_MM > 0) ? window.LANDXML_MICRO_TAPER_MM : 10;
+    // r009: 紫(山留)は土量計算どおり「微テーパー垂直(noSlope)」のまま。法面(傾斜強制ON)にしない。
+    //       青(通常)だけ傾斜を強制ON(土量計算では傾斜が効いている値をそのまま使う)。
+    const excavGroup = fs.filter(f=>f.color!=='gray').map(f=>
+      (f.color==='purple')
+        ? Object.assign({}, f, {noSlope:true, taperMm:taperMm})
+        : Object.assign({}, f, {noSlope:false}));
+    // 既存躯体(gray): r007。本番のbuildManifoldUnionGeomに通す。
+    //  - noSlope:true  → 固定15mm微テーパー(山留・紫と同じLandXML対応の傾斜)
+    //  - OD:0          → 既存躯体には余掘りを適用しない(確定仕様)
+    //  - color:'blue'  → 紫(山留壁面ID追跡)扱いにならないよう通常色にする
+    //  - D を延長      → 下端をサイト最深+MARGINまで(=「下端∞」)。tlは触らない
     const targetBotMm = siteMaxDepthMm + MARGIN_MM;
-    const grayGroupSrc = fs.filter(f=>f.color==='gray');
-    const grayMeshes = grayGroupSrc.map(f=>buildGrayPlugMesh(f, targetBotMm)).filter(Boolean);
+    const grayGroup = [];
+    fs.filter(f=>f.color==='gray').forEach(f=>{
+      if(f.holesMm && f.holesMm.length){
+        console.warn('[LAND-LOGIC] 穴(holesMm)を持つ既存躯体は未対応(本番側もholesMm未対応)のため、このオブジェクトはスキップします');
+        return;
+      }
+      grayGroup.push(Object.assign({}, f, {color:'blue', noSlope:true, OD:0, taperMm:taperMm, D: targetBotMm + (f.tl||0)}));
+    });
 
     if(!excavGroup.length){
       console.warn('[LAND-LOGIC] 通常/山留オブジェクトが1つもありません');
       return;
     }
-    console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayMeshes.length}個 (下端延長=${targetBotMm}mm)`);
+    console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayGroup.length}個 (noSlope・微テーパー=${taperMm}mm・量子化=${window._vertexQuantMm}mm、下端延長=${targetBotMm}mm)`);
 
     // r002(実機検証で判明・修正): Manifold-3Dの`Manifold`クラスは完全に閉じた
     // ソリッドしか受け付けない。GL蓋を除去した「上から覗き込む」表示用の開いた
     // 器のままdifferenceに渡すと即座に"Not manifold"で例外になる。差分演算は
     // 必ず閉じたソリッド同士(removeGLCap:false)で行い、蓋の除去は差分結果に
     // 対して最後にこちらで手動で行う。
-    const retExcav = await buildManifoldUnionGeom(excavGroup, true, offsetX, offsetY, {removeGLCap:false});
+    const retExcav = await _buildLL(excavGroup, offsetX, offsetY, '通常+山留');
     if(!retExcav){
       console.warn('[LAND-LOGIC] 通常+山留グループのビルドに失敗しました');
       return;
@@ -172,27 +231,32 @@
     let finalPositions = retExcav.positions;
     let finalIndices = retExcav.cyanIndices;
 
-    if(grayMeshes.length){
-      const wasm = await _getManifoldWasm();
-      const { Manifold, Mesh } = wasm;
-      const manExcav = new Manifold(new Mesh({vertProperties:retExcav.positions, triVerts:retExcav.cyanIndices, numProp:3}));
-      const manGrayList = grayMeshes.map(m=>new Manifold(new Mesh(m)));
-      console.log('[LAND-LOGIC] 通常+山留 status=', manExcav.status(), ' 既存躯体 status=', manGrayList.map(m=>m.status()));
-      // 既存躯体が複数ある場合はまずそれらをUnion(別々の実体同士の結合なので、
-      // 1個の実体内で継ぎ目を作る今回の問題とは別物で、Union自体は問題ない)
-      const manGrayUnioned = manGrayList.length>1 ? Manifold.union(manGrayList) : manGrayList[0];
-      const diff = Manifold.difference([manExcav, manGrayUnioned]);
-      console.log('[LAND-LOGIC] difference status=', diff.status());
-      if(diff.status() !== 'NoError'){
-        console.warn('[LAND-LOGIC] difference演算がエラーを返したため、通常+山留のみで出力します:', diff.status());
+    if(grayGroup.length){
+      const retGray = await _buildLL(grayGroup, offsetX, offsetY, '既存躯体');
+      if(!retGray){
+        console.warn('[LAND-LOGIC] 既存躯体グループのビルドに失敗したため、通常+山留のみで出力します');
       }else{
-        const rm = diff.getMesh();
-        finalPositions = rm.vertProperties;
-        finalIndices = rm.triVerts;
+        const wasm = await _getManifoldWasm();
+        const { Manifold, Mesh } = wasm;
+        const manExcav = new Manifold(new Mesh({vertProperties:retExcav.positions, triVerts:retExcav.cyanIndices, numProp:3}));
+        const manGray  = new Manifold(new Mesh({vertProperties:retGray.positions,  triVerts:retGray.cyanIndices,  numProp:3}));
+        console.log('[LAND-LOGIC] 通常+山留 status=', manExcav.status(), ' 既存躯体 status=', manGray.status());
+        if(manExcav.status()!=='NoError' || manGray.status()!=='NoError'){
+          console.warn('[LAND-LOGIC] 入力ソリッドがManifoldとして不正なため差分をスキップし、通常+山留のみで出力します');
+        }else{
+          const diff = Manifold.difference([manExcav, manGray]); // 通常+山留 − 既存躯体(引き算)
+          console.log('[LAND-LOGIC] difference status=', diff.status());
+          if(diff.status() !== 'NoError'){
+            console.warn('[LAND-LOGIC] difference演算がエラーを返したため、通常+山留のみで出力します:', diff.status());
+          }else{
+            const rm = diff.getMesh();
+            finalPositions = rm.vertProperties;
+            finalIndices = rm.triVerts;
+          }
+          diff.delete();
+        }
+        manExcav.delete(); manGray.delete();
       }
-      manExcav.delete(); manGrayList.forEach(m=>m.delete());
-      if(manGrayList.length>1) manGrayUnioned.delete();
-      diff.delete();
     }
 
     // 差分完了後、最後にGL(y=0)の蓋だけ落として「上から覗き込む」表示にする
@@ -207,6 +271,10 @@
       if(Math.abs(y0)<EPS_Y && Math.abs(y1)<EPS_Y && Math.abs(y2)<EPS_Y){ removedCapFinal++; continue; }
       cleanIdx.push(a,b,c);
     }
+    // r009: GL蓋に内側の穴(ドーナツ)ができていたら、その穴だけ蓋をする(蓋除去のあとで追加)
+    const lids = buildGLHoleLids(finalPositions, finalIndices);
+    for(let i=0;i<lids.tris.length;i++) cleanIdx.push(lids.tris[i]);
+    console.log(`[LAND-LOGIC] 穴の蓋: ${lids.holes}箇所 / 蓋の三角形=${lids.tris.length/3}`);
     console.log(`[LAND-LOGIC] 最終三角形=${cleanIdx.length/3} (蓋除去=${removedCapFinal} 縮退除去=${removedDegenerate})`);
 
     const glbBytes = encodeMultiGLB([{
@@ -225,4 +293,6 @@
 
   // コンソールから手動でも呼べるようにしておく(Shift+L無しでのデバッグ用)
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
+  window._llBuildGLHoleLids = buildGLHoleLids;   // 検証用
+  console.log('[LAND-LOGIC] r011 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
 })();
