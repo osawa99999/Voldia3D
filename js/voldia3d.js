@@ -12,6 +12,13 @@
 // 両方でこの値を使う(旧実装ではisPointInsideFrustumExcavation側だけ独自に
 // window._vertexQuantMm+1という別の固定値を使っており、値がズレる余地があったため統一)。
 const DOBOKU_VERTICAL_TAPER_FIXED_MM = 15;
+// r106(36回目): Land Logic(LandXML用GLB)の「微テーパー量(mm)」を1か所で管理する変数。
+// 完全な垂直面(同一XZでYだけ違う頂点)はLandXML(TIN)で扱えないため、天端側だけ外へこの量だけ広げる。
+// 現在は他AIの検証待ちで10mmを維持。変更するならこの数値だけを書き換える(Land Logicが起動時にここを読む)。
+// ※上のDOBOKU_VERTICAL_TAPER_FIXED_MM(15mm)は別物: 3D表示・体積計算(山留/紫の強制垂直)用で、LandXML出力には使われない。
+//   使用箇所の一覧は「Voldia_微勾配10mm_使用箇所一覧」を参照。
+const LANDXML_MICRO_TAPER_MM = 10;
+window.LANDXML_MICRO_TAPER_MM = LANDXML_MICRO_TAPER_MM;
 // 追加(2026-08-28 引継ぎ18回目マスター指示): 3Dイメージの体積表示に桁区切りを
 // 追加。数値が長くなってres-box幅(左パネル260px相当)からはみ出しそうな場合は
 // 自動的に1段階フォントサイズを縮小する(.vol-bigの基準は2.2em)。
@@ -2370,6 +2377,8 @@ function toggleMeshSolid(){
     });
     _meshMaterials = newMats;
     if(btn) btn.textContent='🎨 グラデ → ソリッド';
+    // r103: マテリアルが新規に作り直されたので、影ON中なら影の設定(shadowSide等)を掛け直す
+    try{ if(window._shadowVisible === true) applyShadowState(); }catch(e){}
   }
 }
 
@@ -2986,6 +2995,8 @@ function _hideCalcProgress(){
 // Three.js// Three.js
 let threeR=null,threeS=null,threeC=null,threeAnim=null;
 let threeGrid=null; // r035: 基準高さ(GL=y0)メッシュ表示ON/OFF用の参照保持
+let threeDirLight=null; // r101: 影ON/OFF用に平行光源の参照を保持
+let threeAmbLight=null; // r102: 影ON時に環境光を弱めて明暗差を出すための参照
 let orTh=0.6,orPh=0.65,orR=50,orCX=0,orCY=0,orCZ=0;
 let drag3=null,pan3=null;
 // 26回目セッション新規: 従来grayは未定義でblueにフォールバックしていた(バグ)。
@@ -3730,8 +3741,9 @@ function _initThreeBase(objects,frustums){
   // 比率を10億:1→1000万:1(約100倍改善)にした。ズームイン下限(orR最小0.001)
   // は変更していないため、実用上ズームインし過ぎて近接クリップされることは無いはず。
   threeS=new THREE.Scene();threeC=new THREE.PerspectiveCamera(45,W/H,.01,1e5);
-  threeS.add(new THREE.AmbientLight(0xffffff,.45));
+  threeAmbLight=new THREE.AmbientLight(0xffffff,.45);threeS.add(threeAmbLight);
   const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(1,2,1).normalize();threeS.add(dl);
+  threeDirLight=dl; // r101: 影ON/OFF用(影はデフォルトOFF。ONにした時だけshadow設定を有効化)
   objects.forEach(o=>threeS.add(o));
   if(frustums && frustums.length > 0){
     let sx=0,sz=0,maxD=0,ax1=Infinity,ax2=-Infinity,az1=Infinity,az2=-Infinity;
@@ -3749,6 +3761,8 @@ function _initThreeBase(objects,frustums){
     orCX=0; orCY=0; orCZ=0; orR=50;
   }
   updOrbit3();
+  // r101(36回目): 影ON/OFFボタンの用意と、前回のON/OFF状態の反映(デフォルトOFF)
+  try{ ensureShadowButton(); applyShadowState(); }catch(e){ console.warn('[SHADOW] 初期化で例外(影なしで続行):', e); }
   const cv=threeR.domElement;
   cv.addEventListener('contextmenu',e=>e.preventDefault());
   cv.addEventListener('mousedown',e=>{
@@ -3896,6 +3910,8 @@ function disposeThree(){
   }
   threeC=null;
   threeGrid=null; // r035: シーン破棄時に参照もクリア（次回生成時に再取得される）
+  threeDirLight=null; // r101
+  threeAmbLight=null; // r102
   _meshObjs=[]; _edgeMaterials=[]; // r038: シーン破棄時にメッシュ/エッジ参照もクリア（次回生成時に再取得される）
 }
 
@@ -3911,6 +3927,171 @@ function toggleBaseGridVisibility(){
   if(btn){
     btn.textContent = window._baseGridVisible ? '▦ メッシュ ON' : '▦ メッシュ OFF';
     btn.style.opacity = window._baseGridVisible ? '1' : '.5';
+  }
+}
+
+// ============================================================
+// r101(36回目): 3Dイメージの「影」ON/OFF(デフォルトOFF)
+// 仕様(マスター指示): デフォルトOFF、ボタンを押すと影を表示。
+// ・既存の平行光源(dl)の向きは変えず、shadow設定だけON/OFFする(見た目の明るさは不変)。
+// ・OFF時はrenderer.shadowMap.enabled=false・castShadow/receiveShadow=falseで、
+//   影のための描画は一切走らない(動作軽量化方針の維持)。
+// ・ON時もshadowMap.autoUpdate=falseで、ON/再構築の時に1回だけ影マップを作る
+//   (ライトとメッシュ形状は不動で、カメラだけ動くため毎フレーム更新は不要)。
+// ・対数深度バッファ(logarithmicDepthBuffer)併用: three r128は非透視投影を
+//   vIsPerspectiveで判定しgl_FragCoord.zを使うため、平行光源の影と共存できる(r128ソースで確認)。
+// ・ソリッド表示(MeshBasicMaterial)は光源計算を行わないため、影は付かない(グラデ表示で有効)。
+// ・影はメッシュ自身への落ち影(自己影)のみ。地面の受け面は設けていない。
+// ============================================================
+const SHADOW_MAP_SIZE = 1024;      // 影マップの解像度(px)
+const SHADOW_BASE_AMBIENT = 0.45;  // 影OFF時の環境光(初期化時の値と同じ)
+const SHADOW_BASE_DIRECT  = 0.8;   // 影OFF時の平行光(初期化時の値と同じ)
+const SHADOW_CASTER_FRONT_ONLY = true;   // 影マップに書くのは光に向いた面だけ(縞=シャドウアクネ対策)
+const SHADOW_NORMAL_BIAS_TEXELS = 3;     // 受ける面を法線方向へ持ち上げる量(影マップ何画素分か)。縞が残れば増、影が浮けば減
+const SHADOW_DEPTH_BIAS = -0.0005;       // 深さ方向の微小補正(影マップの深さ0〜1に対する比)
+const SHADOW_AMBIENT_RATIO = 0.55; // 影ON時の環境光の倍率。小さいほど影が濃い(1.0=従来の明るさ=影が薄い)
+// 影ON直後の2フレーム後に、キャンバス/影マップのサイズとGLエラーを1回だけログ出力する診断。
+// 「WebGL warning: Drawing to a destination rect smaller than the viewport rect」の原因切り分け用。
+function _shadowDiagOnce(){
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{
+      if(!threeR || !threeDirLight) return;
+      const cv = threeR.domElement, gl = threeR.getContext();
+      const sm = threeDirLight.shadow.map;
+      console.log('[SHADOW-DIAG] canvas(buffer)=' + cv.width + 'x' + cv.height
+        + ' css=' + cv.clientWidth + 'x' + cv.clientHeight
+        + ' dpr=' + window.devicePixelRatio + ' pixelRatio=' + threeR.getPixelRatio()
+        + ' shadowMap=' + (sm ? sm.width + 'x' + sm.height : 'なし')
+        + ' maxTex=' + gl.getParameter(gl.MAX_TEXTURE_SIZE)
+        + ' glError=' + gl.getError());
+    }catch(e){ console.warn('[SHADOW-DIAG] 診断で例外', e); }
+  }));
+}
+function updateShadowButtonLabel(){
+  const b = document.getElementById('btn-shadow-toggle');
+  if(!b) return;
+  const on = window._shadowVisible === true;
+  b.textContent = on ? '☀ 影 ON' : '☀ 影 OFF';
+  b.style.opacity = on ? '1' : '.5';
+}
+function ensureShadowButton(){
+  let b = document.getElementById('btn-shadow-toggle');
+  if(!b){
+    const g = document.getElementById('btn-base-grid-toggle');
+    if(!g || !g.parentNode) return; // 基準ボタンが無い画面では何もしない
+    b = g.cloneNode(false);
+    b.id = 'btn-shadow-toggle';
+    b.removeAttribute('onclick'); // 複製元のインライン onclick(メッシュ切替)を引き継がない
+    b.onclick = toggleShadowVisibility;
+    b.title = '影の表示ON/OFF(グラデ表示時のみ有効)';
+    // 見た目をID指定のCSSに依存している場合に備え、必要なら計算済みスタイルを写す
+    if(!g.className && !g.getAttribute('style')){
+      const cs = getComputedStyle(g);
+      ['fontSize','fontFamily','fontWeight','padding','border','borderRadius','background','color','cursor'].forEach(k=>{ b.style[k] = cs[k]; });
+    }
+    g.parentNode.insertBefore(b, g.nextSibling);
+    // r103(マスター要望): 上2個(戻る・メッシュ)/下2個(影・スクショ)に揃える。
+    // 「メッシュ」ボタンの直後に全幅の改行用要素を挟み、影ボタン以降を必ず2段目へ送る。
+    if(!document.getElementById('btn-row-break-shadow')){
+      const br = document.createElement('div');
+      br.id = 'btn-row-break-shadow';
+      br.style.cssText = 'flex-basis:100%;height:0;width:0;margin:0;padding:0;border:0;';
+      g.parentNode.insertBefore(br, b);
+    }
+    // r102(36回目): ボタンが1個増えて、行の右端(スクショボタン)が画面外に出て押せなくなった。
+    // 行を折り返し可能にする(幅が足りない時だけ2段になる。足りていれば見た目は従来のまま)。
+    const row = g.parentNode;
+    const rcs = getComputedStyle(row);
+    if(rcs.display !== 'flex' && rcs.display !== 'inline-flex') row.style.display = 'flex';
+    row.style.flexWrap = 'wrap';
+    const gap = parseFloat(rcs.columnGap) || 0;
+    if(gap <= 0){ row.style.rowGap = '6px'; }
+    b.style.marginLeft = '0'; // 2段目の先頭になるため左の余白は不要
+  }
+  updateShadowButtonLabel();
+}
+function applyShadowState(){
+  if(!threeR || !threeS || !threeDirLight) return;
+  const on = window._shadowVisible === true;
+  const dl = threeDirLight;
+  // 光源計算を行うPhongメッシュ(掘削形状・山留ハッチ・紫壁・既存躯体など)だけが対象
+  const targets = [];
+  threeS.traverse(o=>{ if(o.isMesh && o.material && o.material.isMeshPhongMaterial) targets.push(o); });
+  _meshObjs.forEach(m=>{ if(targets.indexOf(m) < 0) targets.push(m); });
+  targets.forEach(m=>{
+    const was = m.userData._shadowOn === true;
+    m.castShadow = on; m.receiveShadow = on; m.userData._shadowOn = on;
+    // シェーダの影有無が変わる時だけ再コンパイルさせる(デフォルトOFFのままなら何もしない)
+    if(was !== on && m.material) m.material.needsUpdate = true;
+    // r103: 影を落とす(影マップに書く)のは光に向いた面だけにする。掘削形状は閉じた立体で、
+    // 器の内側(光を受ける面)は法線が光に背を向けた面=「受ける側」なので、これを影マップに
+    // 書かないことで、自分自身の面が自分に影を落とす縞模様(シャドウアクネ)を根本から避ける。
+    // 不都合があればSHADOW_CASTER_FRONT_ONLYをfalseにすると従来(両面を書く)に戻る。
+    if(m.material) m.material.shadowSide = (on && SHADOW_CASTER_FRONT_ONLY) ? THREE.FrontSide : null;
+  });
+  threeR.shadowMap.enabled = on;
+  threeR.shadowMap.type = THREE.PCFSoftShadowMap;
+  threeR.shadowMap.autoUpdate = false;
+  dl.castShadow = on;
+  if(on){
+    const box = new THREE.Box3();
+    targets.forEach(m=>box.expandByObject(m));
+    if(!box.isEmpty()){
+      const sph = box.getBoundingSphere(new THREE.Sphere());
+      const c = sph.center, r = Math.max(sph.radius, 1e-3);
+      const dir = new THREE.Vector3(1,2,1).normalize(); // 元のライト方向と同一(明るさ不変)
+      dl.position.copy(c).addScaledVector(dir, r*2);
+      dl.target.position.copy(c);
+      if(dl.target.parent !== threeS) threeS.add(dl.target);
+      dl.target.updateMatrixWorld(); dl.updateMatrixWorld();
+      // r103: 影カメラをライト空間でボックスの8隅にぴったり合わせる(球で囲むより解像度が上がり、
+      // 奥行き範囲も狭まる)。three側が毎回やる位置合わせ(position=ライト位置・target向き・up=Y)と同じ姿勢を先に作って測る。
+      const sc = dl.shadow.camera;
+      sc.position.copy(dl.position); sc.up.set(0,1,0); sc.lookAt(dl.target.position); sc.updateMatrixWorld(true);
+      const mn = new THREE.Vector3(Infinity,Infinity,Infinity), mx = new THREE.Vector3(-Infinity,-Infinity,-Infinity), cv3 = new THREE.Vector3();
+      for(let i=0;i<8;i++){
+        cv3.set(i&1?box.max.x:box.min.x, i&2?box.max.y:box.min.y, i&4?box.max.z:box.min.z).applyMatrix4(sc.matrixWorldInverse);
+        mn.min(cv3); mx.max(cv3);
+      }
+      const padXY = Math.max(mx.x-mn.x, mx.y-mn.y) * 0.02 + 1e-6;
+      const padZ  = (mx.z-mn.z) * 0.05 + 1e-3;
+      sc.left = mn.x-padXY; sc.right = mx.x+padXY; sc.bottom = mn.y-padXY; sc.top = mx.y+padXY;
+      sc.near = Math.max(1e-3, -mx.z - padZ); sc.far = -mn.z + padZ;
+      sc.updateProjectionMatrix();
+      // r102: 影マップは1024に軽量化(2048だとGPUメモリ負荷が大きく、環境によって確保に失敗する疑い)。
+      // 既存の影マップがあれば破棄して作り直し、サイズ不一致(viewport>描画先)を起こさない。
+      const ms = Math.min(SHADOW_MAP_SIZE, (threeR.capabilities && threeR.capabilities.maxTextureSize) || SHADOW_MAP_SIZE);
+      dl.shadow.mapSize.set(ms, ms);
+      if(dl.shadow.map){ try{ dl.shadow.map.dispose(); }catch(e){} dl.shadow.map = null; }
+      // r103: バイアスは「影マップ1画素(テクセル)の大きさ」基準にする(縞が出たのは固定係数が小さすぎたため)。
+      // normalBias=受ける面を法線方向へ数テクセル持ち上げて比較(影の浮きが出にくい)、bias=深さ方向の微小補正。
+      const texel = Math.max(sc.right - sc.left, sc.top - sc.bottom) / ms;
+      dl.shadow.normalBias = texel * SHADOW_NORMAL_BIAS_TEXELS;
+      dl.shadow.bias = SHADOW_DEPTH_BIAS;
+      dl.shadow.radius = 2;
+    }
+    threeR.shadowMap.needsUpdate = true;
+    // r102: 影の明暗差を強める。環境光を弱め、平行光を足して「光が当たる面の明るさ」は不変に保つ
+    // (当たる面=環境光+平行光の合計を固定)。影の中・光に背を向けた面だけが暗くなる。
+    if(threeAmbLight){
+      threeAmbLight.intensity = SHADOW_BASE_AMBIENT * SHADOW_AMBIENT_RATIO;
+      dl.intensity = SHADOW_BASE_DIRECT + SHADOW_BASE_AMBIENT * (1 - SHADOW_AMBIENT_RATIO);
+    }
+    _shadowDiagOnce();
+  }else{
+    if(threeAmbLight){ threeAmbLight.intensity = SHADOW_BASE_AMBIENT; dl.intensity = SHADOW_BASE_DIRECT; }
+    // 元の配置(原点基準・向き同一)へ戻す
+    dl.position.set(1,2,1).normalize();
+    dl.target.position.set(0,0,0);
+    dl.target.updateMatrixWorld(); dl.updateMatrixWorld();
+  }
+}
+function toggleShadowVisibility(){
+  window._shadowVisible = !(window._shadowVisible === true); // デフォルトOFF前提の安全なトグル
+  applyShadowState();
+  updateShadowButtonLabel();
+  if(window._shadowVisible && window._meshSolidMode){
+    toast('ソリッド表示では影は付きません(グラデ表示に戻すと影が出ます)');
   }
 }
 
@@ -4090,7 +4271,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r100(base:VoldiaM r069)"; // r100(36回目): 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r106(base:VoldiaM r069)"; // r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -4573,6 +4754,132 @@ function _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC)
   }
   return { positions: new Float32Array(positions), uv: new Float32Array(uvs) };
 }
+// ============================================================
+// r105(36回目): 山留ラインと紫オブジェクトの辺が重なる所は「山留面優先、紫の壁は無し」にする(マスター方針)。
+// 症状: 山留の壁(1°のバッチ角が付いた微傾斜)と紫の壁(微テーパー)が、同じ場所に別々の壁として2枚できる。
+//   青の下に露出する紫の壁(深い所)と、山留の壁(浅い所)が切り替わる深さで、数mm〜10mmの「段差」ができ、
+//   ハッチも水平に分断された(36回目の実機報告)。LandXML用GLBでも同じ場所に壁が2枚できていた。
+// 対処: 紫オブジェクトの辺のうち、山留ポリゴンの辺と「平行・同じ向き・距離が許容内・範囲が重なる」ものを、
+//   山留の面より外側(PUSH量)まで押し出す。山留プリズムとのintersectionで外側は切り落とされるため、
+//   その辺には紫の壁が残らず、山留の壁だけが全深さで連続する。隣の辺は交点を取り直して自然に延長する。
+// 影響: 山留の外側を足すだけ(その外側は山留で切られる)なので、3D表示・Land Logicの形状だけに作用する。
+//   体積計算(_calcVolumeFallback等)は一切触らない(入力が別系統のため)。
+// 調整値(1か所): PURPLE_YIELD_TOL_MM / PURPLE_YIELD_PUSH_MM / PURPLE_YIELD_ANGLE_DEG
+// ============================================================
+const PURPLE_YIELD_TOL_MM = 50;       // 山留の辺との距離がこれ以内なら「重なっている」(バッチ角の振れ+量子化+描画のずれを見込む)
+const PURPLE_YIELD_PUSH_MM = 100;     // 山留の面よりさらに外側へ押し出す量(山留のバッチ壁の最大振れ(約44mm@2.5m)より大きく)
+const PURPLE_YIELD_ANGLE_DEG = 2;     // 平行とみなす角度差
+function _purpleYieldToYamadome(frustums, ydMm){
+  if(!ydMm || ydMm.length < 3) return {frustums, changedEdges:0, changedObjs:0};
+  const area2 = pts => { let a=0; for(let i=0;i<pts.length;i++){ const p=pts[i], q=pts[(i+1)%pts.length]; a += p.x*q.y - q.x*p.y; } return a; };
+  const outN = (a,b,ccw) => { const dx=b.x-a.x, dy=b.y-a.y, l=Math.hypot(dx,dy)||1; return ccw ? {x:dy/l,y:-dx/l} : {x:-dy/l,y:dx/l}; };
+  const ydCCW = area2(ydMm) > 0;
+  const sinTol = Math.sin(PURPLE_YIELD_ANGLE_DEG*Math.PI/180);
+  let changedEdges = 0, changedObjs = 0;
+  const out = frustums.map(f => {
+    if(f.color !== 'purple' || !f.ptsMm || f.ptsMm.length < 3) return f;
+    const pts = f.ptsMm, n = pts.length, ccw = area2(pts) > 0;
+    const shift = new Array(n).fill(0);
+    let any = false;
+    for(let i=0;i<n;i++){
+      const a = pts[i], b = pts[(i+1)%n];
+      const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy); if(len < 1e-6) continue;
+      const ux=dx/len, uy=dy/len, nP = outN(a,b,ccw);
+      for(let j=0;j<ydMm.length;j++){
+        const c = ydMm[j], d = ydMm[(j+1)%ydMm.length];
+        const ex=d.x-c.x, ey=d.y-c.y, el=Math.hypot(ex,ey); if(el < 1e-6) continue;
+        const vx=ex/el, vy=ey/el;
+        if(Math.abs(ux*vy - uy*vx) > sinTol) continue;                 // 平行でない
+        const nY = outN(c,d,ydCCW);
+        if(nP.x*nY.x + nP.y*nY.y <= 0) continue;                       // 向きが逆(山留の反対側の壁)
+        const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+        const dist = Math.abs((mx-c.x)*nY.x + (my-c.y)*nY.y);          // 辺の中点と山留の辺(直線)の距離
+        if(dist > PURPLE_YIELD_TOL_MM) continue;
+        const sA=(a.x-c.x)*vx+(a.y-c.y)*vy, sB=(b.x-c.x)*vx+(b.y-c.y)*vy;
+        if(Math.min(sA,sB) > el || Math.max(sA,sB) < 0) continue;      // 範囲が重ならない
+        // 紫の辺の直線を、山留の辺の直線+PUSHの位置まで外側へ(すでに外側ならそのまま)
+        const t = (c.x-a.x)*nP.x + (c.y-a.y)*nP.y + PURPLE_YIELD_PUSH_MM;
+        if(t > shift[i]) shift[i] = t;
+      }
+      if(shift[i] > 0) any = true;
+    }
+    if(!any) return f;
+    // 各辺を個別にshift[i]だけ外側へ動かし、隣り合う辺の直線の交点を新しい頂点にする
+    const lines = pts.map((a,i)=>{ const b=pts[(i+1)%n]; const nP=outN(a,b,ccw);
+      return {px:a.x+nP.x*shift[i], py:a.y+nP.y*shift[i], dx:b.x-a.x, dy:b.y-a.y, nx:nP.x, ny:nP.y}; });
+    const np = [];
+    for(let k=0;k<n;k++){
+      const L0 = lines[(k-1+n)%n], L1 = lines[k];
+      const cr = L0.dx*L1.dy - L0.dy*L1.dx;
+      if(Math.abs(cr) < 1e-9*Math.hypot(L0.dx,L0.dy)*Math.hypot(L1.dx,L1.dy)){
+        // 平行(同一直線上の連続辺): 元の頂点を、この点で接する辺の移動量の大きい方へ動かす
+        const sh = Math.max(shift[(k-1+n)%n], shift[k]); np.push({x:pts[k].x + L1.nx*sh, y:pts[k].y + L1.ny*sh}); continue;
+      }
+      const tt = ((L1.px-L0.px)*L1.dy - (L1.py-L0.py)*L1.dx) / cr;
+      np.push({x:L0.px + L0.dx*tt, y:L0.py + L0.dy*tt});
+    }
+    if(typeof _ringSelfIntersects === 'function' && _ringSelfIntersects(np)){
+      console.warn('[PURPLE-YIELD] 押し出し後の外周が自己交差するため、この紫オブジェクトは元の形のままにします');
+      return f;
+    }
+    changedObjs++; changedEdges += shift.filter(v=>v>0).length;
+    const xs=np.map(p=>p.x), ys=np.map(p=>p.y);
+    return {...f, ptsMm:np, x1:Math.min(...xs), x2:Math.max(...xs), y1:Math.min(...ys), y2:Math.max(...ys)};
+  });
+  return {frustums: out, changedEdges, changedObjs};
+}
+// ============================================================
+// r104(36回目): 山留ラインと紫オブジェクトの辺が重なった所は「山留ライン優先」にする。
+// 症状: 紫の壁ハッチ(purpleWallOverlay)と山留のハッチ(yamadomeOverlay)は別々に作られるため、
+// 辺が重なる(数mm〜十数mm差)と同じ位置に2枚のハッチが重なり、縞が二重に見えていた
+// (36回目のNode再現: 紫壁の三角形のうち山留面から7〜10mm以内のものが該当。他の辺は5m以上離れていて無関係)。
+// 対処: 山留のハッチ壁(1壁=2三角形=6頂点)から壁ごとの平面と範囲を求め、紫壁ハッチの三角形のうち
+// 3頂点とも「同じ山留壁の面から許容距離以内かつその壁の範囲内」のものを落とす(=紫の辺は無しとして扱う)。
+// 表示用ハッチだけの処理で、掘削形状メッシュ・体積計算・GLB(Land Logic含む)には一切影響しない。
+// 限界: 三角形単位の判定のため、紫の壁が山留の辺より長く部分的にしか重ならない場合、
+//       重なっていない部分を含む三角形は残る(その三角形の重なり部分は二重のまま)。
+// ============================================================
+const PURPLE_YD_MERGE_TOL_MM = 30; // 許容距離(mm)。微テーパー帯(10〜20mm)+頂点量子化(10mm)を見込む
+function _dropPurpleWallsOnYamadome(positions, uv, ydPositions, tol){
+  if(!positions || !ydPositions || ydPositions.length < 18) return {positions, uv, dropped:0};
+  const walls = [];
+  for(let o=0; o+18<=ydPositions.length; o+=18){
+    const pts = [];
+    for(let k=0;k<6;k++){
+      const p=[ydPositions[o+k*3], ydPositions[o+k*3+1], ydPositions[o+k*3+2]];
+      if(!pts.some(q=>Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2]) < 1e-7)) pts.push(p);
+    }
+    if(pts.length !== 4) continue;               // 想定外の構造(壁=4隅)でなければ判定しない
+    pts.sort((a,b)=>a[1]-b[1]);
+    const b0=pts[0], b1=pts[1];                  // 下端の2隅
+    const ex=b1[0]-b0[0], ez=b1[2]-b0[2], el=Math.hypot(ex,ez);
+    if(el < 1e-9) continue;
+    const e=[ex/el, ez/el];
+    const u=[pts[2][0]-b0[0],pts[2][1]-b0[1],pts[2][2]-b0[2]], w=[b1[0]-b0[0],b1[1]-b0[1],b1[2]-b0[2]];
+    let n=[u[1]*w[2]-u[2]*w[1], u[2]*w[0]-u[0]*w[2], u[0]*w[1]-u[1]*w[0]];
+    const nl=Math.hypot(n[0],n[1],n[2]); if(nl < 1e-12) continue; n=n.map(v=>v/nl);
+    let smin=Infinity, smax=-Infinity;
+    pts.forEach(p=>{ const sv=(p[0]-b0[0])*e[0]+(p[2]-b0[2])*e[1]; if(sv<smin)smin=sv; if(sv>smax)smax=sv; });
+    walls.push({b0, n, e, smin, smax, yBot:pts[0][1], yTop:pts[3][1]});
+  }
+  if(!walls.length) return {positions, uv, dropped:0};
+  const onWall = (px,py,pz,W) => {
+    const d = Math.abs((px-W.b0[0])*W.n[0] + (py-W.b0[1])*W.n[1] + (pz-W.b0[2])*W.n[2]);
+    if(d > tol) return false;
+    const sv = (px-W.b0[0])*W.e[0] + (pz-W.b0[2])*W.e[1];
+    return sv >= W.smin - tol && sv <= W.smax + tol && py >= W.yBot - tol && py <= W.yTop + tol;
+  };
+  const keepPos = [], keepUv = []; let dropped = 0;
+  for(let t=0; t+9<=positions.length; t+=9){
+    const drop = walls.some(W => onWall(positions[t],positions[t+1],positions[t+2],W)
+      && onWall(positions[t+3],positions[t+4],positions[t+5],W)
+      && onWall(positions[t+6],positions[t+7],positions[t+8],W));
+    if(drop){ dropped++; continue; }
+    for(let k=0;k<9;k++) keepPos.push(positions[t+k]);
+    if(uv) for(let k=0;k<6;k++) keepUv.push(uv[(t/9)*6+k]);
+  }
+  return {positions:new Float32Array(keepPos), uv:uv?new Float32Array(keepUv):uv, dropped};
+}
 async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
   if(!frustums || !frustums.length) return null;
   // r098(34回目セッション、Land Logic用): 通常はGL(y=0)の蓋を除去する(土量計算の
@@ -4599,6 +4906,14 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     return true;
   });
   if(!frustums.length) return null;
+  // r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁は作らない)。山留が無ければ何もしない。
+  {
+    const _yr = _purpleYieldToYamadome(frustums, getYamadomeMmPolygon(_ydOffsetX, _ydOffsetY));
+    if(_yr.changedObjs > 0){
+      frustums = _yr.frustums;
+      console.log(`[PURPLE-YIELD] 山留ラインと重なる紫の辺を${_yr.changedEdges}本、山留面より${PURPLE_YIELD_PUSH_MM}mm外側へ押し出しました(山留面優先、紫オブジェクト${_yr.changedObjs}個)`);
+    }
+  }
   console.log(`[3D ${VOLDIA3D_VER}] buildManifoldUnionGeom(Manifold方式) 開始: frustums=${frustums.length} 頂点量子化=${window._vertexQuantMm}mm`);
 
   // r044-fix②: 入力座標(ptsMm/holesMm)の事前量子化 — 既存踏襲。
@@ -5156,13 +5471,23 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   let _purpleWallOverlay = null;
   let _purpleWallsForPlacement = null; // 配置モード反映用(2026-08-29 引継ぎ18回目マスター指示)
   if(purpleTriPos.length > 0){
-    const positions = new Float32Array(purpleTriPos);
-    const uv = new Float32Array(purpleTriUv);
-    _purpleWallOverlay = { positions, uv };
-    // 配置モード送信用データ: 頂点座標は既にSC(mm→m)適用済み・frustum正規化
-    // 座標系(=山留のoffsetX/offsetYと同じ基準)なので、そのまま送るだけでよい。
-    _purpleWallsForPlacement = { positions, uv };
-    console.log(`[PURPLE-WALL] Manifold ID追跡により ${positions.length/9} 三角形を採用`);
+    let positions = new Float32Array(purpleTriPos);
+    let uv = new Float32Array(purpleTriUv);
+    // r104(36回目): 山留ラインと重なる紫の壁ハッチは落とす(山留ライン優先。ハッチの二重表示対策)
+    if(_ydOverlayData && _ydOverlayData.positions){
+      const fl = _dropPurpleWallsOnYamadome(positions, uv, _ydOverlayData.positions, PURPLE_YD_MERGE_TOL_MM * SC);
+      if(fl.dropped > 0){
+        console.log(`[PURPLE-WALL] 山留ラインと重なる紫壁ハッチを${fl.dropped}三角形除外(山留優先、許容${PURPLE_YD_MERGE_TOL_MM}mm)`);
+        positions = fl.positions; uv = fl.uv;
+      }
+    }
+    if(positions.length > 0){
+      _purpleWallOverlay = { positions, uv };
+      // 配置モード送信用データ: 頂点座標は既にSC(mm→m)適用済み・frustum正規化
+      // 座標系(=山留のoffsetX/offsetYと同じ基準)なので、そのまま送るだけでよい。
+      _purpleWallsForPlacement = { positions, uv };
+      console.log(`[PURPLE-WALL] Manifold ID追跡により ${positions.length/9} 三角形を採用`);
+    }
   }
 
 
