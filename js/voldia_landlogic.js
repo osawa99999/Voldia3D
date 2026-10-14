@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  Land Logic  ★現行バージョン: r012 (37回目セッション)
+//  Land Logic  ★現行バージョン: r013 (37回目セッション)
 //   r001: 34回目新設 / r006: Y軸符号修正 / r007: 既存躯体を本番buildManifoldUnionGeom+noSlope微テーパー方式へ変更
 //   r008: 微テーパーを10mm(頂点量子化単位の整数倍)に確定。voldia3d.js r099のf.taperMm対応が前提
 //   r009: 紫(山留)は法面ではなく微テーパー垂直のまま出力 / 既存躯体の引き算でGL蓋に内側の穴(ドーナツ)ができたら蓋をする
@@ -10,6 +10,9 @@
 //   r011(36回目): 微テーパー量(10mm)を、固定値ではなくvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(window経由)から読む。
 //         変更は voldia3d.js の数値1か所だけでよい。量子化へフォールバックした時だけ、量子化単位の整数倍に切り上げて使う。
 //         Shift+Lは日本語入力ON(IME)でも効くよう、物理キー(e.code==='KeyL')でも判定する。
+//   r013(37回目): 既存躯体(gray)の微テーパーを負(天端が内へ狭まる)にした。掘削側(void)は天端が外へ広がるのが正しいが、
+//         Manifold.differenceで引かれる側の既存躯体まで外へ広げると床の上へ張り出し、上から見て下向きの面(TIN規則違反)になるため。
+//         量子化フォールバックの切り上げも符号を保つ形に修正(例: -4 → 0 になって潰れるのを防ぐ)。voldia3d.js r108が前提。
 //   r012(37回目): 原点(0,0)と北上回転を出力に反映。原点=測点(1個なら自動/複数ならノースアロー設定で選択した測点)、
 //         北=ノースアローの方位角(northAngleDeg: 画面上=0°・時計回り正)。出力GLBは「X=東(Easting)・Y=高さ(GL=0)・Z=-北(-Northing)」
 //         =北が-Z方向(従来の画面上方向)に向く。LandXML化する時は E=X, N=-Z, Z=Y と読み替えるだけでよい。
@@ -149,7 +152,7 @@
     if(!ret){
       // 従来の量子化で組み直す時だけ、微テーパーを量子化単位qの整数倍に切り上げる(格子に丸められて潰れないように)
       const q = window._vertexQuantMm;
-      const g2 = (q > 0) ? group.map(f => (typeof f.taperMm === 'number') ? Object.assign({}, f, {taperMm: Math.ceil(f.taperMm / q) * q}) : f) : group;
+      const g2 = (q > 0) ? group.map(f => (typeof f.taperMm === 'number') ? Object.assign({}, f, {taperMm: Math.sign(f.taperMm) * Math.ceil(Math.abs(f.taperMm) / q) * q}) : f) : group;
       ret = await buildManifoldUnionGeom(g2, true, offsetX, offsetY, {removeGLCap:false});
     }
     return ret;
@@ -251,7 +254,7 @@
         console.warn('[LAND-LOGIC] 穴(holesMm)を持つ既存躯体は未対応(本番側もholesMm未対応)のため、このオブジェクトはスキップします');
         return;
       }
-      grayGroup.push(Object.assign({}, f, {color:'blue', noSlope:true, OD:0, taperMm:taperMm, D: targetBotMm + (f.tl||0)}));
+      grayGroup.push(Object.assign({}, f, {color:'blue', noSlope:true, OD:0, taperMm:-taperMm, D: targetBotMm + (f.tl||0)})); // r013: 既存躯体は天端が内へ狭まる向き(負)=引かれる側がオーバーハングしない
     });
 
     if(!excavGroup.length){
@@ -350,5 +353,5 @@
   // コンソールから手動でも呼べるようにしておく(Shift+L無しでのデバッグ用)
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
   window._llBuildGLHoleLids = buildGLHoleLids;   // 検証用
-  console.log('[LAND-LOGIC] r012 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
+  console.log('[LAND-LOGIC] r013 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
 })();

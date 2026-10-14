@@ -61,7 +61,8 @@ function isPointInsideFrustumExcavation(pt, f) {
     ? (typeof f.taperMm === 'number' ? f.taperMm : DOBOKU_VERTICAL_TAPER_FIXED_MM)
     : f.D * getSlopeRatio();
   let offsetDist = f.OD + ratio * taper;
-  if(offsetDist < 0) offsetDist = 0;
+  // r108: 負のtaperMm(既存躯体用=天端が内へ狭まる)の時だけ0クランプしない
+  if(offsetDist < 0 && !(f.noSlope && typeof f.taperMm === 'number' && f.taperMm < 0)) offsetDist = 0;
   
   const contour = f.noSlope
     ? offsetPolygon(f.ptsMm, offsetDist, false, 1.5) // r040: 鋭角コーナー暴走防止（1.0だと別箇所で重複面が発生したため1.5に調整）
@@ -4276,7 +4277,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r107(base:VoldiaM r069)"; // r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r108(base:VoldiaM r069)"; // r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -4987,7 +4988,12 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     // 共有定数DOBOKU_VERTICAL_TAPER_FIXED_MM(15mm)。Land Logicが「微テーパー量=頂点量子化単位の
     // 整数倍」にして、格子丸めで10mm/20mmに割れるのを避けるために使う。既存の呼び出しは無影響。
     const taper = f.noSlope ? (typeof f.taperMm === 'number' ? f.taperMm : DOBOKU_VERTICAL_TAPER_FIXED_MM) : f.D * getSlopeRatio();
-    const dist = Math.max(0, f.OD + ratio * taper);
+    // r108(37回目): taperMmが負の時(既存躯体: 天端が内へ狭まる向き)は0クランプしない。
+    //   Manifold.differenceで「引かれる側」の既存躯体が天端で外へ広がると、床の上へ張り出して
+    //   オーバーハング(上から見て下向きの面=TIN規則違反)になるため、向きを逆にする。
+    //   正のtaperMmや従来の呼び出し(taperMm未指定・正値)は従来どおり max(0, …) で完全に不変。
+    const _negTaper = f.noSlope && typeof f.taperMm === 'number' && f.taperMm < 0;
+    const dist = _negTaper ? (f.OD + ratio * taper) : Math.max(0, f.OD + ratio * taper);
     const q = window._vertexQuantMm;
     const minOffsetMm = (f.noSlope && q > 0 && ratio > 0.999) ? (q / 2 + 1) : 0;
     return f.noSlope ? offsetPolygon(f.ptsMm, dist, false, 1.5, minOffsetMm) : offsetPolygon(f.ptsMm, dist);

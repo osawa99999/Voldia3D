@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r036 (37回目セッション: 配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r037 (37回目セッション: (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -544,9 +544,24 @@ async function buildVoldiaGLBBytes(progressCb, excludeExistingStruct){
 //   window._lastCalcModeForPlacementに直近runCalc()時のmodeが残るので、
 //   同じ上書きロジックをここでも再現する(計算未実行でnullの場合は上書きなし)。
 async function buildExistingStructureOverlapGLBBytes(progressCb){
-  const fsRaw=getAllFrustums(); if(!fsRaw.length) return null;
   const calcMode = window._lastCalcModeForPlacement;
-  let fs = fsRaw;
+  let fs, excavFrustums, structFrustums;
+  // r037(37回目): 土量計算(doboku)後は、runCalcが確定済みのfs(キャッシュ)をそのまま使う。
+  // 旧実装は生frustum(getAllFrustums)から「天端0正規化・GL加算・既存躯体の切り下げ/平行移動・底面∞」を
+  // 自前で再現していたが、現状地盤GL≠0の時に再現が食い違い、(B)だけ深さ・形状が異常になった
+  // (掘削土量解析.glbのVoldia_OverlapForExcelで最深が-2.2mになっていた不具合。正しくは-0.7m)。
+  // 体積計算(runCalc→buildUnionFrustumGeometry)と同じ入力を使うので、基準値との食い違いも原理的に起きない。
+  const _cacheFs = window._lastCalcFrustumsForLandLogic;
+  if(calcMode==='doboku' && Array.isArray(_cacheFs) && _cacheFs.length){
+    fs = _cacheFs.slice();
+    fs._offsetX = window._lastCalcOffsetXForLandLogic || 0;
+    fs._offsetY = window._lastCalcOffsetYForLandLogic || 0;
+    excavFrustums = fs.filter(f=>f.color!=='gray');
+    structFrustums = fs.filter(f=>f.color==='gray');
+    if(!structFrustums.length) return null;
+  }else{
+  const fsRaw=getAllFrustums(); if(!fsRaw.length) return null;
+  fs = fsRaw;
   if(calcMode==='normal'){
     fs = fs.map(f=>({...f, noSlope:true}));
   } else if(calcMode==='doboku'){
@@ -555,15 +570,16 @@ async function buildExistingStructureOverlapGLBBytes(progressCb){
   }
   fs._offsetX = fsRaw._offsetX; fs._offsetY = fsRaw._offsetY;
 
-  const excavFrustums = fs.filter(f=>f.color!=='gray');
+  excavFrustums = fs.filter(f=>f.color!=='gray');
   const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
-  let structFrustums = fs.filter(f=>f.color==='gray').map(f=>({...f, D: f.D - _concVal}));
+  structFrustums = fs.filter(f=>f.color==='gray').map(f=>({...f, D: f.D - _concVal}));
   if(!structFrustums.length) return null;
   // r035(36回目): 土量計算(doboku)後のみ、既存躯体の底面∞。この関数のfsは生frustum系の座標
   // (botDepth=D-tl)なので、同じ座標系の掘削+既存躯体から最深を求めて余白0で揃える。
   if(window._lastCalcModeForPlacement === 'doboku'){
     const _siteBotB = siteDeepestBottomMm(excavFrustums.concat(structFrustums));
     structFrustums = structFrustums.map(f => extendGrayToBottomMm(f, _siteBotB));
+  }
   }
   if(progressCb) progressCb(20,'(B)重複ソリッドを計算中...');
   const geom = buildExistingStructureOverlapMesh(excavFrustums, structFrustums, fs._offsetX||0, fs._offsetY||0);
