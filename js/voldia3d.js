@@ -2108,7 +2108,7 @@ function computeDobokuSiteBottomFromRaw(rawFs, concVal, glOffMm){
         Dgg = tlg - (tl - Dg);                  // 下端は不動(r016)
         if(!(Dgg > 0)) return;
       }
-      list.push({D: Dgg, tl: tlg});
+      list.push({D: Dgg, tl: tlg - glOff}); // r107: runCalc本体と同じ「現状地盤=0」座標系(glOff=0なら従来と同じ)
     }else{
       if(!(tl - f.D + concVal < 0)) return;     // runCalc同様: 下端がGLより上は除外
       let d = (tl === 0) ? f.D : f.D - tl;
@@ -2791,9 +2791,14 @@ async function runCalc(mode){
       // 領域なので、天端をGLの値まで切り下げる(＝GLより下側にはみ出させて
       // 伸ばすことはしない。切るだけの片側クリップ)。下端は常に不動。
       _grayFsUntouched = _grayFsUntouched.map(f => {
-        const bottom = (f.tl||0) - f.D; // 描いた通りの不動の下端
+        const bottom = (f.tl||0) - f.D; // 描いた通りの不動の下端(GL基準)
         const clippedTl = Math.min(f.tl||0, glOff);
-        return {...f, tl: clippedTl, D: clippedTl - bottom};
+        // r107(37回目): 青・山留は「現状地盤=0(天端0)」の座標系で組まれている(D+=glOff)が、
+        // 既存躯体はGL基準(描いた値)のままだったため、GL≠0で青との高さが glOff だけ食い違っていた
+        // (体積計算・3D表示・Land Logic共通の不具合)。切り下げ(clip)まではGL基準で行い、
+        // その後に全体を -glOff だけ平行移動して現状地盤=0の座標系へ揃える。
+        // 平行移動なので大きさ(D)は不変(r016の「大きさを変えない」仕様はそのまま守る)。
+        return {...f, tl: clippedTl - glOff, D: clippedTl - bottom};
       }).filter(f=>{
         if(f.D <= 0){ excludedGL.push(f.name || '(無名、既存躯体)'); return false; }
         return true;
@@ -4271,7 +4276,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r106(base:VoldiaM r069)"; // r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r107(base:VoldiaM r069)"; // r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

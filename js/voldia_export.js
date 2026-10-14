@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r035 (36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r036 (37回目セッション: 配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -471,10 +471,19 @@ async function buildVoldiaGLBBytes(progressCb, excludeExistingStruct){
   existingStructGeoms = excludeExistingStruct ? [] : fs.filter(f=>f.color==='gray')
     .map(f => {
       let g = {...f, D: f.D - _concVal, noSlope:true, OD:0};
+      // r036(37回目): 土量計算(doboku)でGL≠0の時は、runCalc本体(voldia3d.js r107)と同じ手順で
+      // 既存躯体を「現状地盤=0」の座標系へ揃える(GL基準で切り下げ→-glOff平行移動)。
+      // これを忘れると配置モードの既存躯体だけGL基準のままになり、青・山留と高さが食い違う。
+      if(_siteBotEs !== null && window._glOffsetMm){
+        const _glOff = window._glOffsetMm, _tl0 = g.tl||0, _bot = _tl0 - g.D;
+        const _clip = Math.min(_tl0, _glOff);
+        if(!(_clip - _bot > 0)) return null;                 // runCalcと同じ: 深さ0以下は対象外
+        g = {...g, tl: _clip - _glOff, D: _clip - _bot};
+      }
       if(_siteBotEs !== null) g = extendGrayToBottomMm(g, _siteBotEs);
       return buildFrustumGeometry(g);
     })
-    .filter(g => g.positions && g.positions.length);
+    .filter(g => g && g.positions && g.positions.length);
   if(!exportGeoms||!exportGeoms.length)throw new Error('先に「計算」ボタンを押してください');
   if(progressCb)progressCb(40,'メッシュを結合中...');
   let totalVerts=0,totalTris=0;

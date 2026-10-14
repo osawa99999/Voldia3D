@@ -441,7 +441,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0124</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0125</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1039,11 +1039,12 @@ D&D or クリックでロードしてください</p>
 <div id="toast-top"></div>
 
 <script src="lib/earcut.js"></script>
-<script src="js/voldia_landlogic.js"></script>
 <script src="js/voldia_main.js"></script>
 
 <script src="js/voldia3d.js"></script>
 <script src="js/voldia_export.js"></script>
+<!-- r125(37回目): Land Logic(Shift+L)の読み込みタグが無く、リスナーが一度も登録されていなかったため追加。voldia3d.js/voldia_export.jsより後に読み込む -->
+<script src="js/voldia_landlogic.js"></script>
 
 <!-- ClipperLib は冒頭の inline scriptに含まれています -->
 

@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  Land Logic  ★現行バージョン: r011 (36回目セッション)
+//  Land Logic  ★現行バージョン: r012 (37回目セッション)
 //   r001: 34回目新設 / r006: Y軸符号修正 / r007: 既存躯体を本番buildManifoldUnionGeom+noSlope微テーパー方式へ変更
 //   r008: 微テーパーを10mm(頂点量子化単位の整数倍)に確定。voldia3d.js r099のf.taperMm対応が前提
 //   r009: 紫(山留)は法面ではなく微テーパー垂直のまま出力 / 既存躯体の引き算でGL蓋に内側の穴(ドーナツ)ができたら蓋をする
@@ -9,6 +9,11 @@
 //         量子化0で構築/Manifold化に失敗した場合は従来の量子化で組み直し(警告ログ)。
 //   r011(36回目): 微テーパー量(10mm)を、固定値ではなくvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(window経由)から読む。
 //         変更は voldia3d.js の数値1か所だけでよい。量子化へフォールバックした時だけ、量子化単位の整数倍に切り上げて使う。
+//         Shift+Lは日本語入力ON(IME)でも効くよう、物理キー(e.code==='KeyL')でも判定する。
+//   r012(37回目): 原点(0,0)と北上回転を出力に反映。原点=測点(1個なら自動/複数ならノースアロー設定で選択した測点)、
+//         北=ノースアローの方位角(northAngleDeg: 画面上=0°・時計回り正)。出力GLBは「X=東(Easting)・Y=高さ(GL=0)・Z=-北(-Northing)」
+//         =北が-Z方向(従来の画面上方向)に向く。LandXML化する時は E=X, N=-Z, Z=Y と読み替えるだけでよい。
+//         測点が無い/複数で未選択の時は出力を止めてtoastで知らせる(原点なしGLBは出さない)。出力ファイル名はTest3D_origin.glb。
 //  ------------------------------------------------------------
 //  目的: LandXML(TIN)出力に向けた試験用GLBを生成する、既存の表示/積算ロジック
 //  (buildShellMesh・buildManifoldUnionGeom・buildExistingStructureOverlapMesh等)
@@ -156,7 +161,8 @@
   }
 
   document.addEventListener('keydown', function(e){
-    if(e.key !== 'L' && e.key !== 'l') return;
+    // 日本語入力(IME)がONだとe.keyが'Process'等になり反応しないため、物理キー(e.code)でも判定する
+    if(e.key !== 'L' && e.key !== 'l' && e.code !== 'KeyL') return;
     if(!e.shiftKey) return;
     if(!_llReady()){
       console.log('[LAND-LOGIC] Shift+Lは「3Dイメージで土量計算を実行した直後」のみ有効です');
@@ -169,12 +175,49 @@
     });
   });
 
+  // ── r012: 原点測点の決定 ───────────────────────────────
+  // 測点が1個→問答無用でそれが原点 / 複数→ノースアロー設定(🧭)で選んだ測点 / 0個または複数で未選択→null(出力を止める)
+  function _llResolveOrigin(){
+    const pts = (typeof surveyPts !== 'undefined' && Array.isArray(surveyPts)) ? surveyPts : [];
+    if(pts.length === 0) return {ok:false, msg:'⚠ 測点がありません。📍測点設置で原点にする点を置いてください'};
+    let idx = (typeof originSurveyIdx === 'number' && pts[originSurveyIdx]) ? originSurveyIdx : null;
+    let auto = false;
+    if(idx === null){
+      if(pts.length === 1){ idx = 0; auto = true; }
+      else return {ok:false, msg:'⚠ 測点が複数あります。ノースアロー設定(右上🧭)で原点にする測点を選んでください'};
+    }
+    return {ok:true, idx:idx, pt:pts[idx], auto:auto};
+  }
+  // ── r012: 原点を(0,0)にして、北が-Z方向を向くよう回転する ─────────
+  // 入力pos: Voldia3D座標(x=2D右, z=2D下, 単位m)。thetaDeg: ノースアロー方位角(画面上=0°・時計回り正)。
+  // 画面上の北単位ベクトルn=(sinθ,-cosθ)、東e=(cosθ,sinθ) → E=dx*cosθ+dz*sinθ, N=dx*sinθ-dz*cosθ
+  // 出力: x=E, y=y(GL=0のまま), z=-N。この写像は回転+平行移動のみ(行列式+1)なので面の向き(巻き方向)は変わらない。
+  function _llToNorthUp(pos, oxM, ozM, thetaDeg){
+    const t = thetaDeg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+    const out = new Float32Array(pos.length);
+    for(let i=0;i<pos.length;i+=3){
+      const dx = pos[i] - oxM, dz = pos[i+2] - ozM;
+      out[i]   = dx*c + dz*s;
+      out[i+1] = pos[i+1];
+      out[i+2] = -(dx*s - dz*c);
+    }
+    return out;
+  }
+  window._llToNorthUp = _llToNorthUp; // 検証用
+
   async function buildAndDownloadLandLogicGLB(){
     const fs = window._lastCalcFrustumsForLandLogic;
     const offsetX = window._lastCalcOffsetXForLandLogic;
     const offsetY = window._lastCalcOffsetYForLandLogic;
     if(!fs || !fs.length){
       console.warn('[LAND-LOGIC] frustumデータがありません(先に3Dイメージで土量計算を実行してください)');
+      return;
+    }
+    // r012: 原点が決まらないなら、重い構築に入る前に止める
+    const _org = _llResolveOrigin();
+    if(!_org.ok){
+      console.warn('[LAND-LOGIC] 原点が決まらないため出力を中止:', _org.msg);
+      if(typeof toast === 'function') toast(_org.msg, 3500);
       return;
     }
     console.log(`[LAND-LOGIC] 開始: frustum総数=${fs.length}`);
@@ -277,6 +320,19 @@
     console.log(`[LAND-LOGIC] 穴の蓋: ${lids.holes}箇所 / 蓋の三角形=${lids.tris.length/3}`);
     console.log(`[LAND-LOGIC] 最終三角形=${cleanIdx.length/3} (蓋除去=${removedCapFinal} 縮退除去=${removedDegenerate})`);
 
+    // r012: 原点(測点)を(0,0)にして北上回転(座標の意味はファイル先頭のr012コメント参照)
+    const _mmpx = (25.4/72) * scaleDenom / RS;                       // voldia3d.jsと同じmm/px
+    const _oxM = (_org.pt.x * _mmpx - offsetX) * 0.001;
+    const _ozM = (_org.pt.y * _mmpx - offsetY) * 0.001;
+    const _theta = (typeof northAngleDeg === 'number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0;
+    const _dms = (typeof degToDMSStr === 'function') ? degToDMSStr(_theta) : (_theta + '°');
+    console.log(`[LAND-LOGIC] 原点=測点No.${_org.idx+1}${_org.auto?'(1個のため自動)':''} 3D位置(x,z)=(${_oxM.toFixed(4)}, ${_ozM.toFixed(4)})m / 北方位角=${_dms} (${_theta.toFixed(6)}°)`);
+    finalPositions = _llToNorthUp(finalPositions, _oxM, _ozM, _theta);
+    { let mnx=1e9,mxx=-1e9,mnz=1e9,mxz=-1e9,mny=1e9,mxy=-1e9;
+      for(let i=0;i<finalPositions.length;i+=3){ const x=finalPositions[i],y=finalPositions[i+1],z=finalPositions[i+2];
+        if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y; if(z<mnz)mnz=z; if(z>mxz)mxz=z; }
+      console.log(`[LAND-LOGIC] 出力範囲 東(E)=${mnx.toFixed(3)}〜${mxx.toFixed(3)} / 北(N)=${(-mxz).toFixed(3)}〜${(-mnz).toFixed(3)} / 高さ=${mny.toFixed(3)}〜${mxy.toFixed(3)} (m, 原点=0)`); }
+
     const glbBytes = encodeMultiGLB([{
       positions: finalPositions,
       indices: new Uint32Array(cleanIdx),
@@ -285,14 +341,14 @@
     const blob = new Blob([glbBytes], {type:'model/gltf-binary'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'Test3D.glb';
+    a.href = url; a.download = 'Test3D_origin.glb';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    console.log('[LAND-LOGIC] Test3D.glb をダウンロードしました');
+    console.log('[LAND-LOGIC] Test3D_origin.glb をダウンロードしました');
   }
 
   // コンソールから手動でも呼べるようにしておく(Shift+L無しでのデバッグ用)
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
   window._llBuildGLHoleLids = buildGLHoleLids;   // 検証用
-  console.log('[LAND-LOGIC] r011 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
+  console.log('[LAND-LOGIC] r012 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
 })();
