@@ -441,7 +441,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0125</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0126</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -785,7 +785,7 @@ D&D or クリックでロードしてください</p>
             <div class="doboku-row" style="margin:0;" title="現況地盤とGLの差。マイナスの場合のみ「-」を付けて入力(例: -200)">
               <label>現状地盤 GL</label>
               <div class="doboku-inp-wrap">
-                <input type="text" class="doboku-inp" id="gl-offset-mm" value="+0" placeholder="-200"
+                <input type="text" class="doboku-inp" id="gl-offset-mm" value="+0" placeholder="-200" autocomplete="off"
                   inputmode="numeric" onchange="onGlOffsetChange()">
                 <span class="doboku-unit">mm</span>
               </div>

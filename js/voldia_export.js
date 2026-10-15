@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r037 (37回目セッション: (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r038 (37回目セッション: 現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -27,6 +27,9 @@ async function exportCSV(){
     // concThick(捨てコン+砕石)は既にr013時点から保存済みだったが、この2つは未保存だった。
     globalOverdig:( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value)),
     slopeAngleDeg: (typeof slopeAngleDeg==='number' && !isNaN(slopeAngleDeg)) ? slopeAngleDeg : 45,
+    // r038(37回目): 現状地盤GL(mm)もVoldファイルに保存する。従来は保存も復元もされず、読込後は
+    // 入力欄の見た目と適用値(window._glOffsetMm)が食い違う原因になっていた。
+    glOffsetMm: (typeof window._glOffsetMm==='number' && !isNaN(window._glOffsetMm)) ? window._glOffsetMm : 0,
     backgroundImageDataURL: bgDataURL,
     placementObjects: placementObjects,
     surveyPts: (surveyPts||[]).map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)})), // r024(AreCal移植): 測点もmm座標で保存
@@ -152,6 +155,14 @@ async function applyVoldData(data){
       b.style.fontWeight = on ? 'bold' : 'normal';
       b.classList.toggle('active', on);
     });
+  }
+  // r038(37回目): 現状地盤GLを復元する。キーが無い旧ファイルは0に戻す(直前に開いていたファイルの値が
+  // 残って別ファイルの土量に混ざらないよう、「読込=状態を確定させる」扱いにする)。表示と適用値を必ず揃える。
+  {
+    const _g = (typeof data.glOffsetMm==='number' && !isNaN(data.glOffsetMm)) ? Math.round(data.glOffsetMm) : 0;
+    window._glOffsetMm = _g;
+    const _glEl = document.getElementById('gl-offset-mm');
+    if(_glEl) _glEl.value = (_g>=0?'+':'') + _g;
   }
   // r020(至急修正): 読込後にスタート画面の「PDFをD&D」表示が消えず、作図画面に
   // 進めなかったバグを修正。PDF読込(loadPDF)・方眼紙モード開始(startGridPaperMode)

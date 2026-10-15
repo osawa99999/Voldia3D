@@ -19,6 +19,10 @@ const DOBOKU_VERTICAL_TAPER_FIXED_MM = 15;
 //   使用箇所の一覧は「Voldia_微勾配10mm_使用箇所一覧」を参照。
 const LANDXML_MICRO_TAPER_MM = 10;
 window.LANDXML_MICRO_TAPER_MM = LANDXML_MICRO_TAPER_MM;
+// r109(37回目): 微テーパー(LandXML用の「壁を倒す量」)を壁の高さ別の可変にした(マスター案: 最小15mm・最大55mm)。
+//   倒し量[mm] = clamp( baseMm + perMeterMm × 壁の高さ[m] , minMm , maxMm )  → 1m:15 / 2m:25 / 3m:35 / 4m:45 / 5m以上:55
+//   ここ1か所の数値を変えるだけで全体に反映される。LANDXML_MICRO_TAPER_MMは旧版互換(この設定が無い時のみ使用)。
+window.LANDXML_TAPER = { minMm: 15, maxMm: 55, baseMm: 5, perMeterMm: 10 };
 // 追加(2026-08-28 引継ぎ18回目マスター指示): 3Dイメージの体積表示に桁区切りを
 // 追加。数値が長くなってres-box幅(左パネル260px相当)からはみ出しそうな場合は
 // 自動的に1段階フォントサイズを縮小する(.vol-bigの基準は2.2em)。
@@ -2491,6 +2495,9 @@ async function runCalc(mode){
   // r075マスター指示: 2D画面で図形を選択したまま3Dイメージへ移動すると選択色が
   // 残ったままになる不具合の修正。3D計算実行時に必ず選択状態をクリアする。
   if(selectedSet.size>0){ clearSelection(); }
+  // r109(37回目): 現状地盤GLは「入力欄に見えている値=適用する値」を計算の度に保証する。onchangeでしか反映
+  // されない作りだと、ブラウザの入力欄復元や.vold読込の後に、表示は-1200なのに適用値は0という食い違いが起きる。
+  { const _glEl = document.getElementById('gl-offset-mm'); if(_glEl && typeof onGlOffsetChange === 'function') onGlOffsetChange(); }
   // Voldia版: 前回計算で赤表示になったエラーフラグを一旦リセット（再計算で直っていれば消える）
   if(shapes.some(sh=>sh._voldiaGeoError)){
     shapes.forEach(sh=>{ sh._voldiaGeoError=false; });
@@ -4277,7 +4284,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r108(base:VoldiaM r069)"; // r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r109(base:VoldiaM r069)"; // r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  Land Logic  ★現行バージョン: r013 (37回目セッション)
+//  Land Logic  ★現行バージョン: r014 (37回目セッション)
 //   r001: 34回目新設 / r006: Y軸符号修正 / r007: 既存躯体を本番buildManifoldUnionGeom+noSlope微テーパー方式へ変更
 //   r008: 微テーパーを10mm(頂点量子化単位の整数倍)に確定。voldia3d.js r099のf.taperMm対応が前提
 //   r009: 紫(山留)は法面ではなく微テーパー垂直のまま出力 / 既存躯体の引き算でGL蓋に内側の穴(ドーナツ)ができたら蓋をする
@@ -10,6 +10,8 @@
 //   r011(36回目): 微テーパー量(10mm)を、固定値ではなくvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(window経由)から読む。
 //         変更は voldia3d.js の数値1か所だけでよい。量子化へフォールバックした時だけ、量子化単位の整数倍に切り上げて使う。
 //         Shift+Lは日本語入力ON(IME)でも効くよう、物理キー(e.code==='KeyL')でも判定する。
+//   r014(37回目): 倒し量を壁の高さ別の可変に(マスター案: 最小15mm・最大55mm)。式=clamp(5mm+10mm/m×高さ, 15, 55)。山留は自身の高さ、
+//         既存躯体は見える高さ(=サイト最深)で決め、同じ傾きを延長後の深さ全体に掛ける。細い躯体は収縮量を短辺の40%までに制限。voldia3d.js r109が前提。
 //   r013(37回目): 既存躯体(gray)の微テーパーを負(天端が内へ狭まる)にした。掘削側(void)は天端が外へ広がるのが正しいが、
 //         Manifold.differenceで引かれる側の既存躯体まで外へ広げると床の上へ張り出し、上から見て下向きの面(TIN規則違反)になるため。
 //         量子化フォールバックの切り上げも符号を保つ形に修正(例: -4 → 0 になって潰れるのを防ぐ)。voldia3d.js r108が前提。
@@ -236,11 +238,19 @@
     const _q = window._vertexQuantMm;
     // r011: 微テーパー量はvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(1か所管理)。読めない時だけ従来の10mm。
     const taperMm = (typeof window.LANDXML_MICRO_TAPER_MM === 'number' && window.LANDXML_MICRO_TAPER_MM > 0) ? window.LANDXML_MICRO_TAPER_MM : 10;
+    // r014(37回目): 倒し量は壁の高さ別の可変(voldia3d.jsのwindow.LANDXML_TAPER: 最小15mm〜最大55mm、既定は5mm+10mm/m)。
+    //   hMm: 壁の高さ[mm] → 天端側の水平オフセット[mm]。設定が読めない時だけ従来の固定値(taperMm)。
+    const _TP = window.LANDXML_TAPER;
+    const topOffsetMm = (hMm) => {
+      if(!_TP) return taperMm;
+      const v = _TP.baseMm + _TP.perMeterMm * (hMm/1000);
+      return Math.min(_TP.maxMm, Math.max(_TP.minMm, v));
+    };
     // r009: 紫(山留)は土量計算どおり「微テーパー垂直(noSlope)」のまま。法面(傾斜強制ON)にしない。
     //       青(通常)だけ傾斜を強制ON(土量計算では傾斜が効いている値をそのまま使う)。
     const excavGroup = fs.filter(f=>f.color!=='gray').map(f=>
       (f.color==='purple')
-        ? Object.assign({}, f, {noSlope:true, taperMm:taperMm})
+        ? Object.assign({}, f, {noSlope:true, taperMm:topOffsetMm(f.D)}) // r014: 山留(紫)は自身の壁の高さ(=D)で決める
         : Object.assign({}, f, {noSlope:false}));
     // 既存躯体(gray): r007。本番のbuildManifoldUnionGeomに通す。
     //  - noSlope:true  → 固定15mm微テーパー(山留・紫と同じLandXML対応の傾斜)
@@ -254,14 +264,27 @@
         console.warn('[LAND-LOGIC] 穴(holesMm)を持つ既存躯体は未対応(本番側もholesMm未対応)のため、このオブジェクトはスキップします');
         return;
       }
-      grayGroup.push(Object.assign({}, f, {color:'blue', noSlope:true, OD:0, taperMm:-taperMm, D: targetBotMm + (f.tl||0)})); // r013: 既存躯体は天端が内へ狭まる向き(負)=引かれる側がオーバーハングしない
+      // r014: 既存躯体の見える壁の高さ≒サイト最深(siteMaxDepthMm)。その高さで倒し量を決め、同じ傾き(mm/mm)を
+      //       延長後の深さD全体に掛ける(=見える部分で倒し量がちょうど topOffsetMm になる)。向きは負(天端が内へ狭まる, r013)。
+      const _Dext = targetBotMm + (f.tl||0);
+      let _gTaper = -(topOffsetMm(siteMaxDepthMm) / Math.max(siteMaxDepthMm, 1)) * _Dext;
+      // 躯体が細いと内向きの収縮で潰れる(幅<収縮量×2でManifold不正)ため、収縮量を外形の短辺の40%までに制限する。
+      if(f.ptsMm && f.ptsMm.length >= 3){
+        let mnx=1e18,mxx=-1e18,mny=1e18,mxy=-1e18;
+        f.ptsMm.forEach(p=>{ if(p.x<mnx)mnx=p.x; if(p.x>mxx)mxx=p.x; if(p.y<mny)mny=p.y; if(p.y>mxy)mxy=p.y; });
+        const cap = 0.4 * Math.min(mxx-mnx, mxy-mny);
+        if(-_gTaper > cap){ console.warn(`[LAND-LOGIC] 既存躯体が細いため倒し量を${(-_gTaper).toFixed(1)}→${cap.toFixed(1)}mmに制限しました`); _gTaper = -cap; }
+      }
+      grayGroup.push(Object.assign({}, f, {color:'blue', noSlope:true, OD:0, taperMm:_gTaper, D: _Dext})); // r013: 既存躯体は天端が内へ狭まる向き(負)=引かれる側がオーバーハングしない
     });
 
     if(!excavGroup.length){
       console.warn('[LAND-LOGIC] 通常/山留オブジェクトが1つもありません');
       return;
     }
-    console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayGroup.length}個 (noSlope・微テーパー=${taperMm}mm・量子化=${window._vertexQuantMm}mm、下端延長=${targetBotMm}mm)`);
+    console.log(`[LAND-LOGIC] 通常+山留=${excavGroup.length}個 / 既存躯体=${grayGroup.length}個 (微テーパー=${_TP ? `可変 ${_TP.minMm}〜${_TP.maxMm}mm(${_TP.baseMm}mm+${_TP.perMeterMm}mm/m)` : taperMm+'mm固定'}・量子化=${window._vertexQuantMm}mm、下端延長=${targetBotMm}mm)`);
+    excavGroup.filter(f=>f.color==='purple').forEach(f=>console.log(`[LAND-LOGIC]   山留 壁高さ=${Math.round(f.D)}mm → 倒し量=${f.taperMm.toFixed(1)}mm`));
+    grayGroup.forEach(f=>console.log(`[LAND-LOGIC]   既存躯体 見える高さ=${Math.round(siteMaxDepthMm)}mm → 延長D=${Math.round(f.D)}mm全体で天端の内向き=${(-f.taperMm).toFixed(1)}mm`));
 
     // r002(実機検証で判明・修正): Manifold-3Dの`Manifold`クラスは完全に閉じた
     // ソリッドしか受け付けない。GL蓋を除去した「上から覗き込む」表示用の開いた
@@ -353,5 +376,5 @@
   // コンソールから手動でも呼べるようにしておく(Shift+L無しでのデバッグ用)
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
   window._llBuildGLHoleLids = buildGLHoleLids;   // 検証用
-  console.log('[LAND-LOGIC] r013 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
+  console.log('[LAND-LOGIC] r014 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
 })();
