@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 
 let sortMode = 'no';
@@ -3031,11 +3031,12 @@ function setSubMode(on){
 
 // ================================================================
 //  r037(37回目): ✏修正モード(頂点ドラッグ)
-//   ・四角形(type==='rect') … どの頂点をドラッグしても図形全体の平行移動のみ
+//   ・四角形(type==='rect') … 頂点=向かいの頂点を固定して2辺を平行に動かし拡大縮小(常に直角の長方形) / 辺の中点◆=その辺だけ平行移動
 //   ・多角形/その他        … その頂点だけ自由移動(穴(holes)の頂点も可)
 //   ・マウスを離した時に判定し、自己交差・辺の接触・同一点・面積過小・穴のはみ出しがあれば
 //     「その形状は出来ません」とトーストを出して元の形状に戻す。成功時だけUndo履歴に積む。
-//   ・頂点を増やす/減らすことはしない。Shiftで直交移動、他図形の端点にスナップ。ESCでキャンセル。
+//   ・頂点を増やす/減らすことはしない。Shiftで直交移動(多角形)。ESCでキャンセル。
+//   ・オブジェクトスナップは描画ツールと同じgetSnap(端点・中点・線上・交点・測点・山留・元図・方眼)。動かしている図形自身には吸着しない。
 // ================================================================
 function _editRings(sh){ return [sh.pts].concat(sh.holes||[]); }
 function _editCopyRings(sh){ return { pts: sh.pts.map(p=>({x:p.x,y:p.y})), holes: sh.holes ? sh.holes.map(h=>h.map(p=>({x:p.x,y:p.y}))) : undefined }; }
@@ -3084,14 +3085,37 @@ function _editShapeValid(sh){
   }
   return true;
 }
+// 四角形(type==='rect')が「直角の長方形」か(頂点0→1と0→3が直交し、4点目が平行四辺形になっているか)
+function _editRectAxes(sh){
+  if(sh.type!=='rect'||!sh.pts||sh.pts.length!==4) return null;
+  const p=sh.pts, ex=p[1].x-p[0].x, ey=p[1].y-p[0].y, fx=p[3].x-p[0].x, fy=p[3].y-p[0].y;
+  const W=Math.hypot(ex,ey), H=Math.hypot(fx,fy); if(W<1e-6||H<1e-6) return null;
+  const u={x:ex/W,y:ey/W}, v={x:fx/H,y:fy/H};
+  if(Math.abs(u.x*v.x+u.y*v.y)>1e-6) return null;                       // 直交していない → 多角形として扱う
+  if(Math.hypot(p[2].x-(p[1].x+fx),p[2].y-(p[1].y+fy))>1e-6*Math.max(W,H)+1e-6) return null; // 平行四辺形でない
+  return {u,v};
+}
+function _editSignedArea(r){ let a=0; for(let i=0;i<r.length;i++){ const j=(i+1)%r.length; a+=r[i].x*r[j].y-r[j].x*r[i].y; } return a/2; }
 function _editHit(lx,ly){
   const HIT=10/zoom; let best=null,bd=HIT;
   for(let si=shapes.length-1;si>=0;si--){
     const sh=shapes[si];
     if(sh.enabled===false||colorFilter[sh.color||'blue']===false) continue;
     _editRings(sh).forEach((ring,ri)=>ring.forEach((p,vi)=>{
-      const d=Math.hypot(p.x-lx,p.y-ly); if(d<bd){bd=d;best={si,ri,vi};}
+      const d=Math.hypot(p.x-lx,p.y-ly); if(d<bd){bd=d;best={kind:'vertex',si,ri,vi};}
     }));
+  }
+  if(best) return best;
+  // 頂点が無ければ、直角四角形の「辺の中点」(その辺だけ平行移動するハンドル)を探す
+  bd=HIT;
+  for(let si=shapes.length-1;si>=0;si--){
+    const sh=shapes[si];
+    if(sh.enabled===false||colorFilter[sh.color||'blue']===false) continue;
+    if(!_editRectAxes(sh)) continue;
+    for(let k=0;k<4;k++){
+      const a=sh.pts[k], b=sh.pts[(k+1)%4], d=Math.hypot((a.x+b.x)/2-lx,(a.y+b.y)/2-ly);
+      if(d<bd){bd=d;best={kind:'edge',si,ri:0,vi:k};}
+    }
   }
   return best;
 }
@@ -3099,33 +3123,58 @@ function editMouseDown(lx,ly){
   const h=_editHit(lx,ly);
   if(!h){ return; }
   const sh=shapes[h.si];
-  editDrag={si:h.si,ri:h.ri,vi:h.vi,start:{x:_editRings(sh)[h.ri][h.vi].x,y:_editRings(sh)[h.ri][h.vi].y},orig:_editCopyRings(sh),moved:false};
-  setToolBar(sh.type==='rect' ? '✏ 四角形は平行移動のみです（ESCでキャンセル）' : '✏ 頂点を移動中（離した時に形状を確認します・ESCでキャンセル）');
+  const orig=_editCopyRings(sh);
+  const start = h.kind==='edge'
+    ? {x:(orig.pts[h.vi].x+orig.pts[(h.vi+1)%4].x)/2, y:(orig.pts[h.vi].y+orig.pts[(h.vi+1)%4].y)/2}
+    : {x:_editRings(sh)[h.ri][h.vi].x, y:_editRings(sh)[h.ri][h.vi].y};
+  editDrag={kind:h.kind,si:h.si,ri:h.ri,vi:h.vi,start,orig,moved:false,axes:_editRectAxes(sh)};
+  setToolBar(editDrag.axes
+    ? (h.kind==='edge' ? '✏ 四角形: この辺だけ平行に動かします（ESCでキャンセル）' : '✏ 四角形: 向かいの頂点を固定し、2辺を平行に動かして拡大縮小します（ESCでキャンセル）')
+    : '✏ 頂点を移動中（離した時に形状を確認します・ESCでキャンセル）');
+}
+// オブジェクトスナップ: 描画ツールと同じgetSnap(端点・中点・線上・交点・測点・山留・元図・方眼)を使う。
+// ただし「いま動かしている図形自身」には吸着しないよう、その図形の外周を一時的に空にして呼ぶ。
+// 多角形は、動かしている頂点以外の自分の頂点(端点)にだけ追加で吸着できる。
+function _editSnap(d,vx,vy){
+  const sh=shapes[d.si]; const saved=sh.pts; sh.pts=[];
+  let snap=null; try{ snap=getSnap(vx,vy); } finally { sh.pts=saved; }
+  if(!d.axes && d.ri===0){
+    const tol=SNAP_PX/zoom*0.85; let bd=snap?Math.hypot(snap.x-vx,snap.y-vy):tol;
+    d.orig.pts.forEach((p,i)=>{ if(i===d.vi) return; const dd=Math.hypot(p.x-vx,p.y-vy); if(dd<=tol && dd<bd){ bd=dd; snap={x:p.x,y:p.y,type:'endpoint'}; } });
+  }
+  return snap;
 }
 function editMouseMove(e,lx,ly){
   if(!editDrag){
     const h=_editHit(lx,ly);
-    const changed=(!!h!==!!editHover)||(h&&editHover&&(h.si!==editHover.si||h.ri!==editHover.ri||h.vi!==editHover.vi));
+    const changed=(!!h!==!!editHover)||(h&&editHover&&(h.kind!==editHover.kind||h.si!==editHover.si||h.ri!==editHover.ri||h.vi!==editHover.vi));
     editHover=h; drawCv.style.cursor=h?'move':'';
     if(changed) redraw();
     return;
   }
-  const d=editDrag, sh=shapes[d.si];
+  const d=editDrag, sh=shapes[d.si], o=d.orig;
   let vx=lx,vy=ly;
-  if(shiftDown) ({x:vx,y:vy}=s90(d.start.x,d.start.y,vx,vy));
-  // スナップは「他図形の端点」のみ(自分自身の頂点には吸着させない)
-  const tol=SNAP_PX/zoom; let gsnap=null,gd=tol*0.85;
-  shapes.forEach((s2,si2)=>{
-    if(si2===d.si||s2.enabled===false) return;
-    _editRings(s2).forEach(r=>r.forEach(p=>{ const dd=Math.hypot(vx-p.x,vy-p.y); if(dd<gd){gd=dd;gsnap=p;} }));
-  });
-  showSnap(gsnap?{x:gsnap.x,y:gsnap.y,type:'endpoint'}:null,e.clientX,e.clientY);
-  const np=gsnap?{x:gsnap.x,y:gsnap.y}:roundPt({x:vx,y:vy});
-  const o=d.orig;
-  if(sh.type==='rect'){
-    const dx=np.x-d.start.x, dy=np.y-d.start.y;
-    sh.pts=o.pts.map(p=>({x:p.x+dx,y:p.y+dy}));
-    if(o.holes) sh.holes=o.holes.map(h=>h.map(p=>({x:p.x+dx,y:p.y+dy})));
+  if(shiftDown && !d.axes) ({x:vx,y:vy}=s90(d.start.x,d.start.y,vx,vy));
+  const snap=_editSnap(d,vx,vy);
+  showSnap(snap,e.clientX,e.clientY);
+  const np=snap?{x:snap.x,y:snap.y}:roundPt({x:vx,y:vy});
+  if(d.axes){
+    const {u,v}=d.axes, P=o.pts; let q;
+    if(d.kind==='edge'){
+      // 辺の中点ハンドル: その辺だけを法線方向へ平行移動(隣の2辺は伸び縮みするだけ)
+      const k=d.vi, k2=(k+1)%4, ex=P[k2].x-P[k].x, ey=P[k2].y-P[k].y, L=Math.hypot(ex,ey);
+      const n={x:-ey/L,y:ex/L}, t=(np.x-d.start.x)*n.x+(np.y-d.start.y)*n.y;
+      q=P.map((p,i)=>(i===k||i===k2)?{x:p.x+n.x*t,y:p.y+n.y*t}:{x:p.x,y:p.y});
+    } else {
+      // 頂点ハンドル: 向かいの頂点を固定し、2辺を平行に動かして拡大縮小(常に直角の長方形のまま)
+      const opp=P[(d.vi+2)%4], dx=np.x-opp.x, dy=np.y-opp.y, a=dx*u.x+dy*u.y, b=dx*v.x+dy*v.y;
+      q=P.map(p=>{ const rx=p.x-opp.x, ry=p.y-opp.y, cu=rx*u.x+ry*u.y, cv=rx*v.x+ry*v.y;
+        const fa=Math.abs(cu)>1e-6?a:0, fb=Math.abs(cv)>1e-6?b:0;
+        return {x:opp.x+u.x*fa+v.x*fb, y:opp.y+u.y*fa+v.y*fb}; });
+    }
+    // 向かい側を越えて反転した場合も、元の巻き方向(頂点の並び)を保つ
+    if(_editSignedArea(q)*_editSignedArea(P)<0) q=[q[0],q[3],q[2],q[1]];
+    sh.pts=q; if(o.holes) sh.holes=o.holes.map(h=>h.map(p=>({x:p.x,y:p.y}))); // 穴は動かさない(はみ出したら離した時に不可)
   } else {
     const c=_editCopyRings({pts:o.pts,holes:o.holes});
     const rings=[c.pts].concat(c.holes||[]);
@@ -3143,7 +3192,7 @@ function editMouseUp(){
   setToolBar('✏ 修正モード');
   const sh=shapes[d.si];
   if(!sh||!d.moved){ redraw(); return; }
-  const valid = (sh.type==='rect') ? true : _editShapeValid(sh);
+  const valid = _editShapeValid(sh); // r037: 四角形も(拡大縮小後の)面積下限・穴のはみ出しを判定
   if(!valid){
     _editRestore(d);
     toast('⚠ その形状は出来ません',2200);
@@ -3172,7 +3221,7 @@ function setEditMode(on){
   if(on){
     setStatus('✏ 修正: 頂点をドラッグして移動');
     setToolBar('✏ 修正モード');
-    toast('✏ 修正モード: 頂点をドラッグ（四角形は平行移動のみ・多角形は自由。不正な形は元に戻ります）',3600);
+    toast('✏ 修正モード: 頂点をドラッグ（四角形は直角のまま拡大縮小・辺の◆は平行移動、多角形は自由。不正な形は元に戻ります）',3600);
   } else {
     setStatus(''); setToolBar(''); showSnap(null); drawCv.style.cursor='';
   }
@@ -3418,19 +3467,31 @@ function redraw(mx,my){
     });
     drawCtx.restore();
   }
-  // r037: ✏修正モード中は全図形の頂点にハンドル(■)を表示。ドラッグ中の頂点は黄色、ホバー中は白。
+  // r037: ✏修正モード中は全図形の頂点にハンドル(■)を表示。四角形はさらに辺の中点(◆)=その辺だけ平行移動。
+  //       ドラッグ中のハンドルは黄色、ホバー中は白。
   if(editMode){
     drawCtx.save();
     shapes.forEach((sh,si)=>{
       if(sh.enabled===false||colorFilter[sh.color||'blue']===false) return;
       _editRings(sh).forEach((ring,ri)=>ring.forEach((p,vi)=>{
-        const act = editDrag && editDrag.si===si && (sh.type==='rect' || (editDrag.ri===ri && editDrag.vi===vi));
-        const hov = !editDrag && editHover && editHover.si===si && editHover.ri===ri && editHover.vi===vi;
+        const act = editDrag && editDrag.kind==='vertex' && editDrag.si===si && editDrag.ri===ri && editDrag.vi===vi;
+        const hov = !editDrag && editHover && editHover.kind==='vertex' && editHover.si===si && editHover.ri===ri && editHover.vi===vi;
         const r=((act||hov)?6:4)/zoom;
         drawCtx.beginPath(); drawCtx.rect(p.x-r,p.y-r,2*r,2*r);
         drawCtx.fillStyle = act ? '#ffff00' : (hov ? '#ffffff' : 'rgba(255,255,255,0.75)');
         drawCtx.fill(); drawCtx.strokeStyle='#000'; drawCtx.lineWidth=1/zoom; drawCtx.stroke();
       }));
+      if(_editRectAxes(sh)){
+        for(let k=0;k<4;k++){
+          const a=sh.pts[k], b=sh.pts[(k+1)%4], mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+          const act = editDrag && editDrag.kind==='edge' && editDrag.si===si && editDrag.vi===k;
+          const hov = !editDrag && editHover && editHover.kind==='edge' && editHover.si===si && editHover.vi===k;
+          const r=((act||hov)?6:4)/zoom;
+          drawCtx.beginPath(); drawCtx.moveTo(mx,my-r); drawCtx.lineTo(mx+r,my); drawCtx.lineTo(mx,my+r); drawCtx.lineTo(mx-r,my); drawCtx.closePath();
+          drawCtx.fillStyle = act ? '#ffff00' : (hov ? '#ffffff' : 'rgba(120,200,255,0.9)');
+          drawCtx.fill(); drawCtx.strokeStyle='#000'; drawCtx.lineWidth=1/zoom; drawCtx.stroke();
+        }
+      }
     });
     drawCtx.restore();
   }
