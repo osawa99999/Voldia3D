@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 
 let sortMode = 'no';
@@ -131,6 +131,10 @@ let surveyMode=false,surveyPts=[]; // r024(AreCal移植): 測点設置
 let northAngleDeg=0, originSurveyIdx=null;
 let svBase=null,svDir=null; // r025(AreCal移植): 測点オフセットダイアログの基点・方向
 let yamadome=null; // 仮想山留ポリゴン（px座標）。1個のみ。
+// r037(37回目): ✏修正モード(頂点ドラッグ)。四角形=平行移動のみ / 多角形=自由移動(ドラッグ解除時に自己交差等を判定、不正なら元に戻す)
+let editMode=false;
+let editDrag=null;   // {si, ri, vi, start:{x,y}, orig:{pts,holes}, moved}
+let editHover=null;  // {si, ri, vi}
 let yamadomeEditMode=false; // 山留頂点移動モード
 let yamadomeEditVtx=-1;     // ドラッグ中の頂点インデックス
 let yamadomeEditVtxStart=null; // 新7(2026-08-28 引継ぎ18回目): ドラッグ開始時の頂点初期位置(直交移動の基準)
@@ -617,6 +621,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(subMode)setSubMode(false);
     rectAngle=0;startTool('rect');setToolBar('⬛ 四角形作図中（右クリックで終了）');toast('⬛ 四角形 — 1点目をクリック');
   });
+  { const _eb=document.getElementById('edit-btn'); if(_eb) _eb.addEventListener('click',()=>setEditMode(!editMode)); } // r037: ✏修正ボタン
   document.getElementById('poly-btn').addEventListener('click',()=>{
     if(distMode)setDistMode(false);
     if(selUnionMode)setSelUnionMode(false);
@@ -1628,6 +1633,7 @@ function showVerticalHoverTip(show,cx,cy){
 //  描画ツール
 // ================================================================
 function startTool(t){
+  if(typeof editMode!=='undefined' && editMode) setEditMode(false); // r037: 修正モード中に作図ツールを開始したら修正モードを終了
   if(surveyMode)setSurveyMode(false); // r024(AreCal移植): 他ツール開始で測点モード終了
   // r073(21回目引継ぎ・マスター報告「距離測定→山留の連続押しでボタンが2つONになり、
   // 山留キャンセル後に距離測定が誤発火する」): startTool()はsurveyModeは終了させて
@@ -1665,6 +1671,7 @@ function cancelDraw(){
 // せいで外部JSから呼べていなかった教訓を反映し、同じ轍を踏まないようにする)。
 window.cancelAllTools = function(){
   _invalidateRepeat();
+  if(editMode) setEditMode(false); // r037
   if(drawing) cancelDraw();
   if(distMode) setDistMode(false);
   if(surveyMode) setSurveyMode(false);
@@ -1724,6 +1731,9 @@ function onMouseDown(e){
     return;
   }
   const{x:lx,y:ly}=getLogi(e);
+
+  // r037: ✏修正モード中は頂点ドラッグだけを受け付ける(他の作図・選択・山留ドラッグには入らない)
+  if(editMode){ if(e.button===0) editMouseDown(lx,ly); return; }
 
   // 山留 頂点ドラッグ（描画中でない時）
   // 追加1(2026-08-24 引継ぎ18回目マスター報告): distMode(距離測定)・surveyMode
@@ -1853,6 +1863,7 @@ function onMouseDown(e){
 function onMouseMove(e){
   const{x:lx,y:ly}=getLogi(e);
   window.lastMx=lx; window.lastMy=ly; // ArrowKey時プレビュー更新用
+  if(editMode){ editMouseMove(e,lx,ly); return; } // r037: ✏修正モード
   // 新1(2026-08-28 引継ぎ18回目): 他モードに切り替わった際にグレーホバー表示が
   // 残らないよう、まず非表示にしてからアイドル時のみ再表示する
   showVerticalHoverTip(false);
@@ -2258,6 +2269,7 @@ function updSidebar(){
     const col=SHAPE_COLORS[sh.color||'blue']||SHAPE_COLORS.blue;
     const li=document.createElement('li');
     li.dataset.idx=idx; // Fix8: リスト選択用
+    li.classList.add('sh-col-'+(sh.color||'blue')); // r037: 色別の行背景(青=青灰色)
     if(sh.noSlope)li.classList.add('noslope-item');
     if(sh._voldiaGeoError)li.classList.add('geo-error-item');
     // v0.0009: 選択ハイライト色をオブジェクト色の明るいバージョンに
@@ -2721,6 +2733,7 @@ function roundPt(pt){
 // ================================================================
 function setDistMode(on){
   if(on){
+    if(editMode)setEditMode(false); // r037
     if(drawing)cancelDraw();
     if(selUnionMode)setSelUnionMode(false);
     if(subMode)setSubMode(false);
@@ -2755,6 +2768,7 @@ function setDistMode(on){
 // ================================================================
 function setSurveyMode(on){
   if(on){
+    if(editMode)setEditMode(false); // r037
     _invalidateRepeat();
     if(drawing)cancelDraw();
     if(distMode)setDistMode(false);
@@ -2856,6 +2870,7 @@ function updSelUnionToolbar(){
 
 function setSelUnionMode(on){
   selUnionMode=on;selUnionSet.clear();
+  if(on && editMode) setEditMode(false); // r037
   if(on) _invalidateRepeat();
   document.getElementById('sel-union-btn').classList.toggle('on',on);
   // do-sel-union removed from right panel (Fix12)
@@ -2996,6 +3011,7 @@ function updSubToolbar(){
 
 function setSubMode(on){
   subMode=on;subBase=-1;subTargets.clear();
+  if(on && editMode) setEditMode(false); // r037
   if(on) _invalidateRepeat();
   document.getElementById('sub-btn').classList.toggle('on',on);
   // do-sub removed from right panel - handled by updSubToolbar()
@@ -3012,6 +3028,165 @@ function setSubMode(on){
   }
   updSidebar();redraw();
 }
+
+// ================================================================
+//  r037(37回目): ✏修正モード(頂点ドラッグ)
+//   ・四角形(type==='rect') … どの頂点をドラッグしても図形全体の平行移動のみ
+//   ・多角形/その他        … その頂点だけ自由移動(穴(holes)の頂点も可)
+//   ・マウスを離した時に判定し、自己交差・辺の接触・同一点・面積過小・穴のはみ出しがあれば
+//     「その形状は出来ません」とトーストを出して元の形状に戻す。成功時だけUndo履歴に積む。
+//   ・頂点を増やす/減らすことはしない。Shiftで直交移動、他図形の端点にスナップ。ESCでキャンセル。
+// ================================================================
+function _editRings(sh){ return [sh.pts].concat(sh.holes||[]); }
+function _editCopyRings(sh){ return { pts: sh.pts.map(p=>({x:p.x,y:p.y})), holes: sh.holes ? sh.holes.map(h=>h.map(p=>({x:p.x,y:p.y}))) : undefined }; }
+// 線分ab と cd が交差・接触するか(端点どうしの接触・共線の重なりも含む)
+function _editSegTouch(a,b,c,d){
+  const EPS=1e-7;
+  const cross=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+  const inBox=(p,q,r)=>Math.min(p.x,q.x)-EPS<=r.x&&r.x<=Math.max(p.x,q.x)+EPS&&Math.min(p.y,q.y)-EPS<=r.y&&r.y<=Math.max(p.y,q.y)+EPS;
+  const o1=cross(a,b,c),o2=cross(a,b,d),o3=cross(c,d,a),o4=cross(c,d,b);
+  if(((o1>EPS&&o2<-EPS)||(o1<-EPS&&o2>EPS))&&((o3>EPS&&o4<-EPS)||(o3<-EPS&&o4>EPS))) return true; // 真の交差
+  if(Math.abs(o1)<=EPS&&inBox(a,b,c)) return true;
+  if(Math.abs(o2)<=EPS&&inBox(a,b,d)) return true;
+  if(Math.abs(o3)<=EPS&&inBox(c,d,a)) return true;
+  if(Math.abs(o4)<=EPS&&inBox(c,d,b)) return true;
+  return false;
+}
+// 1つの輪(リング)が単純(自己交差・自己接触・同一点なし)か
+function _editRingSimple(r){
+  const n=r.length; if(n<3) return false;
+  for(let i=0;i<n;i++){ const j=(i+1)%n; if(Math.hypot(r[i].x-r[j].x,r[i].y-r[j].y)<1e-6) return false; }
+  for(let i=0;i<n;i++){
+    for(let j=i+1;j<n;j++){
+      if(j===i+1||(i===0&&j===n-1)) continue; // 隣り合う辺は端点を共有するのが正常
+      if(_editSegTouch(r[i],r[(i+1)%n],r[j],r[(j+1)%n])) return false;
+    }
+  }
+  return true;
+}
+function _editRingsCross(r1,r2){
+  for(let i=0;i<r1.length;i++) for(let j=0;j<r2.length;j++)
+    if(_editSegTouch(r1[i],r1[(i+1)%r1.length],r2[j],r2[(j+1)%r2.length])) return true;
+  return false;
+}
+// 図形全体(外周+穴)が有効か
+function _editShapeValid(sh){
+  const MIN_AREA_M2=1e-2; // 作図時(r061)と同じ下限
+  if(!_editRingSimple(sh.pts)) return false;
+  if(calcArea(sh.pts)<MIN_AREA_M2) return false;
+  const holes=sh.holes||[];
+  for(let a=0;a<holes.length;a++){
+    const h=holes[a];
+    if(!_editRingSimple(h)) return false;
+    if(h.some(p=>!pointInPoly(p.x,p.y,sh.pts))) return false; // 穴が外周からはみ出し
+    if(_editRingsCross(h,sh.pts)) return false;
+    for(let b=a+1;b<holes.length;b++) if(_editRingsCross(h,holes[b])) return false;
+  }
+  return true;
+}
+function _editHit(lx,ly){
+  const HIT=10/zoom; let best=null,bd=HIT;
+  for(let si=shapes.length-1;si>=0;si--){
+    const sh=shapes[si];
+    if(sh.enabled===false||colorFilter[sh.color||'blue']===false) continue;
+    _editRings(sh).forEach((ring,ri)=>ring.forEach((p,vi)=>{
+      const d=Math.hypot(p.x-lx,p.y-ly); if(d<bd){bd=d;best={si,ri,vi};}
+    }));
+  }
+  return best;
+}
+function editMouseDown(lx,ly){
+  const h=_editHit(lx,ly);
+  if(!h){ return; }
+  const sh=shapes[h.si];
+  editDrag={si:h.si,ri:h.ri,vi:h.vi,start:{x:_editRings(sh)[h.ri][h.vi].x,y:_editRings(sh)[h.ri][h.vi].y},orig:_editCopyRings(sh),moved:false};
+  setToolBar(sh.type==='rect' ? '✏ 四角形は平行移動のみです（ESCでキャンセル）' : '✏ 頂点を移動中（離した時に形状を確認します・ESCでキャンセル）');
+}
+function editMouseMove(e,lx,ly){
+  if(!editDrag){
+    const h=_editHit(lx,ly);
+    const changed=(!!h!==!!editHover)||(h&&editHover&&(h.si!==editHover.si||h.ri!==editHover.ri||h.vi!==editHover.vi));
+    editHover=h; drawCv.style.cursor=h?'move':'';
+    if(changed) redraw();
+    return;
+  }
+  const d=editDrag, sh=shapes[d.si];
+  let vx=lx,vy=ly;
+  if(shiftDown) ({x:vx,y:vy}=s90(d.start.x,d.start.y,vx,vy));
+  // スナップは「他図形の端点」のみ(自分自身の頂点には吸着させない)
+  const tol=SNAP_PX/zoom; let gsnap=null,gd=tol*0.85;
+  shapes.forEach((s2,si2)=>{
+    if(si2===d.si||s2.enabled===false) return;
+    _editRings(s2).forEach(r=>r.forEach(p=>{ const dd=Math.hypot(vx-p.x,vy-p.y); if(dd<gd){gd=dd;gsnap=p;} }));
+  });
+  showSnap(gsnap?{x:gsnap.x,y:gsnap.y,type:'endpoint'}:null,e.clientX,e.clientY);
+  const np=gsnap?{x:gsnap.x,y:gsnap.y}:roundPt({x:vx,y:vy});
+  const o=d.orig;
+  if(sh.type==='rect'){
+    const dx=np.x-d.start.x, dy=np.y-d.start.y;
+    sh.pts=o.pts.map(p=>({x:p.x+dx,y:p.y+dy}));
+    if(o.holes) sh.holes=o.holes.map(h=>h.map(p=>({x:p.x+dx,y:p.y+dy})));
+  } else {
+    const c=_editCopyRings({pts:o.pts,holes:o.holes});
+    const rings=[c.pts].concat(c.holes||[]);
+    rings[d.ri][d.vi]={x:np.x,y:np.y};
+    sh.pts=c.pts; if(c.holes) sh.holes=c.holes;
+  }
+  d.moved=true;
+  if(animId)cancelAnimationFrame(animId);
+  animId=requestAnimationFrame(()=>redraw());
+}
+function _editRestore(d){ const sh=shapes[d.si]; if(!sh) return; sh.pts=d.orig.pts.map(p=>({x:p.x,y:p.y})); if(d.orig.holes) sh.holes=d.orig.holes.map(h=>h.map(p=>({x:p.x,y:p.y}))); else delete sh.holes; }
+function editMouseUp(){
+  if(!editDrag) return;
+  const d=editDrag; editDrag=null; showSnap(null);
+  setToolBar('✏ 修正モード');
+  const sh=shapes[d.si];
+  if(!sh||!d.moved){ redraw(); return; }
+  const valid = (sh.type==='rect') ? true : _editShapeValid(sh);
+  if(!valid){
+    _editRestore(d);
+    toast('⚠ その形状は出来ません',2200);
+    redraw(); return;
+  }
+  // 成功: Undoには「変更前」の形で積む(pushUndoは現在状態を保存するため、一旦元に戻してから積み、再度新しい形に戻す)
+  const np={pts:sh.pts,holes:sh.holes};
+  _editRestore(d); pushUndo();
+  sh.pts=np.pts; if(np.holes) sh.holes=np.holes;
+  sh.area=calcArea(sh.pts)-(sh.holes||[]).reduce((s,h)=>s+calcArea(h),0);
+  updSidebar(); redraw();
+}
+function setEditMode(on){
+  if(on){
+    _invalidateRepeat();
+    if(drawing)cancelDraw();
+    if(distMode)setDistMode(false);
+    if(surveyMode)setSurveyMode(false);
+    if(selUnionMode)setSelUnionMode(false);
+    if(subMode)setSubMode(false);
+    if(selectedSet.size>0)clearSelection();
+  } else if(editDrag){ _editRestore(editDrag); editDrag=null; }
+  editMode=on; editHover=null;
+  if(!on) _startToolEndCooldown();
+  const b=document.getElementById('edit-btn'); if(b) b.classList.toggle('on',on);
+  if(on){
+    setStatus('✏ 修正: 頂点をドラッグして移動');
+    setToolBar('✏ 修正モード');
+    toast('✏ 修正モード: 頂点をドラッグ（四角形は平行移動のみ・多角形は自由。不正な形は元に戻ります）',3600);
+  } else {
+    setStatus(''); setToolBar(''); showSnap(null); drawCv.style.cursor='';
+  }
+  redraw();
+}
+// ドラッグ解除(マウスを離した時)の判定・ESCキャンセル
+document.addEventListener('mouseup',e=>{ if(editMode && editDrag && e.button===0) editMouseUp(); });
+document.addEventListener('keydown',e=>{
+  if(!editMode) return;
+  if(e.key==='Escape'){
+    if(editDrag){ _editRestore(editDrag); editDrag=null; showSnap(null); setToolBar('✏ 修正モード'); redraw(); toast('✏ 移動をキャンセルしました',1200); }
+    else setEditMode(false);
+  }
+});
 
 function toggleSub(idx){
   if(subBase===-1){subBase=idx;}
@@ -3240,6 +3415,22 @@ function redraw(mx,my){
     yamadome.pts.forEach((p,i)=>{
       drawCtx.beginPath();drawCtx.arc(p.x,p.y,(yamadomeEditVtx===i?5:3)/zoom,0,Math.PI*2);
       drawCtx.fillStyle=yamadomeEditVtx===i?'#ffff00':'#ff4444';drawCtx.fill();
+    });
+    drawCtx.restore();
+  }
+  // r037: ✏修正モード中は全図形の頂点にハンドル(■)を表示。ドラッグ中の頂点は黄色、ホバー中は白。
+  if(editMode){
+    drawCtx.save();
+    shapes.forEach((sh,si)=>{
+      if(sh.enabled===false||colorFilter[sh.color||'blue']===false) return;
+      _editRings(sh).forEach((ring,ri)=>ring.forEach((p,vi)=>{
+        const act = editDrag && editDrag.si===si && (sh.type==='rect' || (editDrag.ri===ri && editDrag.vi===vi));
+        const hov = !editDrag && editHover && editHover.si===si && editHover.ri===ri && editHover.vi===vi;
+        const r=((act||hov)?6:4)/zoom;
+        drawCtx.beginPath(); drawCtx.rect(p.x-r,p.y-r,2*r,2*r);
+        drawCtx.fillStyle = act ? '#ffff00' : (hov ? '#ffffff' : 'rgba(255,255,255,0.75)');
+        drawCtx.fill(); drawCtx.strokeStyle='#000'; drawCtx.lineWidth=1/zoom; drawCtx.stroke();
+      }));
     });
     drawCtx.restore();
   }

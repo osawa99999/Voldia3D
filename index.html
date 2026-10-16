@@ -56,6 +56,9 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;background:var(--
   padding:6px 8px;cursor:pointer;transition:background .12s;
 }
 #sh-list li:hover{background:#333;}
+/* r0127(37回目): オブジェクト一覧の青の行は青っぽいグレーの地色にして、他の色の行と見分けやすくする */
+#sh-list li.sh-col-blue{background:#27323f;}
+#sh-list li.sh-col-blue:hover{background:#314051;}
 #sh-list li.selected{background:#1a3a5c;border-left-color:#64b5f6;}
 #sh-list li.noslope-item{border-left-color:var(--warn);}
 #sh-list li.geo-error-item{border-left-color:#ff1744 !important;box-shadow:0 0 0 1px rgba(255,23,68,.5) inset;}
@@ -441,7 +444,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0126</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0127</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -547,6 +550,7 @@ D&D or クリックでロードしてください</p>
         <button id="rect-btn">□ 四角形</button>
         <button id="poly-btn">🔵 多角形</button>
         <button id="yamadome-btn" title="仮想山留を1つ配置（土量計算でクリップ）">🏗 山留</button>
+        <button id="edit-btn" title="頂点をドラッグして図形を修正（四角形は平行移動のみ／多角形は自由移動・自己交差は不可で元に戻る）">✏ 修正</button>
       </div>
       <div class="bgrp" style="margin-top:5px;">
         <button id="sel-union-btn" title="選択した図形を合成" style="display:none">🔗 選択合成</button>

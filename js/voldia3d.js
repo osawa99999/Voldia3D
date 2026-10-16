@@ -2219,6 +2219,7 @@ let _lastGeoms=null; // 計算済み水密ジオメトリ（GLB出力用）
 let _lastExistingStructGeoms=[];
 let _meshMaterials=[]; // 透過スライダー制御用マテリアル参照（現在アクティブなもの＝グラデ時はPhong/ソリッド時はBasic）
 let _meshObjs=[]; // r038: ソリッド⇔グラデ切替時にマテリアルを丸ごと差し替えるためのメッシュ本体参照
+let _existingStructMat=null; // r110(37回目): 既存躯体メッシュのマテリアル参照(透過スライダー連動用)
 let _edgeMaterials=[]; // r038: 透過スライダー連動でエッジ輝度を上げるための参照 [navyEdges用, navyEdgesThick用]
 const _EDGE_BASE_RGB=[0x0a,0x1a,0x3a]; // エッジのベース色（ディープネイビー）
 
@@ -2297,6 +2298,15 @@ function updMeshOpacity(val){
     if(m.depthWrite !== wantDepthWrite){ m.depthWrite = wantDepthWrite; }
     m.needsUpdate=true;
   });
+  // r110(37回目、マスター要望): 既存躯体(グレー)も透過スライダーに連動させる。
+  // 従来は「常にグレーの独立表示」仕様でスライダー対象外だったため、他が透けても躯体だけ不透明のままだった。
+  // ソリッド⇔グラデ切替の対象外(頂点カラーを持たない)という扱いは変えず、不透明度と深度書込だけ連動させる。
+  if(_existingStructMat){
+    _existingStructMat.opacity = op;
+    _existingStructMat.transparent = op < 0.99;
+    _existingStructMat.depthWrite = wantDepthWrite;
+    _existingStructMat.needsUpdate = true;
+  }
   // r038 要望④→r025再修正: 面が透明になるほどエッジが同化して見えにくくなるため、
   // 透過度が上がる（op が小さくなる）ほどエッジの色を明るく・不透明度を上げる。
   // ※旧実装は不透明時(lift=0)点でも基準値0.95/0.6からスタートしており、
@@ -3384,6 +3394,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   // purpleWallMeshと違いuv属性を付けていなかった点、および空データ時の
   // ガードが甘かった点を疑い、同じ防御(uv属性付与・try/catch)に揃えた。
   let existingStructMesh = null;
+  _existingStructMat = null;
   if(structFrustumsForMesh.length){
     try {
       const esPositions = [];
@@ -3413,6 +3424,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
           color: SHAPE_COLORS_3D.gray, opacity: 1, transparent: false, side: THREE.DoubleSide
         });
         existingStructMesh = new THREE.Mesh(esGeo, esMat);
+        _existingStructMat = esMat; // r110: 透過スライダー連動用に参照を保持
         // r005: マスター提案の対策。既存躯体の天端が掘削シェルの段差・法面頂部と
         // 高さ方向で完全一致すると、掘削側の輪郭線(navyEdges)が既存躯体の面と
         // 同一平面に来てしまい、あたかも躯体の上に線が乗っているように見える
@@ -4284,7 +4296,7 @@ function classifyPathsSafe(rawPaths, SF) {
   processNode(tree);
   return result;
 }
-const VOLDIA3D_VER = "Voldia-3D-r109(base:VoldiaM r069)"; // r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r110(base:VoldiaM r069)"; // r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
