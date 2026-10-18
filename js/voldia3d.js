@@ -1,6 +1,11 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r111 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロと確認した関数だけを削除。挙動は変えていない)
+//  isPointInsideFrustumExcavation / getLineSegmentsIntersection / getPolygonIntersections(旧Vertex-First方式の部品)
+//  getJSTTimestamp(getVoldiaTimestampに統一済み) / classifyPathsSafe(誰も呼んでいなかった) / _removeCollinearPts / _delaunayFlip(earcut後処理)
+//  未着手(別途確認が必要): _lastExistingStructGeoms(書き込みのみ。計算経路に近いのでマスター確認待ち)、関数内の未使用ローカル(clipperDifference重複 等)。
+//  ※ このファイルの冒頭ヘッダ『r104より分離』は古いまま(別件の小整理)。
 
 // 3D高さ逆算用：2D平面上での点Pから線分ABへの最短距離を求める
 // 【問題B対応・2026-08-24マスター指示】LandXMLの垂直面回避ハック(noSlopeオブジェクトの
@@ -8,7 +13,7 @@
 // 増大する角度指定方式から、深さによらず常に一定量だけ外側にオフセットする固定値方式に変更。
 // 15mmという値は、(a)頂点量子化(既定10mm)で潰れて完全垂直に戻らない下限を確保しつつ、
 // (b)土工の施工誤差(±30〜50mm)に対して十分小さい、という両方の条件から選定。
-// buildManifoldUnionGeom内のcontourOf()と、下記isPointInsideFrustumExcavation()の
+// buildManifoldUnionGeom内のcontourOf()と、(r111で削除済みの)isPointInsideFrustumExcavation()の
 // 両方でこの値を使う(旧実装ではisPointInsideFrustumExcavation側だけ独自に
 // window._vertexQuantMm+1という別の固定値を使っており、値がズレる余地があったため統一)。
 const DOBOKU_VERTICAL_TAPER_FIXED_MM = 15;
@@ -39,85 +44,11 @@ function _setResVolBig(numText){
 // 実行時、紫(強制垂直)オブジェクトが存在する場合の注意トーストを起動(ページ読み込み)
 // 毎に1回だけ出すためのフラグ
 let _purpleCalcWarnShown = false;
-// 3D空間上の点pt(m単位)がフラスタムfの3D掘削範囲(中空空間)内部にあるか判定
-function isPointInsideFrustumExcavation(pt, f) {
-  const S_CONV = 0.001;
-  const zMm = -pt.y / S_CONV; // 高さY(m)を深さZ(mm、正値)に変換
-  
-  const topDepth = -(f.tl || 0);
-  const botDepth = f.D - (f.tl || 0);
-  
-  // 相手のピットの深さ範囲外なら内部ではない
-  // v0.0017: 境界上の点（天端・底面ちょうど）を「外部」扱いにする
-  // 同一位置オブジェクトで境界上の重心が内部判定されて壁面が消える問題の対策
-  if (zMm <= topDepth + 1e-6 || zMm >= botDepth - 1e-6) return false;
-  
-  // その深さでの2Dオフセット輪郭を正確に取得
-  // r038: contourOf()と同じ「天端で最大・底面でゼロ」の極小テーパー式に統一
-  // （体積計算側の関数は別系統なのでここは表示専用のdead判定にのみ影響）
-  const fromTop = zMm - topDepth;
-  const ratio = 1.0 - fromTop / f.D;
-  // 【問題B対応】以前はここだけ window._vertexQuantMm+1 という独自の固定値を
-  // 使っていたが、buildManifoldUnionGeom側のcontourOf()と値が食い違う余地が
-  // あったため、共有定数DOBOKU_VERTICAL_TAPER_FIXED_MMに統一。
-  // r099: frustum個別のテーパー量(f.taperMm)があればそれを優先(Land Logic用。既定は従来どおり共有定数)
-  const taper = f.noSlope
-    ? (typeof f.taperMm === 'number' ? f.taperMm : DOBOKU_VERTICAL_TAPER_FIXED_MM)
-    : f.D * getSlopeRatio();
-  let offsetDist = f.OD + ratio * taper;
-  // r108: 負のtaperMm(既存躯体用=天端が内へ狭まる)の時だけ0クランプしない
-  if(offsetDist < 0 && !(f.noSlope && typeof f.taperMm === 'number' && f.taperMm < 0)) offsetDist = 0;
-  
-  const contour = f.noSlope
-    ? offsetPolygon(f.ptsMm, offsetDist, false, 1.5) // r040: 鋭角コーナー暴走防止（1.0だと別箇所で重複面が発生したため1.5に調整）
-                                                       // r047追記: この1.5クランプは極端な鋭角(21度級)だと
-                                                       // オフセット量が縮小しすぎる副作用あり。詳細はbuildManifoldUnionGeom
-                                                       // 内の同パラメータ箇所のコメント・引継ぎMD参照。
-    : offsetPolygon(f.ptsMm, offsetDist);
-  // 2D平面上で点(mm)がポリゴンの内側にあるかを判定
-  return pointInPoly(pt.x / S_CONV, pt.z / S_CONV, contour);
-}
-
-
-// 線分A(a1-a2)とB(b1-b2)の交点を計算
-function getLineSegmentsIntersection(a1, a2, b1, b2) {
-  const det = (a2.x - a1.x) * (b2.y - b1.y) - (a2.y - a1.y) * (b2.x - b1.x);
-  if (Math.abs(det) < 1e-9) return null; // 平行な場合は交点なし
-
-  const t = ((b1.x - a1.x) * (b2.y - b1.y) - (b1.y - a1.y) * (b2.x - b1.x)) / det;
-  const u = ((b1.x - a1.x) * (a2.y - a1.y) - (b1.y - a1.y) * (a2.x - a1.x)) / det;
-
-  // 線分の範囲内(0〜1)で交差しているか判定
-  if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
-    return {
-      x: a1.x + t * (a2.x - a1.x),
-      y: a1.y + t * (a2.y - a1.y)
-    };
-  }
-  return null;
-}
-
-// 多角形1と多角形2の全辺の交差(貫入交点)を抽出
-function getPolygonIntersections(poly1, poly2) {
-  const intersections = [];
-  const n1 = poly1.length;
-  const n2 = poly2.length;
-  
-  for (let i = 0; i < n1; i++) {
-    const a1 = poly1[i];
-    const a2 = poly1[(i + 1) % n1];
-    for (let j = 0; j < n2; j++) {
-      const b1 = poly2[j];
-      const b2 = poly2[(j + 1) % n2];
-      
-      const pt = getLineSegmentsIntersection(a1, a2, b1, b2);
-      if (pt) {
-        intersections.push(pt);
-      }
-    }
-  }
-  return intersections;
-}
+// 【r111 削除】isPointInsideFrustumExcavation() / getLineSegmentsIntersection() / getPolygonIntersections()
+//   旧「Vertex-First Triangle Fill」方式(SECTION 5のコメント参照)の部品。全ファイル横断で呼び出し元ゼロを確認して削除
+//   (getPolygonIntersectionsだけがgetLineSegmentsIntersectionを呼んでいて、そのgetPolygonIntersections自体が未使用だった)。
+//   現行は r062〜 のManifoldベース(buildManifoldUnionGeom)。SECTION 5コメント内に名前が残っているのは経緯の記録。
+//   必要になったら r110 のファイルから復元できる。
 
 // ────────────────────────────────────────────────────────────────
 //  offsetPolygon: ポリゴンを外側にdist[mm]拡張
@@ -1876,13 +1807,9 @@ function getJSTDateStr(){
   const jst=new Date(d.getTime()+9*60*60*1000);
   return jst.toISOString().slice(0,10);
 }
-function getJSTTimestamp(){
-  const d=new Date();
-  const jst=new Date(d.getTime()+9*60*60*1000);
-  return jst.toISOString().slice(0,19).replace(/[-:T]/g,'');
-}
+// r111: getJSTTimestamp()(年4桁のタイムスタンプ)を削除。呼び出し元ゼロ。ファイル名のタイムスタンプは下の getVoldiaTimestamp()(YYMMDDHHMMSS・12桁)に統一済み。
 // r072マスター指定の命名規則(YYMMDDHHMMSS・12桁)用。Vold/DXF/データ出力の
-// ファイル名をこれで統一する(getJSTTimestamp()は年4桁のため用途が別)。
+// ファイル名をこれで統一する(旧getJSTTimestamp()は年4桁だったが、呼び出しゼロのためr111で削除)。
 function getVoldiaTimestamp(){
   const d=new Date();
   const jst=new Date(d.getTime()+9*60*60*1000);
@@ -4258,45 +4185,10 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 
 // ★ 3Dエンジンバージョン（修正のたびに+1すること）
 
-// ════════════════════════════════════════════════════════════
-//  r036: classifyPathsSafe — ClipperLibのPolyTree機能を使った
-//  堅牢なouter/holes分類。従来のclassifyPaths(pointInPolyベースの
-//  偶数/奇数深さ判定)より、穴の中に島があるような複雑なケースでも
-//  正確に処理できる。buildSimpleExtrudeGeom(通常計算)専用。
-//  土量計算側(buildManifoldUnionGeomの既存classifyPaths呼び出し)は
-//  無改変のため、このファイルにはclassifyPathsSafeとして別名で追加し、
-//  既存のclassifyPathsとは完全に独立させている。
-// ════════════════════════════════════════════════════════════
-function classifyPathsSafe(rawPaths, SF) {
-  if (!rawPaths || rawPaths.length === 0) return [];
-  const cl = new ClipperLib.Clipper();
-  cl.StrictlySimple = true;
-  for (const path of rawPaths) {
-    cl.AddPath(path, ClipperLib.PolyType.ptSubject, true);
-  }
-  const tree = new ClipperLib.PolyTree();
-  cl.Execute(ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-
-  const result = [];
-  function processNode(node) {
-    const childs = node.Childs();
-    for (let i = 0; i < childs.length; i++) {
-      const outerNode = childs[i];
-      const outerPts = outerNode.Contour().map(p => ({ x: p.X / SF, y: p.Y / SF }));
-      const holesPts = [];
-      const holeChilds = outerNode.Childs();
-      for (let j = 0; j < holeChilds.length; j++) {
-        const holeNode = holeChilds[j];
-        holesPts.push(holeNode.Contour().map(p => ({ x: p.X / SF, y: p.Y / SF })));
-        processNode(holeNode);
-      }
-      result.push({ outer: outerPts, holes: holesPts });
-    }
-  }
-  processNode(tree);
-  return result;
-}
-const VOLDIA3D_VER = "Voldia-3D-r110(base:VoldiaM r069)"; // r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+// 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
+//   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
+//   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
+const VOLDIA3D_VER = "Voldia-3D-r111(base:VoldiaM r069)"; // r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -4558,47 +4450,9 @@ const VOLDIA3D_VER = "Voldia-3D-r110(base:VoldiaM r069)"; // r110(37回目): 既
 //    問題で、両経路が同じ境界点を共有する設計に改める必要がある。
 //    次セッションでの継続課題。
 // ════════════════════════════════════════════════════════════
-// ── 共線点除去: ほぼ一直線上の冗長頂点をearcut投入前に除去 ──
-// pts: {x,y}または{X,Y}形式の点配列(閉じたリング、始点末尾重複なし想定)
-// getX/getY: 座標アクセサ（呼び出し側の点形式に依存しないための抽象化）
-// epsDist: 「直線とみなす」垂直距離の許容値。getX/getYが返す座標系と
-//          同じ単位（メートル系呼び出し元ならメートル、Clipper整数系
-//          呼び出し元ならそのスケール単位）で指定すること。
-//
-// r055修正メモ①: 当初 dot>0 (=同方向へ直進する共線点のみ除去) という条件を
-// 入れていたが、問題1/問題5で実際に検出された縮退三角形の原因は
-// 「dot<0のスパイク(折り返し)」パターンだった。dotの符号に関わらず
-// 「隣接2点を結ぶ線への実質寄与(面積)がほぼ0」なら除去するよう修正済み。
-//
-// r055修正メモ②(問題3で発覚): 角度ベースの閾値(epsDeg)は辺の長さに
-// よって実際のズレ量(mm)が変動してしまう欠陥があった。9m級の長辺では
-// 角度0.05°でも垂直方向に約2.9mmもズレるのに、閾値をわずかに超えて
-// 検出漏れしていた。「三角形が縮退しているか」は辺の長さに関係なく
-// 絶対的なmm単位で判断すべき性質のものなので、角度(sin)ベースから
-// 点と直線の垂直距離(絶対値)ベースに変更。これにより辺長に依存しない
-// 一貫した基準で判定できる。
-function _removeCollinearPts(pts, getX, getY, epsDist){
-  if(!pts || pts.length < 4) return pts; // 三角形以下は弄らない
-  let keep = pts.slice();
-  for(let pass = 0; pass < 2; pass++){ // 連続する共線点にも対応するため2周
-    const m = keep.length;
-    if(m < 4) break;
-    const next = [];
-    for(let i = 0; i < m; i++){
-      const prev = keep[(i - 1 + m) % m], cur = keep[i], nxt = keep[(i + 1) % m];
-      const abx = getX(nxt) - getX(prev), aby = getY(nxt) - getY(prev); // prev→next
-      const abLen = Math.hypot(abx, aby);
-      if(abLen < 1e-9){ continue; } // prevとnextが重複＝curは孤立点、除去
-      const apx = getX(cur) - getX(prev), apy = getY(cur) - getY(prev); // prev→cur
-      const cross = abx * apy - aby * apx;
-      const dist = Math.abs(cross) / abLen; // curから直線prev-nextへの垂直距離
-      if(dist < epsDist) continue; // 直線からの逸脱が閾値未満＝共線とみなして除去
-      next.push(cur);
-    }
-    if(next.length >= 3) keep = next; else break;
-  }
-  return keep.length >= 3 ? keep : pts; // 壊れる場合は元のまま返す(安全側)
-}
+// 【r111 削除】_removeCollinearPts(pts,getX,getY,epsDist) — earcut投入前に共線点(ほぼ一直線上の冗長頂点)を除去していた(r055/r056)。
+//   全ファイル横断で呼び出し元ゼロを確認して削除(上の経緯コメントは残す)。削除の直接の経緯(いつ呼ばれなくなったか)は未確認。
+//   必要になったら r110 のファイルから復元できる。
 // ════════════════════════════════════════════════════════════
 //  r057: 問題3(21回目引継ぎ 続き) スリバー面品質改善
 //  ────────────────────────────────────────────────────────
@@ -4630,70 +4484,10 @@ function _removeCollinearPts(pts, getX, getY, epsDist){
 //  確認済みなので有効なはずだが、100%の保証ではない。
 //  マスターの実機確認まだ。Node側検証はあくまで仮説。
 // ════════════════════════════════════════════════════════════
-// tris: earcut出力のインデックス配列(flat: i0,i1,i2,i0,i1,i2,...)
-// flatPts: 2D座標のflat配列(x0,y0,x1,y1,...)。triのインデックスに対応。
-// 戻り値: フリップ後の新しいtris配列(元の配列は変更しない)
-function _delaunayFlip(tris, flatPts, maxIter){
-  maxIter = maxIter || 30;
-  const gx = i => flatPts[i*2], gy = i => flatPts[i*2+1];
-  function signedArea2(a,b,c){
-    return (gx(b)-gx(a))*(gy(c)-gy(a)) - (gy(b)-gy(a))*(gx(c)-gx(a));
-  }
-  // dが三角形abc(CCW前提)の外接円の内側にあればtrue(=フリップすべき)
-  function inCircleCCW(a,b,c,d){
-    const ax=gx(a)-gx(d), ay=gy(a)-gy(d);
-    const bx=gx(b)-gx(d), by=gy(b)-gy(d);
-    const cx=gx(c)-gx(d), cy=gy(c)-gy(d);
-    const aSq=ax*ax+ay*ay, bSq=bx*bx+by*by, cSq=cx*cx+cy*cy;
-    const det = ax*(by*cSq - bSq*cy) - ay*(bx*cSq - bSq*cx) + aSq*(bx*cy - by*cx);
-    return det > 1e-12;
-  }
-  let triList = [];
-  const nTri0 = tris.length / 3;
-  for(let t = 0; t < nTri0; t++){
-    const a=tris[t*3], b=tris[t*3+1], c=tris[t*3+2];
-    if(signedArea2(a,b,c) < 0) triList.push([b,a,c]); // CCWに正規化
-    else triList.push([a,b,c]);
-  }
-  for(let iter = 0; iter < maxIter; iter++){
-    const edgeMap = new Map();
-    const key = (a,b) => a < b ? a+'_'+b : b+'_'+a;
-    for(let t = 0; t < triList.length; t++){
-      const [a,b,c] = triList[t];
-      [[a,b,c],[b,c,a],[c,a,b]].forEach(([e0,e1,apex]) => {
-        const k = key(e0,e1);
-        if(!edgeMap.has(k)) edgeMap.set(k, []);
-        edgeMap.get(k).push({t, e0, e1, apex});
-      });
-    }
-    let flippedAny = false;
-    const consumedTri = new Set();
-    for(const entries of edgeMap.values()){
-      if(entries.length !== 2) continue; // 境界/非多様体エッジは対象外(トポロジー維持)
-      const [E1, E2] = entries;
-      if(E1.t === E2.t) continue;
-      if(consumedTri.has(E1.t) || consumedTri.has(E2.t)) continue; // 1周で同じ三角形を2回いじらない
-      const a=E1.e0, b=E1.e1, c=E1.apex, d=E2.apex;
-      // 四角形a-c-b-dが凸であることを確認(cとdがabの反対側)
-      const sideC = signedArea2(a,b,c);
-      const sideD = signedArea2(a,b,d);
-      if(sideC <= 0 || sideD >= 0) continue; // E1(a,b,c)はCCW登録済みのはずなのでsideC>0、E2はCW側なのでsideD<0が正常
-      if(!inCircleCCW(a,b,c,d)) continue; // ドロネー条件を満たしていれば何もしない
-      // 対角線をa-bからc-dへフリップ。新しい2三角形(a,c,d)(c,b,d)の向きは
-      // 元の(a,b,c)(a,b,d)のCCW/CW関係から一意に決まらないため、都度符号を見て正規化する。
-      const area1 = signedArea2(a,c,d), area2 = signedArea2(c,b,d);
-      if(Math.abs(area1) <= 1e-12 || Math.abs(area2) <= 1e-12) continue; // 数値的に不健全なら見送り(安全側)
-      triList[E1.t] = area1 > 0 ? [a,c,d] : [c,a,d];
-      triList[E2.t] = area2 > 0 ? [c,b,d] : [b,c,d];
-      consumedTri.add(E1.t); consumedTri.add(E2.t);
-      flippedAny = true;
-    }
-    if(!flippedAny) break;
-  }
-  const out = [];
-  triList.forEach(([a,b,c]) => out.push(a,b,c));
-  return out;
-}
+// 【r111 削除】_delaunayFlip(tris, flatPts, maxIter) — earcut出力の細長い三角形を直すLawsonフリップ後処理。
+//   全ファイル横断で呼び出し元ゼロを確認して削除(上の r057 コメントは経緯として残す)。
+//   buildManifoldUnionGeom / buildSimpleExtrudeGeom が Manifold方式(r062〜)になった後は、earcut→フリップの経路を通らない。
+//   (削除の直接の経緯=いつ呼ばれなくなったかは未確認)。必要になったら r110 のファイルから復元できる。
 // ════════════════════════════════════════════════════════════
 //  r062: buildManifoldUnionGeom はManifold(manifold-3d)ベース。
 //  各frustumをGL(y=0)の蓋+側面(錐台)+底面蓋のwatertight立体として構築し、

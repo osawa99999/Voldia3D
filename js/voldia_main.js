@@ -1,5 +1,22 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// ============================================================
+// 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
+//  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
+//               checkNorthOriginForExport()(将来のLandXML出力用ガード。未使用)
+//  削除した変数: _lastOps(書き込みのみ) / toolsLocked(書き込みのみ。voldia_export.js側の代入1行も削除)
+//  残したもの: SHARP_ANGLE_DEG(voldia3d.jsが参照)。
+//  ※ 詳細な理由は、各削除箇所に残したコメントを参照。復元が必要になったら r041 のファイルから戻す。
+// 【r041 削除一覧】(38回目。r039の起動フロー改造で呼ばれなくなった旧コードを整理。挙動は変えていない)
+//  削除した関数: showPgModal() / askVecExtractConsent() / showRotModal()
+//     → 起動ダイアログ(showStartupDialog)が、ページ選択・元図の線の確認・角度調整の確認を全部引き受けたため。
+//  削除したイベント: rot-yes / rot-no のクリック処理、sc-gridpaper-confirm のクリック処理
+//     → 角度調整UIの開始は startRotationUI() に切り出した(rot-yesのボタンを仮想クリックする方式をやめた)。
+//        方眼紙の開始は起動ダイアログ(_suStart)が行う。
+//  削除したフラグ参照: window._afterPDFLoad / window._gridPaperMode
+//     → どこでもtrueにされなくなったため(sc-confirm・setupScGrid・sc-changeの分岐ごと削除)。
+//  残したもの: sc-modal(縮尺の「変更」ボタン用)、toolsLocked変数(「廃止予定、互換性のため残す」の既存コメントのまま → r042で削除)
+//  ※ HTML側の削除(pg-modal / rot-modal / sc-modalの方眼紙ボタンと空の用紙サイズ欄)は Voldia_v0131.html の冒頭付近コメント参照
 // ============================================================
 
 let sortMode = 'no';
@@ -141,7 +158,7 @@ let yamadomeEditVtxStart=null; // 新7(2026-08-28 引継ぎ18回目): ドラッ�
 let rectAngle=0; // 四角形の回転角度（度）
 let vecPts=[],vecSegs=[];
 let vecGrid=null; // r023: 元図スナップ用の空間インデックス（AreCal移植）
-let _lastOps=null; // r023: 回転焼き込み時の再抽出用にgetOperatorList()結果をキャッシュ
+// r042: _lastOps(回転焼き込み時の再抽出用キャッシュ)を削除。書き込みのみで読む箇所が無かった(現行は「元図の線抽出→bakeRotation()がvecPts/vecSegsごと回転」で、再抽出しない)
 
 // r023(AreCal移植): 元図スナップ用 空間インデックス（グリッド分割）
 class LineGrid{
@@ -308,14 +325,16 @@ window.addEventListener('message', async (ev)=>{
 let wMidTimer=null;
 let rotAngle=0,_rotPage=null;
 function isToolsLocked(){
-  // sc-modal(初回縮尺設定)とrot-ctrl(角度調整中)だけブロック
+  // sc-modal(縮尺の「変更」)・su-overlay(起動ダイアログ)・rot-ctrl(角度調整中)だけブロック
   const scm=document.getElementById('sc-modal');
   const rotctrl=document.getElementById('rot-ctrl');
   if(scm&&scm.style.display==='block')return true;
+  const suo=document.getElementById('su-overlay'); // r039: 起動ダイアログ表示中もツールをロック
+  if(suo&&suo.style.display==='flex')return true;
   if(rotctrl&&rotctrl.style.display==='flex')return true;
   return false; // toolsLocked変数は使わない
 }
-let toolsLocked=false; // 廃止予定、互換性のため残す
+// r042: toolsLocked変数を削除(「廃止予定、互換性のため残す」だったが、書き込み(=false)のみで読む箇所が無かった。isToolsLocked()はこの変数を使わない)
 
 const UNDO_MAX=30;
 const undoStack=[];
@@ -398,9 +417,8 @@ function toastTop(msg,dur=2500){
 // ================================================================
 document.addEventListener('DOMContentLoaded',()=>{
   // 免責ダイアログ
-  document.getElementById('disclaimer-ok').addEventListener('click',()=>{
-    document.getElementById('disclaimer-modal').style.display='none';
-  });
+  // r039: 免責は起動ダイアログの「了解してはじめる」で同意する方式に変更。ここは別窓の「閉じる」(.vold直接読込時は同意モード)
+  document.getElementById('disclaimer-ok').addEventListener('click',()=>_discClose());
 
   // r023(30回目セッション、マスター指示): ライセンス表記(Credits)モーダルの開閉。
   // 免責モーダルの下から開く導線なので、開いている間は免責モーダルの後ろに重ねて表示する
@@ -409,28 +427,14 @@ document.addEventListener('DOMContentLoaded',()=>{
   // 実機で重なり順がおかしい場合はここのz-indexを見直すこと)。
   document.getElementById('open-license-modal').addEventListener('click',(e)=>{
     e.preventDefault();
+    e.stopPropagation(); // r039: drop-hint内へ移設したため、クリックがファイル選択を開かないようにする
     document.getElementById('license-modal').style.display='flex';
   });
   document.getElementById('license-modal-close').addEventListener('click',()=>{
     document.getElementById('license-modal').style.display='none';
   });
 
-  // 回転確認モーダル
-  // 回転確認モーダル：Yesを選択した時
-  document.getElementById('rot-yes').addEventListener('click',()=>{
-    document.getElementById('rot-modal').style.display='none';
-    rotAngle=0;
-    document.getElementById('rot-overlay').style.display='block';
-    document.getElementById('rot-ctrl').style.display='flex';
-    toggleSidebars(true); // サイドバーをロック
-    fitScreen();
-    toast('📐 回転モード: ボタンまたは入力欄で角度を調整してください',4000);
-  });
-  document.getElementById('rot-no').addEventListener('click',()=>{
-    document.getElementById('rot-modal').style.display='none';
-    toolsLocked=false; // Fix5: 角度調整スキップでもツール解禁
-    fitScreen();
-  });
+  // r041: 旧「回転確認モーダル」(rot-yes/rot-no)のクリック処理を削除。角度調整は起動ダイアログのチェックで決まり、startRotationUI()が開始する
   document.querySelectorAll('.rot-step-btn').forEach(btn=>{
     btn.addEventListener('click',()=>{
       const step=parseFloat(btn.dataset.step);
@@ -451,7 +455,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     
     toggleSidebars(false); // 👈 ここでロック解除！また自由に使いなさい
     
-    toolsLocked=false;
     fitScreen();
     toast(baked!==0?`✅ 回転 ${baked>=0?'+':''}${baked.toFixed(1)}° 適用`:'✅ 回転なし（そのまま適用）',2500);
   });
@@ -477,8 +480,11 @@ document.addEventListener('DOMContentLoaded',()=>{
     const f=e.dataTransfer.files[0];
     if(!f)return;
     if(isVoldFile(f)){
-      if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
-      loadVoldFile(f);
+      // r039: 起動ダイアログを通らない読込は、読込前に免責の別窓で同意確認する
+      _requireConsent(()=>{
+        if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
+        loadVoldFile(f);
+      });
       return;
     }
     if(pdfDoc){toast('⚠ PDFは1枚のみ。全消去してからお試しください');return;}
@@ -555,9 +561,12 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(!fin.files[0])return;
     const f=fin.files[0];
     if(isVoldFile(f)){
-      if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')){ fin.value=''; return; }
-      loadVoldFile(f);
       fin.value='';
+      // r039: 起動ダイアログを通らない読込は、読込前に免責の別窓で同意確認する
+      _requireConsent(()=>{
+        if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
+        loadVoldFile(f);
+      });
       return;
     }
     if(pdfDoc){toast('⚠ PDFは1枚のみ。全消去してからお試しください');fin.value='';return;}
@@ -567,24 +576,11 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // v0.0011: 方眼紙モードボタン
   document.getElementById('grid-paper-btn').addEventListener('click', ()=>{
-    // sc-modalを方眼紙モードで開く
-    document.getElementById('sc-gridpaper-confirm-wrap').style.display='block';
-    document.getElementById('sc-confirm').style.display='none'; // 通常の「設定」ボタンを隠す
-    document.getElementById('sc-modal').style.display='flex';
-    window._gridPaperMode = true;
+    // r039: 起動ダイアログを方眼紙モードで開く(ページ/元図の線/角度調整はグレーアウト)
+    showStartupDialog(null,true);
   });
 
-  // 方眼紙モード確定ボタン
-  document.getElementById('sc-gridpaper-confirm').addEventListener('click', ()=>{
-    const denom = document.getElementById('sc-init-in').value;
-    const v = denom ? ('1/' + denom) : '1/100';
-    applyScale(v);
-    document.getElementById('sc-modal').style.display='none';
-    document.getElementById('sc-gridpaper-confirm-wrap').style.display='none';
-    document.getElementById('sc-confirm').style.display='';
-    window._gridPaperMode = false;
-    startGridPaperMode();
-  });
+  // r041: 「方眼紙モード確定ボタン」(sc-gridpaper-confirm)のクリック処理を削除。方眼紙の開始は起動ダイアログ(_suStart)が行う
 
   // スケールグリッド
   setupScGrid('sc-grid-modal');
@@ -595,7 +591,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(v){
       applyScale(v);
       document.getElementById('sc-modal').style.display='none';
-      if(window._afterPDFLoad){ window._afterPDFLoad=false; showRotModal(); }
     }
   });
   document.getElementById('sc-init-in').addEventListener('keydown',e=>{
@@ -603,11 +598,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   // v0.0012: 変更ボタン → sc-modalをダイアログ式で開く（通常モード）
   document.getElementById('sc-change').addEventListener('click',()=>{
-    // 通常モード（方眼紙でない）
-    document.getElementById('sc-gridpaper-confirm-wrap').style.display='none';
-    document.getElementById('sc-confirm').style.display='';
-    document.getElementById('sc-confirm').textContent='設定';
-    window._gridPaperMode = false;
+    // r041: 方眼紙モード用の切替(sc-gridpaper-confirm-wrapの非表示・_gridPaperMode)を削除。このモーダルは「変更」専用になった
     document.getElementById('sc-modal').style.display='flex';
   });
 
@@ -991,9 +982,10 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
     const confirmModalOpen = document.getElementById('confirm-modal') && document.getElementById('confirm-modal').style.display==='flex';
     const calcModalOpen = document.getElementById('calc-modal') && document.getElementById('calc-modal').classList.contains('show');
     const scModalOpen = document.getElementById('sc-modal') && document.getElementById('sc-modal').classList.contains('show');
+    const suOpen = document.getElementById('su-overlay') && document.getElementById('su-overlay').style.display==='flex'; // r039
     const ioPanelOpen = document.getElementById('io-float-panel') && document.getElementById('io-float-panel').style.display!=='none';
     const placementOpen = document.getElementById('placement-overlay') && document.getElementById('placement-overlay').style.display!=='none';
-    return isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||ioPanelOpen||placementOpen;
+    return isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||suOpen||ioPanelOpen||placementOpen;
   }
 
   // キーボード
@@ -1017,9 +1009,10 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       const confirmModalOpen = document.getElementById('confirm-modal') && document.getElementById('confirm-modal').style.display==='flex';
       const calcModalOpen = document.getElementById('calc-modal') && document.getElementById('calc-modal').classList.contains('show');
       const scModalOpen = document.getElementById('sc-modal') && document.getElementById('sc-modal').classList.contains('show');
+    const suOpen = document.getElementById('su-overlay') && document.getElementById('su-overlay').style.display==='flex'; // r039
       const ioPanelOpen = document.getElementById('io-float-panel') && document.getElementById('io-float-panel').style.display!=='none';
       const placementOpen = document.getElementById('placement-overlay') && document.getElementById('placement-overlay').style.display!=='none';
-      const anyBlocking = isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||ioPanelOpen||placementOpen||surveyMode||distMode||selUnionMode||subMode||yamadomeEditMode;
+      const anyBlocking = isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||suOpen||ioPanelOpen||placementOpen||surveyMode||distMode||selUnionMode||subMode||yamadomeEditMode;
       if(!anyBlocking){
         e.preventDefault();
         startTool(_lastDrawToolForRepeat);
@@ -1231,20 +1224,12 @@ function setupScGrid(id){
   const g=document.getElementById(id);if(!g)return;
   g.querySelectorAll('.sbtn[data-sc]').forEach(b=>{
     if(b.dataset.sc==='custom')return;
-    // r062: 方眼紙モードでもワンクリックで即決定(以前はダブルクリック必須だった)。
+    // r041: 方眼紙モード(_gridPaperMode)の分岐と、PDF読込直後の角度確認(_afterPDFLoad→showRotModal)を削除。
+    //       どちらも起動ダイアログに移ったため、ここは「変更」ボタン経由の縮尺変更だけになった。
     b.addEventListener('click',()=>{
-      if(window._gridPaperMode){
-        document.getElementById('sc-init-in').value = b.dataset.sc.split('/')[1];
-        applyScale(b.dataset.sc);
-        g.querySelectorAll('.sbtn[data-sc]').forEach(bb=>bb.classList.remove('on'));
-        b.classList.add('on');
-        document.getElementById('sc-gridpaper-confirm').click();
-        return;
-      }
       applyScale(b.dataset.sc);
       const m=document.getElementById('sc-modal');
       if(m.style.display==='block'||m.style.display==='flex') m.style.display='none';
-      if(window._afterPDFLoad){ window._afterPDFLoad=false; showRotModal(); }
     });
   });
 }
@@ -1275,7 +1260,7 @@ function loadPDF(file){
         document.getElementById('grid-paper-btn').style.display='none';
         hideUiBlockOverlays();
         document.getElementById('loading').style.display='none';
-        showPgModal(pdf.numPages);
+        showStartupDialog(pdf); // r039: ページ選択/元図の線/縮尺/角度調整を起動ダイアログに統合
       })
       .catch(err=>{alert('PDF読込エラー: '+err.message);
         document.getElementById('loading').style.display='none';});
@@ -1283,21 +1268,203 @@ function loadPDF(file){
   rd.readAsArrayBuffer(file);
 }
 
-function showPgModal(n){
-  const m=document.getElementById('pg-modal');
-  const btns=document.getElementById('pg-btns');
-  btns.innerHTML='';
-  for(let i=1;i<=n;i++){
-    const b=document.createElement('button');
-    b.textContent='ページ '+i;
-    b.addEventListener('click',()=>{m.style.display='none';pageNum=i;renderPage();});
-    btns.appendChild(b);
+// r041: showPgModal() を削除(ページ選択は起動ダイアログに統合済み)
+
+// ================================================================
+//  r039(38回目): 起動ダイアログ (Arecal A040 の移植)
+//  PDF読込直後に「ページ/元図の線/縮尺/角度調整」を1画面で選ぶ。免責の同意もここ(了解してはじめる)。
+//  ・縮尺はこれまで通りapplyScale()に任せる(体積・3D側は一切変更なし)。
+//  ・元図の線の抽出→回転焼き込みの順は従来のまま(bakeRotation()がvecPts/vecSegsも回転させる)。
+// ================================================================
+let _consentGiven=false;       // このセッションで免責に同意済みか
+let _discConsentMode=false;    // 免責の別窓が「同意確認」モードか(false=読むだけ)
+let _discCb=null;
+let _suPdf=null,_suInited=false,_suPaperSeq=0,_suTipOwner=null,_suGridMode=false;
+const _SU_TIPS={
+  vec:'マウスが線にピタッと吸着する機能を使えるようにします\n（CADから変換されたPDFにのみ有効）\n※読込に時間がかかったり、動作が重くなる場合があります\n※この設定は後から変更できません（有効化には再読込が必要）',
+  scale:'PDF図面の縮尺を選んでください。\n間違うと正確な面積・体積が計測出来ません',
+  rot:'斜めにスキャンされた図面の角度を補正できます'
+};
+function _showDisclaimer(consentMode,cb){
+  _discConsentMode=!!consentMode;_discCb=cb||null;
+  const b=document.getElementById('disclaimer-ok');
+  if(b)b.textContent=consentMode?'了解してはじめる':'閉じる';
+  document.getElementById('disclaimer-modal').style.display='flex';
+}
+function _discClose(){
+  document.getElementById('disclaimer-modal').style.display='none';
+  if(_discConsentMode){
+    _consentGiven=true;_discConsentMode=false;
+    const f=_discCb;_discCb=null;
+    if(f)f();
   }
-  if(n===1){m.style.display='none';renderPage();}
-  else m.style.display='block';
+}
+function _requireConsent(cb){
+  if(_consentGiven){cb();return;}
+  _showDisclaimer(true,cb);
+}
+function _suEl(id){return document.getElementById(id);}
+function _suHideTip(){const t=_suEl('su-tip');if(t)t.style.display='none';_suTipOwner=null;}
+function _suShowTip(target){
+  const tip=_suEl('su-tip');
+  tip.textContent=_SU_TIPS[target.dataset.tip]||'';
+  tip.style.display='block';
+  const r=target.getBoundingClientRect();
+  const tw=tip.offsetWidth,th=tip.offsetHeight;
+  let x=r.left,y=r.bottom+8;
+  if(x+tw>window.innerWidth-8)x=window.innerWidth-8-tw;
+  if(x<8)x=8;
+  if(y+th>window.innerHeight-8)y=Math.max(8,r.top-th-8);
+  tip.style.left=x+'px';tip.style.top=y+'px';
+  _suTipOwner=target;
+}
+// 用紙サイズ判定(Arecalと同じ)。wPt/hPtはPDFのpt単位(scale=1)
+function detectPaperSize(wPt,hPt){
+  const mm={w:wPt*25.4/72,h:hPt*25.4/72};
+  const sizes=[
+    {n:'A0',w:841,h:1189},{n:'A1',w:594,h:841},{n:'A2',w:420,h:594},
+    {n:'A3',w:297,h:420},{n:'A4',w:210,h:297},{n:'A5',w:148,h:210},
+    {n:'B0',w:1000,h:1414},{n:'B1',w:707,h:1000},{n:'B2',w:500,h:707},
+    {n:'B3',w:353,h:500},{n:'B4',w:250,h:353},{n:'B5',w:176,h:250}
+  ];
+  const TOL=8; // mm誤差許容
+  const w=mm.w,h=mm.h;
+  if(Math.max(w,h)>1200)return 'A0以上の大きな図面';
+  if(Math.max(w,h)<100)return 'かなり小さい図面';
+  for(const s of sizes){
+    if((Math.abs(w-s.w)<TOL&&Math.abs(h-s.h)<TOL)||(Math.abs(w-s.h)<TOL&&Math.abs(h-s.w)<TOL))
+      return s.n+(w<h?'（縦）':'（横）');
+  }
+  return `不定形（${Math.round(w)}×${Math.round(h)}mm）`;
+}
+// 任意入力の縮尺分母: 1以上・小数第1位まで。不正ならnull(エラー文は呼び出し側が表示)
+function _suParseDenom(raw){
+  const v=parseFloat(raw);
+  if(isNaN(v)||v<1)return null;
+  if(Math.abs(v*10-Math.round(v*10))>1e-6)return null; // 小数第2位以下があれば弾く(例: 12.55→NG、12.5→OK)
+  return Math.round(v*10)/10;
+}
+async function _suUpdatePaper(){
+  const seq=++_suPaperSeq;
+  const el=_suEl('su-paper');
+  if(_suGridMode){el.textContent='用紙: A3（横）';return;}
+  if(!_suPdf){el.textContent='';return;}
+  try{
+    const p=await _suPdf.getPage(parseInt(_suEl('su-page').value)||1);
+    if(seq!==_suPaperSeq)return;
+    const vp=p.getViewport({scale:1});
+    el.textContent='用紙: '+detectPaperSize(vp.width,vp.height);
+  }catch(e){if(seq===_suPaperSeq)el.textContent='';}
+}
+function _suInit(){
+  if(_suInited)return;_suInited=true;
+  _suEl('su-page').addEventListener('change',_suUpdatePaper);
+  _suEl('su-scale').addEventListener('change',()=>{
+    const isCustom=_suEl('su-scale').value==='custom';
+    _suEl('su-custom-row').style.display=isCustom?'flex':'none';
+    _suEl('su-err').textContent='';
+    if(isCustom){const ci=_suEl('su-custom');ci.focus();ci.select();}
+  });
+  _suEl('su-custom').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();_suStart();}});
+  _suEl('su-read').addEventListener('click',()=>_showDisclaimer(false));
+  _suEl('su-start').addEventListener('click',_suStart);
+  // r040: 方眼紙モードで開いた時だけ「戻る」(PDF入力画面へ)。枠の外をクリックしても閉じない(誤操作防止)
+  _suEl('su-back').addEventListener('click',()=>{
+    _suEl('su-overlay').style.display='none';_suGridMode=false;_suHideTip();
+  });
+  // 解説: マウスはホバーで表示。タッチ端末は「?」ボタンのタップで表示/非表示(ホバーが無いため)。
+  document.querySelectorAll('#su-dlg [data-tip]').forEach(t=>{
+    t.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')_suShowTip(t);});
+    t.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')_suHideTip();});
+  });
+  document.querySelectorAll('#su-dlg .su-ic').forEach(b=>{
+    b.addEventListener('click',e=>{
+      e.stopPropagation();
+      if(e.pointerType==='mouse')return; // マウスはホバー表示済み(クリックで消えないように)
+      const tip=_suEl('su-tip');
+      if(_suTipOwner===b&&tip.style.display==='block')_suHideTip();else _suShowTip(b);
+    });
+  });
+  _suEl('su-overlay').addEventListener('click',e=>{
+    if(!e.target.closest('.su-ic'))_suHideTip();
+  });
+}
+// pdf=読込済みPDF(通常) / grid=true で方眼紙モード(ページ・元図の線・角度調整はグレーアウト)
+function showStartupDialog(pdf,grid){
+  _suGridMode=!!grid;_suPdf=grid?null:pdf;_suInit();
+  const sel=_suEl('su-page');sel.innerHTML='';
+  if(!grid){
+    for(let i=1;i<=pdf.numPages;i++){
+      const op=document.createElement('option');op.value=String(i);op.textContent='ページ '+i;sel.appendChild(op);
+    }
+    sel.value='1';
+  }else{
+    const op=document.createElement('option');op.value='1';op.textContent='―';sel.appendChild(op);
+  }
+  sel.disabled=grid||pdf.numPages<=1; // 1ページだけの場合は「ページ 1」のみ表示(選択不要)
+  _suEl('su-vec').checked=!grid;  _suEl('su-vec').disabled=!!grid;
+  _suEl('su-rot').checked=false;  _suEl('su-rot').disabled=!!grid;
+  ['su-row-page','su-row-vec','su-row-rot'].forEach(id=>_suEl(id).classList.toggle('su-off',!!grid));
+  // r040: 縮尺の既定値は1/100(マスター指示。毎回の選択の手間を省く)。用紙サイズ表示と見比べて違えば変更する
+  _suEl('su-scale').value='1/100';
+  _suEl('su-back').style.display=grid?'inline-block':'none';
+  _suEl('su-custom-row').style.display='none';
+  _suEl('su-custom').value='100';
+  _suEl('su-err').textContent='';
+  _suHideTip();
+  _suUpdatePaper();
+  _suEl('su-overlay').style.display='flex';
+}
+function _suStart(){
+  const sv=_suEl('su-scale').value;
+  const err=_suEl('su-err');
+  let denom=null;
+  if(!sv){
+    err.textContent='⚠ スケール比を選択してください';
+    toast('⚠ スケール比を選択してください');
+    _suEl('su-scale').focus();
+    return;
+  }
+  if(sv==='custom'){
+    const dv=_suParseDenom(_suEl('su-custom').value.trim());
+    if(dv===null){err.textContent='⚠ 1以上の数値で入力してください（小数第1位まで）';_suEl('su-custom').focus();return;}
+    denom=dv;
+  }else{
+    denom=parseFloat(sv.split('/')[1]);
+  }
+  err.textContent='';
+  _consentGiven=true; // 「了解してはじめる」=免責に同意
+  _suEl('su-overlay').style.display='none';
+  _suHideTip();
+  if(_suGridMode){
+    // 方眼紙モード: 従来の「この縮尺で方眼紙作図を開始」と同じ処理(applyScale→startGridPaperMode)
+    _suGridMode=false;
+    applyScale('1/'+denom);
+    startGridPaperMode();
+    return;
+  }
+  renderPage({page:parseInt(_suEl('su-page').value)||1,vec:_suEl('su-vec').checked,rot:_suEl('su-rot').checked,denom});
+}
+// ページの描画後(renderPageから呼ばれる)。縮尺適用 →(元図の線ON なら抽出)→(角度調整ON なら回転UI)
+async function _startupAfterRender(pg,o){
+  _rotPage=pg; // 回転焼き込み対象
+  applyScale('1/'+o.denom);
+  if(o.vec){
+    await extractVecs(pg);
+  }else{
+    vecPts=[];vecSegs=[];vecGrid=null;
+    updVecLineCountLabel(); // スキップ時は本数表示を0に戻す
+    toast('⚠ 元図の読み取りをスキップしました（元図スナップは使用できません）',3000);
+  }
+  fitScreen();
+  if(o.rot){
+    // 回転UIを開始。OK確定後はbakeRotation()がvecPts/vecSegs/図形ごと回転する
+    startRotationUI();
+  }
 }
 
-async function renderPage(){
+async function renderPage(o){
+  if(o) pageNum=o.page; // r039: 起動ダイアログで選んだページ
   // sc-modalが表示されている間はisToolsLockedがtrueになる（toolsLockedは不要）
   document.getElementById('loading').style.display='block';
   try{
@@ -1326,21 +1493,10 @@ async function renderPage(){
     // (dcOffX,dcOffY)に明示的に合わせないと、zoom=1以外で必ずズレる。
     drawCv.style.transformOrigin = dcOffX + 'px ' + dcOffY + 'px';
     await pg.render({canvasContext:pdfCtx,viewport:vp}).promise;
-    // r023(AreCal移植): 元図スナップ用ベクター抽出を行うか、読込のたびに確認する
-    const wantVecExtract = await askVecExtractConsent();
-    if(wantVecExtract){
-      await extractVecs(pg);
-    }else{
-      vecPts=[];vecSegs=[];vecGrid=null;
-      updVecLineCountLabel(); // r095: スキップ時は本数表示を0に戻す
-      toast('⚠ 元図の読み取りをスキップしました（元図スナップは使用できません）',3000);
-    }
-    fitScreen();
+    // r039(38回目): 旧フロー(元図の確認→縮尺→角度確認)は通らない。起動ダイアログの選択で
+    // 縮尺適用 →(元図の線ON なら抽出)→(角度調整ON なら回転UI)の順に進める。
+    await _startupAfterRender(pg,o);
     document.getElementById('loading').style.display='none';
-    window._afterPDFLoad = true; // v0.0013: PDF読込後フラグ（角度調整制御用）
-    document.getElementById('sc-modal').style.display='block';
-    document.getElementById('sc-init-in').focus();
-    toast('📄 PDF読込完了。縮尺を選択してください');
   }catch(err){
     alert('レンダリングエラー: '+err.message);
     document.getElementById('loading').style.display='none';
@@ -1357,23 +1513,13 @@ function runVecWorker(opsFn,opsArgs,transform,minLen){
   });
 }
 
-// r023(AreCal移植): PDF読込のたびに、元図の読み取り(ベクター抽出)を行うか都度確認する。
-// 低スペックPCでの負荷を心配するユーザーのために、各自の判断でスキップできるようにした。
-function askVecExtractConsent(){
-  return customConfirm(
-    '🧷 元図の線の位置を読み取りますか？\n\n'+
-    'CADデータから作られたPDFの場合、だいたいの線の位置を抽出して「元図スナップ」機能で使えるようにします。\n'+
-    '図面によっては抽出処理に多少時間がかかったり、低スペックPCでは動作が重くなる可能性があります。\n\n'+
-    '※この設定は今回の読込では後から変更できません(有効にするには読み込み直しが必要です)'
-  );
-}
+// r041: askVecExtractConsent() を削除(元図の線を読むかどうかは起動ダイアログのチェックで選ぶ。r023→r039)
 
 async function extractVecs(pg){
   vecPts=[];vecSegs=[];vecGrid=null;
   try{
     const vp=pg.getViewport({scale:RS});
     const ops=await pg.getOperatorList();
-    _lastOps=ops;
     // ページ対角線に対する相対値で「短すぎる線」の閾値を決める(用紙サイズに追従させる)
     const minLen=Math.max(2,Math.hypot(vp.width,vp.height)*0.003);
     const lines=await runVecWorker(ops.fnArray,ops.argsArray,vp.transform,minLen);
@@ -2145,85 +2291,12 @@ function pxToMm(px){
 function calcSum(){return shapes.filter(sh=>sh.enabled!==false&&colorFilter[sh.color||'blue']).reduce((s,sh)=>s+sh.area,0);}
 
 // ================================================================
-// v0.0010: 鋭角自動カット（法面オブジェクト専用）
-// 内角が SHARP_ANGLE_DEG 以下の頂点を面取り
-// カット後の新辺が MIN_CHAMFER_M 以上になるよう切り幅を決定
-// 辺が短すぎてカットできない場合は頂点ごと除去（突起消去）
+// 【r042 削除】chamferSharpAngles() と MIN_CHAMFER_M — v0.0010「鋭角自動カット」の2D(px座標)側実装。
+//   全ファイル横断で呼び出し元ゼロを確認して削除。法面オブジェクトの鋭角カットは、現在 voldia3d.js の
+//   tryChamferMm()(ptsMm=mm座標用・最小辺500mm)が担っている(重複=旧実装が残っていた状態)。
+//   ※ SHARP_ANGLE_DEG は voldia3d.js(runCalc内)が参照しているので残す。消さないこと。
 // ================================================================
 const SHARP_ANGLE_DEG = 40;   // この角度以下を鋭角とみなす
-const MIN_CHAMFER_M   = 1.0;  // 新辺の最小長さ (m)
-
-function chamferSharpAngles(pts, mppx){
-  // pts: [{x,y}] px座標, mppx: px→m の変換係数
-  // 戻り値: { pts: 新頂点列, chamfered: boolean, removed: number }
-  if(!mppx || mppx <= 0) return {pts, chamfered: false, removed: 0};
-  const n = pts.length;
-  if(n < 3) return {pts, chamfered: false, removed: 0};
-
-  const THR_RAD = SHARP_ANGLE_DEG * Math.PI / 180;
-  const MIN_PX  = MIN_CHAMFER_M / mppx; // m → px
-
-  let result = [...pts];
-  let chamfered = false;
-  let removed = 0;
-  let maxIter = (n + 1) * 3; // 無限ループ防止
-
-  for(let iter = 0; iter < maxIter; iter++){
-    if(result.length < 3) break;
-    let found = false;
-    const m = result.length;
-    for(let i = 0; i < m; i++){
-      const prev = result[(i - 1 + m) % m];
-      const cur  = result[i];
-      const next = result[(i + 1) % m];
-
-      // 前後ベクトル
-      const ax = prev.x - cur.x, ay = prev.y - cur.y;
-      const bx = next.x - cur.x, by = next.y - cur.y;
-      const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
-      if(la < 1e-9 || lb < 1e-9){
-        // ゼロ長辺 → 頂点を除去
-        result.splice(i, 1);
-        removed++;
-        chamfered = true;
-        found = true;
-        break;
-      }
-
-      // 内角
-      const cosA = (ax*bx + ay*by) / (la * lb);
-      const angle = Math.acos(Math.max(-1, Math.min(1, cosA)));
-      if(angle >= THR_RAD) continue; // 鋭角でない
-
-      // カット量 t: 新辺長さ = 2t*sin(angle/2) >= MIN_PX
-      const sinHalf = Math.sin(angle / 2);
-      let t = (sinHalf > 1e-6) ? (MIN_PX / (2 * sinHalf)) : MIN_PX;
-
-      // 辺長さの45%制約
-      const tMax = Math.min(la * 0.45, lb * 0.45);
-
-      if(t > tMax){
-        // 辺が短すぎてカット不可 → 頂点ごと除去（突起消去）
-        result.splice(i, 1);
-        removed++;
-        chamfered = true;
-        found = true;
-        break;
-      }
-
-      // カット2点に置き換え
-      const p1 = { x: cur.x + (ax/la)*t, y: cur.y + (ay/la)*t };
-      const p2 = { x: cur.x + (bx/lb)*t, y: cur.y + (by/lb)*t };
-      result.splice(i, 1, p1, p2);
-      chamfered = true;
-      found = true;
-      break;
-    }
-    if(!found) break;
-  }
-
-  return { pts: result.map(p => roundPt(p)), chamfered, removed };
-}
 
 // v0.0009: hex色を明るくするヘルパー（選択ハイライト用）
 function lightenColor(hex, amount){
@@ -2842,17 +2915,10 @@ function openNorthDialog(){
   else{sel.disabled=false;hint.style.display='none';}
   document.getElementById('north-dialog').style.display='flex';
 }
-// 将来のLandXML出力機能から呼び出す想定のガード関数。
-// 原点用測点が未設定なら出力を止めてtoastで測点設置を促し、falseを返す。
-// 現状LandXML出力ボタン自体は本ファイルに未実装のため、実際に使われるのは
-// 将来その機能を追加する際（呼び出し忘れに注意）。
-function checkNorthOriginForExport(){
-  if(originSurveyIdx==null||!surveyPts[originSurveyIdx]){
-    toast('⚠ 原点用の測点が未設定です。ノースアロー設定（右上🧭）から測点を選択してください',3500);
-    return false;
-  }
-  return true;
-}
+// 【r042 削除】checkNorthOriginForExport() — 将来のLandXML出力用ガード関数(未使用のまま残っていた)。
+//   全ファイル横断で呼び出し元ゼロを確認して削除。元の中身: originSurveyIdx==null||!surveyPts[originSurveyIdx] なら
+//   toast('⚠ 原点用の測点が未設定です。ノースアロー設定（右上🧭）から測点を選択してください',3500)して false を返す、だけ。
+//   LandXML出力本体を作る時に必要なら、その時に書き直す(r041以前のファイルから復元も可)。
 
 // ================================================================
 //  選択合成モード
@@ -3343,8 +3409,15 @@ function toggleSidebars(disabled) {
   });
 }
 
-function showRotModal(){
-  document.getElementById('rot-modal').style.display='block';
+// r041: showRotModal() を削除し、旧rot-yesのクリック処理だった「角度調整UIの開始」をここへ切り出した。
+//       _startupAfterRender()が直接呼ぶ(以前はボタンを仮想クリックしていた)。
+function startRotationUI(){
+  rotAngle=0;
+  document.getElementById('rot-overlay').style.display='block';
+  document.getElementById('rot-ctrl').style.display='flex';
+  toggleSidebars(true); // サイドバーをロック
+  fitScreen();
+  toast('📐 回転モード: ボタンまたは入力欄で角度を調整してください',4000);
 }
 function previewRot(angle){
   rotAngle = angle;
