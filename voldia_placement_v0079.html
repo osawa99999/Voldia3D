@@ -490,9 +490,11 @@
 </div>
 
 <script src="data/voldia_models.js"></script>
-<!-- r079(37回目): 作業員を新モデル(LOW_1TOKO)に入れ替え。voldia_models.jsの後・voldia_placement.jsの前に読み込むこと -->
-<script src="data/LOW_1TOKO_geo.js"></script>
-<script src="data/voldia_worker_toko.js"></script>
+<!-- v0079(40回目): 【削除】data/LOW_1TOKO_geo.js と data/voldia_worker_toko.js を読み込んでいたscriptタグ2行。
+     何だったか: r079(37回目)で作業員の新モデル(LOW_1TOKO)を別ファイルで読み込んでいた。
+     なぜ消したか: 作業員のモデルデータ(LOW_1TOKO_GEO)と生成関数(createWorkerFromModel)はr073でdata/voldia_models.js内に統合済み(別ファイル不要)。
+     voldia_placement.jsも両ファイルを参照しない。ファイルは存在せず、読み込みのたびに404(コンソールにエラー)になっていた。
+     voldia_models.jsはvoldia_placement.jsより前に読み込むこと(順序は従来どおり)。 -->
 <script src="js/voldia_placement.js"></script>
 
 </body>

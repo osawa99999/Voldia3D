@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -1504,11 +1504,24 @@ function showStartupDialog(pdf,grid){
   _suUpdatePaper();
   _suEl('su-overlay').style.display='flex';
 }
+// r047(40回目): 新しい四角形/多角形の連番。従来は shapes.length+1 で採番していたため、途中の図形を削除して欠番ができると
+// (例: 四角形1〜5のうち3を削除→次が「四角形5」)既存と重複していた。既存の「四角形N」「多角形N」の最大Nに+1する。
+// 名前が未設定の古い図形は、一覧表示のフォールバック(getAutoTypeName: 種別+位置番号)と同じ名前として数える。
+function _nextShapeNumber(){
+  let mx=0;
+  shapes.forEach((s,i)=>{
+    const nm=s.name||(s.type==='rect'?`四角形${i+1}`:(s.type==='poly'?`多角形${i+1}`:''));
+    const mm=/^(?:四角形|多角形)(\d+)$/.exec(nm);
+    if(mm)mx=Math.max(mx,parseInt(mm[1],10));
+  });
+  return mx+1;
+}
 // ================================================================
 //  Voldファイル読込ダイアログ (r046 / 40回目)
 //  .voldのドロップ/選択 → 起動ダイアログをVoldモードで開く(ページ/縮尺/角度の行は隠す)。
 //  ・元図の線が保存されているVoldだけ「元図の線を読込む」を表示(既定ON)。外すと線(vecSegs)は読み込まない。
-//  ・同意済み(_consentGiven)かつ選択肢が無い(元図の線なし)Voldは、従来どおりダイアログ無しで即読込。
+//  ・読込のたびに必ずこのダイアログを出す(作図中に投げた場合も同じ)。r046で入れた「同意済み+元図の線なしは即読込」の例外は、
+//    作図中にダイアログが出ないという不具合になったため r047 で廃止。
 //  ・「了解してはじめる」で同意扱い(_consentGiven=true)→(現在の内容があれば破棄の確認)→applyVoldData(data,{loadVec})。
 // ================================================================
 async function _openVoldDialog(f){
@@ -1520,7 +1533,6 @@ async function _openVoldDialog(f){
     if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
     Promise.resolve(applyVoldData(data,{loadVec:!!loadVec})).catch(ex=>{alert('読込エラー: '+ex.message);});
   };
-  if(_consentGiven && !hasVec){ run(true); return; }
   _suShowVold(hasVec,run);
 }
 function _suShowVold(hasVec,cb){
@@ -2329,7 +2341,7 @@ function finishShape(){
         const newPts = poly.map(p=>roundPt({x:p.X/SF_SI, y:p.Y/SF_SI}));
         const area = calcArea(newPts);
         if(area < MIN_AREA_M2){ skippedCount++; return; }
-        const shIdx2 = shapes.length + 1;
+        const shIdx2 = _nextShapeNumber(); // r047: shapes.length+1だと欠番で重複していた
         shapes.push({
           type: tool,
           pts: newPts,
@@ -2365,7 +2377,7 @@ function finishShape(){
     }
   }
 
-  const shIdx=shapes.length+1;
+  const shIdx=_nextShapeNumber(); // r047: shapes.length+1だと欠番で重複していた
   const sh={type:tool,pts:cur.pts,area:calcArea(cur.pts),
             depthBeam:'-1800',overdig:'0',noSlope:true,
             color:currentToolColor,enabled:true,
