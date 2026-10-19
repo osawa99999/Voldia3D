@@ -430,8 +430,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #su-read{background:#fff;color:#111;border:2px solid #888;border-radius:10px;padding:8px 22px;font-size:.95em;font-weight:600;text-decoration:underline;cursor:pointer;}
 #su-dlg .su-agree{font-size:.88em;font-weight:700;line-height:1.7;margin:6px 0 14px;color:#f2f2f2;}
 #su-dlg .su-foot{text-align:right;}
-#su-back{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;margin-right:12px;}
-#su-back:active{filter:brightness(.9);}
+/* v0135: 方眼紙モード専用だった「戻る」(#su-back)のCSS・ボタンを削除(「キャンセル」#su-cancelに統一) */
 #su-start{background:#2196f3;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
 #su-start:active{filter:brightness(.9);}
 #su-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;white-space:pre-line;box-shadow:0 2px 12px rgba(0,0,0,.6);pointer-events:none;}
@@ -463,14 +462,17 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #gm-back:active,#gm-start:active{filter:brightness(.9);}
 #gm-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
 /* 起動ダイアログの「キャンセル」(「了解してはじめる」の右) */
-#su-cancel{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;margin-left:12px;}
+#su-cancel{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;}
+/* v0136: ボタン順を「キャンセル → 了解してはじめる」(マスター提示の画像どおり)。PDF/方眼紙/Voldの3モード共通 */
+#su-dlg .su-foot{display:flex;justify-content:flex-end;align-items:center;gap:28px;}
+#su-dlg .su-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
 #su-cancel:active{filter:brightness(.9);}
 /* 3D結果画面: メッシュ/影/色の3トグル(ON/OFFはボタン色)と、下段の出力ボタン行 */
 .rb-row{display:flex;gap:6px;margin-bottom:6px;}
 .rb-tgl{flex:1;padding:7px 0;border-radius:5px;border:1px solid #666;background:#3a3a3a;color:#999;font-size:.82em;cursor:pointer;text-align:center;white-space:nowrap;}
 .rb-tgl.on{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
-.out-row{display:flex;gap:6px;margin-top:8px;}
-.out-row .btn-glb{width:auto;flex:1;min-width:0;padding:8px 2px;font-size:.78em;white-space:nowrap;}
+.out-row{display:flex;flex-direction:column;gap:6px;margin-top:8px;} /* v0135: 横並び→縦3段(「3D配置モード」の文字数が多く窮屈だったため) */
+.out-row .btn-glb{width:100%;padding:8px 6px;font-size:.82em;}
 .btn-cls.btn-cls-main{padding:6px 16px;font-size:.88em;font-weight:700;background:#b71c1c;border-color:#e57373;color:#fff;}
 .btn-cls.btn-cls-main:hover{background:#d32f2f;border-color:#ef9a9a;color:#fff;}
 </style>
@@ -506,7 +508,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0134</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0137</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -940,6 +942,7 @@ D&D or クリックでロードしてください</p>
 <!-- r039(38回目): 起動ダイアログ(ページ選択・元図の線・スケール比・角度調整を1画面に統合)。Arecal A040の移植 -->
 <div id="su-overlay">
   <div id="su-dlg" role="dialog" aria-modal="true">
+    <div class="su-title" id="su-title" style="display:none;">Voldファイルを読み込みます。</div>
     <div class="su-row" id="su-row-page">
       <div class="su-lab">ページを選択</div>
       <select id="su-page"></select>
@@ -948,7 +951,7 @@ D&D or クリックでロードしてください</p>
       <div class="su-lab"><span data-tip="vec">元図の線を読込む</span><button type="button" class="su-ic" data-tip="vec" aria-label="説明">?</button></div>
       <input type="checkbox" id="su-vec" checked>
     </div>
-    <div class="su-row">
+    <div class="su-row" id="su-row-scale">
       <div class="su-lab"><span data-tip="scale">スケール比を設定</span><span class="su-paper" id="su-paper"></span><button type="button" class="su-ic" data-tip="scale" aria-label="説明">?</button></div>
       <select id="su-scale">
         <option value="1/30">1/30</option><option value="1/40">1/40</option><option value="1/50">1/50</option>
@@ -966,7 +969,7 @@ D&D or クリックでロードしてください</p>
     <div class="su-err" id="su-err"></div>
     <div class="su-readwrap"><button type="button" id="su-read">⚠ ご利用前にお読みください</button></div>
     <p class="su-agree">「了解してはじめる」をクリックした時点で、すべての免責事項および完全な自己責任での利用に同意したものとみなします。</p>
-    <div class="su-foot"><button type="button" id="su-back" style="display:none">戻る</button><button type="button" id="su-start">了解してはじめる</button><button type="button" id="su-cancel">キャンセル</button></div>
+    <div class="su-foot"><button type="button" id="su-cancel">キャンセル</button><button type="button" id="su-start">了解してはじめる</button></div>
   </div>
   <div id="su-tip"></div>
 </div>
@@ -1039,6 +1042,12 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0137(40回目): Credits(ライセンス表記)の追記。manifold-3d=Copyright The Manifold Authors(各ソースヘッダで確認)、xlsx-js-style=SheetJS LLC(SheetJS CE)+fork作者gitbrent(Brent Ely)を明記。
+     ※manifold-3dはv3.0.0でGLM(linalgに置換)・外部QuickHull(自前実装に置換)・Thrustを廃止し、TBBはオプション(既定OFF。emscripten PAR=ONは非推奨)。本アプリのv3.5.1には該当しないため、これらは記載していない(書くと事実と食い違うため)。
+     実際に配布されるwasmの中身そのものは未検査。manifold-3dを更新する時は、READMEのDependenciesとリリースノートを見直すこと。 -->
+<!-- v0136(40回目): ①Voldファイル読込時の表示を、起動ダイアログと同じ軽いダイアログ(作成時と同じ#su-overlayをVoldモードで再利用)に変更。長い免責の全文表示をやめ、「ご利用前にお読みください」リンク+同意文+キャンセル/了解。「元図の線を読込む」チェック(既定ON)は元図の線が保存されているVoldのみ表示
+     ②起動画面の北マーク(ノースアロー)を非表示(測点が1つ以上で表示) ③Credits(ライセンス表記)に各ライセンスの全文を追加(MIT/ISC/Boost/JSBN/Apache2.0。THIRD_PARTY_LICENSES.txtにも収録) ④起動ダイアログのボタン順を「キャンセル→了解してはじめる」に変更。 -->
+<!-- v0135(40回目): ①3D結果画面の「3D配置モード」「スクショ」「データ出力」を縦3段に変更 ②起動ダイアログの方眼紙モード専用「戻る」を削除し「キャンセル」に統一(PDF/方眼紙とも同じ位置・同じ動作) ③通常計算で法面角度行がグレーアウトされない不具合をvoldia_main.js r045で修正。計算ロジックは無改造。 -->
 <!-- v0134(40回目): 「3D生成方法」ダイアログ(#gm-overlay)を新設。3Dイメージの通常計算/土量計算ボタンと設定欄(現状地盤GL・捨コン+砕石・余掘り・法面角度)をここへ集約。
      3D結果画面の右UIを整理(メッシュ/影/色の3トグル、下段にスクショ・3D配置モード・データ出力)。起動ダイアログに「キャンセル」を追加。余掘りの既定値を200→300mmに変更。計算ロジックは無改造。 -->
 <div id="license-modal" class="modal">
@@ -1072,13 +1081,15 @@ D&D or クリックでロードしてください</p>
       </div>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">manifold-3d</strong>（CDN読込、v3.5.1）<br>
-        Apache License 2.0<br>
+        Copyright The Manifold Authors — Apache License 2.0<br>
         内部に Clipper2 (Angus Johnson) を含む — Boost Software License 1.0<br>
+        凸包(quickhull)はAntti Kuukka氏のパブリックドメイン作品に由来、ベクトル演算(linalg)はSterling Orsten氏のlinalg.h(パブリックドメイン)に基づく<br>
         <span style="color:#889;">https://github.com/elalish/manifold / https://github.com/AngusJohnson/Clipper2</span>
       </div>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">xlsx-js-style</strong>（CDN読込、v1.2.0。SheetJS Community Editionに基本的なセル書式を追加したもの）<br>
-        Apache License 2.0<br>
+        Apache License 2.0 — SheetJS CE: Copyright (C) 2012-present SheetJS LLC<br>
+        fork作者: gitbrent (Brent Ely)。sheetjs-style (ShanaMaid)・sheetjs-style-v2 (Raul Gonzalez) のコードも取り込み<br>
         <span style="color:#889;">https://github.com/gitbrent/xlsx-js-style</span>
       </div>
       <div style="margin-bottom:14px;">
@@ -1092,6 +1103,143 @@ D&D or クリックでロードしてください</p>
         MIT License（デュアルライセンスのうちMIT側を適用）<br>
         <span style="color:#889;">https://github.com/Stuk/jszip</span>
       </div>
+    </div>
+    <h4 style="margin:18px 0 6px;font-size:.85em;color:#88aaff;">ライセンス全文 (Full license texts)</h4>
+    <p style="color:#aaa;font-size:.74em;line-height:1.7;margin:0 0 8px;">
+      上の各ライブラリが従う許諾条件の全文です(MIT・BSL・Apache等は、著作権表示と許諾文の掲示が条件のため掲載しています)。項目をクリックすると開きます。同じ内容を <b>THIRD_PARTY_LICENSES.txt</b> にも収録しています。
+    </p>
+    <div style="font-size:.74em;">
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">MIT License <span style="color:#889;font-weight:400;">— three.js / GLTFLoader / OrbitControls / jsPDF / JSZip</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">three.js / GLTFLoader / OrbitControls (r128):
+  Copyright © 2010-2021 three.js authors
+jsPDF (v2.5.1):
+  Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH
+JSZip (v3.10.1):
+  Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">ISC License <span style="color:#889;font-weight:400;">— earcut</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">earcut (lib/earcut.js):
+  Copyright (c) 2016, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot; AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Boost Software License 1.0 <span style="color:#889;font-weight:400;">— Javascript Clipper / Clipper2(manifold-3d内)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">Javascript Clipper (lib/clipper.js, v6.4.2.2):
+  Copyright Angus Johnson 2010-2017 (Clipper)
+  Copyright Timo Kähkönen 2012-2017 (JavaScript port)
+Clipper2 (manifold-3d に内蔵):
+  Angus Johnson
+
+Boost Software License - Version 1.0 - August 17th, 2003
+
+Permission is hereby granted, free of charge, to any person or organization obtaining a copy of the software and accompanying documentation covered by this license (the &quot;Software&quot;) to use, reproduce, display, distribute, execute, and transmit the Software, and to prepare derivative works of the Software, and to permit third-parties to whom the Software is furnished to do so, all subject to the following:
+
+The copyright notices in the Software and this entire statement, including the above license grant, this restriction and the following disclaimer, must be included in all copies of the Software, in whole or in part, and all derivative works of the Software, unless such copies or derivative works are solely in the form of machine-executable object code generated by a source language processor.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">JSBN License (Tom Wu) <span style="color:#889;font-weight:400;">— JSBN(Javascript Clipperに内蔵)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">JSBN (BigInteger。Javascript Clipperに内蔵):
+  Copyright (c) 2003-2005 Tom Wu
+
+Copyright (c) 2003-2005 Tom Wu
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS-IS&quot; AND WITHOUT WARRANTY OF ANY KIND, EXPRESS, IMPLIED OR OTHERWISE, INCLUDING WITHOUT LIMITATION, ANY WARRANTY OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+
+IN NO EVENT SHALL TOM WU BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT OR CONSEQUENTIAL DAMAGES OF ANY KIND, OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER OR NOT ADVISED OF THE POSSIBILITY OF DAMAGE, AND ON ANY THEORY OF LIABILITY, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+In addition, the following condition applies:
+
+All redistributions must retain an intact copy of this copyright notice and disclaimer.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Apache License 2.0 <span style="color:#889;font-weight:400;">— PDF.js / manifold-3d / xlsx-js-style</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">PDF.js (v2.12.313):
+  Copyright Mozilla and PDF.js contributors
+manifold-3d (v3.5.1):
+  Copyright The Manifold Authors (各ソースのヘッダに「Copyright &lt;年&gt; The Manifold Authors」と記載。ライブラリの開始者は Emmett Lalish)
+  内蔵: Clipper2 — Copyright Angus Johnson (Boost Software License 1.0。上のBoostの項を参照)
+  派生元の明記: 凸包(quickhull)の実装は Antti Kuukka (akuukka/quickhull) のパブリックドメイン作品に由来、
+  ベクトル演算(linalg)は Sterling Orsten の linalg.h (パブリックドメイン) に基づく。
+  いずれもmanifoldのソースではThe Manifold AuthorsのApache 2.0のファイルとして配布されている
+xlsx-js-style (v1.2.0):
+  SheetJS Community Edition — Copyright (C) 2012-present SheetJS LLC
+  xlsx-js-style は gitbrent (Brent Ely) によるSheetJS CEのfork。sheetjs-style (ShanaMaid) と
+  sheetjs-style-v2 (Raul Gonzalez) のコードも取り込んでいる(いずれもApache 2.0。同プロジェクトのREADMEに記載)
+
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+&quot;License&quot; shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+
+&quot;Licensor&quot; shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+
+&quot;Legal Entity&quot; shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, &quot;control&quot; means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+
+&quot;You&quot; (or &quot;Your&quot;) shall mean an individual or Legal Entity exercising permissions granted by this License.
+
+&quot;Source&quot; form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+&quot;Object&quot; form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+&quot;Work&quot; shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+
+&quot;Derivative Works&quot; shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+&quot;Contribution&quot; shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, &quot;submitted&quot; means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as &quot;Not a Contribution.&quot;
+
+&quot;Contributor&quot; shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
+
+(a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
+
+(b) You must cause any modified files to carry prominent notices stating that You changed the files; and
+
+(c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
+
+(d) If the Work includes a &quot;NOTICE&quot; text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
+
+You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an &quot;AS IS&quot; BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS</pre>
+      </details>
     </div>
     <button id="license-modal-close" style="display:block;width:100%;margin-top:18px;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.9em;cursor:pointer;font-weight:700;">閉じる</button>
   </div>
@@ -1131,10 +1279,11 @@ D&D or クリックでロードしてください</p>
 <!-- ClipperLib は冒頭の inline scriptに含まれています -->
 
 <!-- r060: ノースアロー（方位角ウィジェット）。画面右上に固定表示。
+     v0136: 初期状態は非表示(display:none)。起動画面で回せてしまうため。測点が1つ以上になるとredraw()が表示する(従来どおり)。
      ドラッグで回転／ダブルクリックで数値入力。作図・3D表示・配置モードには一切影響しない
      （将来のLandXML出力時の回転・原点決定にのみ使用）。 -->
 <div id="north-arrow-wrap" title="ドラッグで回転／ダブルクリックで数値入力（LandXML出力用・作図には影響しません）"
-     style="position:fixed;top:16px;right:26px;z-index:9500;width:60px;cursor:grab;user-select:none;touch-action:none;">
+     style="display:none;position:fixed;top:16px;right:26px;z-index:9500;width:60px;cursor:grab;user-select:none;touch-action:none;">
   <svg id="north-arrow-svg" viewBox="0 8 100 108" width="60" height="65" style="display:block;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));">
     <g id="north-arrow-rotor" style="transform-origin:50px 72px;transform:rotate(0deg);">
       <text x="50" y="31" text-anchor="middle" font-size="26" font-weight="900" fill="var(--accent2)" font-family="sans-serif" letter-spacing="1">N</text>
