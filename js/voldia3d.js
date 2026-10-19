@@ -4,7 +4,7 @@
 // 【r111 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロと確認した関数だけを削除。挙動は変えていない)
 //  isPointInsideFrustumExcavation / getLineSegmentsIntersection / getPolygonIntersections(旧Vertex-First方式の部品)
 //  getJSTTimestamp(getVoldiaTimestampに統一済み) / classifyPathsSafe(誰も呼んでいなかった) / _removeCollinearPts / _delaunayFlip(earcut後処理)
-//  未着手(別途確認が必要): _lastExistingStructGeoms(書き込みのみ。計算経路に近いのでマスター確認待ち)、関数内の未使用ローカル(clipperDifference重複 等)。
+//  【r112】_lastExistingStructGeoms(書き込みのみのキャッシュ)も削除(代入6か所+宣言。voldia_main.js側の2か所も削除)。残り未着手: 関数内の未使用ローカル(clipperDifference重複 等)。
 //  ※ このファイルの冒頭ヘッダ『r104より分離』は古いまま(別件の小整理)。
 
 // 3D高さ逆算用：2D平面上での点Pから線分ABへの最短距離を求める
@@ -2117,7 +2117,6 @@ function showCalcModal(){
   });
   
   _lastGeoms = null;
-  _lastExistingStructGeoms = [];
   resetCalcToSelect();
   _hideCalcProgress(); // r072: モーダルを開き直す際、前回の計算中表示が残っていれば消す
 
@@ -2140,10 +2139,7 @@ function closeCalcModal(){
 }
 
 let _lastGeoms=null; // 計算済み水密ジオメトリ（GLB出力用）
-// 26回目セッション新規: 既存躯体(グレー)の「描いた形状そのまま」ジオメトリ。
-// _lastGeomsとは別枠で保持し、GLB出力時に専用ノード(Voldia_ExistingStructure)
-// として分離出力する(r051のVoldia_FixedObjects分離と同じ理由・同じ扱い)。
-let _lastExistingStructGeoms=[];
+// r112: _lastExistingStructGeoms(26回目新設の既存躯体キャッシュ)を削除。27回目からexport側が読まなくなり、書き込みのみだった(詳細は buildMeshFromGeoms 付近の【r112 削除】コメント)。
 let _meshMaterials=[]; // 透過スライダー制御用マテリアル参照（現在アクティブなもの＝グラデ時はPhong/ソリッド時はBasic）
 let _meshObjs=[]; // r038: ソリッド⇔グラデ切替時にマテリアルを丸ごと差し替えるためのメッシュ本体参照
 let _existingStructMat=null; // r110(37回目): 既存躯体メッシュのマテリアル参照(透過スライダー連動用)
@@ -2841,7 +2837,6 @@ async function runCalc(mode){
     window._lastCalcABBreakdown = { excavOnlyM3, existingOverlapM3, totalM3: unionM3 };
 
     _lastGeoms = result.unionGeoms;
-    _lastExistingStructGeoms = result.existingStructGeoms || [];
 
     // r010: VoldiaM側で見つかった体積計算バグ(Math.abs()による穴符号消失/
     // holesMm無視)の修正・移植を確認できたため、土量計算も実数値表示に復活。
@@ -3173,29 +3168,13 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
     _lastGeoms = [{ positions: posMm, indices: mergedIdx }];
   }
 
-  // 26回目セッション新規: 既存躯体(グレー)は配置モードの地面/躯体GLBにも
-  // 含める(マスター指示: 体積とは無関係、通常の地面や躯体を表示するのと同じ
-  // 段階でオブジェクトを作るだけでよい)。ただし_lastGeoms(掘削シェル本体)には
-  // 混ぜない — r051のVoldia_FixedObjects分離と同じ理由(既存躯体は掘削シェルと
-  // 接続しない独立ソリッドのため、配置モード側の境界ループ検出の辺カウントを
-  // 狂わせる)。完全に別変数_lastExistingStructGeomsに保持し、GLB出力時に
-  // 専用ノード(Voldia_ExistingStructure)として分離出力する。
-  if(structFrustumsForMesh.length){
-    const esPositionsMm = [];
-    const esIndicesMm = [];
-    structFrustumsForMesh.forEach(f=>{
-      const {positions: p, indices: idx} = buildFrustumGeometry({...f, noSlope:true, OD:0});
-      if(!p || !p.length || !idx || !idx.length) return;
-      const base = esPositionsMm.length / 3;
-      for(let i=0;i<p.length;i++) esPositionsMm.push(p[i]);
-      for(let i=0;i<idx.length;i++) esIndicesMm.push(idx[i]+base);
-    });
-    _lastExistingStructGeoms = esPositionsMm.length
-      ? [{ positions: new Float32Array(esPositionsMm), indices: new Uint32Array(esIndicesMm) }]
-      : [];
-  } else {
-    _lastExistingStructGeoms = [];
-  }
+  // 【r112 削除】26回目に追加した「既存躯体の描いた形状そのまま」ジオメトリのキャッシュ(_lastExistingStructGeoms)を組み立てるブロックを削除。
+  //   経緯: 26回目にGLB出力の専用ノード(Voldia_ExistingStructure)用として新設 → 27回目(voldia_export.js r010)で、export側は
+  //   このキャッシュに頼らず fs(図形リスト)から毎回作り直す方式に変わり、以後このキャッシュは書き込みだけで誰にも読まれていなかった。
+  //   全ファイル(JS5本+ライブラリ/モデル/アセット4本+HTML2本)を横断して読み手ゼロを確認して削除。
+  //   ※ 専用ノード自体は今も出力される(voldia_export.js が fs から作る。voldia_placement.js が Voldia_ExistingStructure として受け取る)。
+  //   ※ ここで呼んでいた buildFrustumGeometry() は外部状態を書き換えない(引数も複製)ことを確認済みなので、削除で挙動は変わらない。
+  //   ※ structFrustumsForMesh 自体は、下の表示(esPositions/esIndices等)でまだ使っている。
 
   // r065: cyanGeo/redGeoを別々にcomputeVertexNormals()すると、cyan/red境界にある
   // 共有頂点の法線が「自分の色の三角形群」だけから平均されてしまい、本来滑らかで
@@ -3357,7 +3336,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
         // 同一平面に来てしまい、あたかも躯体の上に線が乗っているように見える
         // (候補①、山留の天端で実際に再現・確認済み)。ここは表示専用のThree.js
         // Mesh位置(position)を1mmだけ持ち上げるだけで、esPositions/esIndices
-        // 自体(体積計算・GLB出力データ、_lastExistingStructGeomsは別途独立して
+        // 自体(体積計算・GLB出力データ、(旧)_lastExistingStructGeomsは別途独立して
         // structFrustumsForMeshから再計算されるため無関係)は一切変更しない。
         // r008: マスターが実機で確認(カメラをどの角度に回しても常に張り付いて見える)、
         // 掘削シェルの頂点が既存躯体の天端面と1点で座標一致していることによる本物の
@@ -4188,7 +4167,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r111(base:VoldiaM r069)"; // r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r112(base:VoldiaM r069)"; // r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
