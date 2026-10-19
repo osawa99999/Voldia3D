@@ -1,10 +1,10 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
 //               checkNorthOriginForExport()(将来のLandXML出力用ガード。未使用)
-//  削除した変数: _lastOps(書き込みのみ) / toolsLocked(書き込みのみ。voldia_export.js側の代入1行も削除)
+//  削除した変数: _lastOps(書き込みのみ) / toolsLocked(書き込みのみ。voldia_export.js側の代入1行も削除)  / r043で _lastExistingStructGeoms への代入2か所も削除(変数本体は voldia3d.js r112 で削除)
 //  残したもの: SHARP_ANGLE_DEG(voldia3d.jsが参照)。
 //  ※ 詳細な理由は、各削除箇所に残したコメントを参照。復元が必要になったら r041 のファイルから戻す。
 // 【r041 削除一覧】(38回目。r039の起動フロー改造で呼ばれなくなった旧コードを整理。挙動は変えていない)
@@ -2549,7 +2549,7 @@ function updSidebar(){
         selectedSet.forEach(si=>{if(si!==i)shapes[si][key]=shapes[i][key];});
         updSidebar();
       }
-      _lastGeoms=null; _lastExistingStructGeoms=[];
+      _lastGeoms=null; // r043: _lastExistingStructGeoms=[]; を削除(voldia3d.js r112。書き込みのみの変数だった)
       // 面積0チェック（念のため）
       if(shapes[i].area<=0){pushUndo();shapes.splice(i,1);updSidebar();redraw();toast('⚠ 面積0のオブジェクトを削除しました');return;}
     };
@@ -2597,7 +2597,7 @@ function updSidebar(){
       const v=!shapes[i].noSlope;
       shapes[i].noSlope=v;
       if(selectedSet.size>1&&selectedSet.has(i)){selectedSet.forEach(si=>{shapes[si].noSlope=v;});}
-      _lastGeoms=null; _lastExistingStructGeoms=[];
+      _lastGeoms=null; // r043: _lastExistingStructGeoms=[]; を削除(voldia3d.js r112。書き込みのみの変数だった)
       btn.textContent=v?'垂直':'法面';
       btn.classList.toggle('active-hamen',!v);
       btn.classList.toggle('active-vertical',v);
