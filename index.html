@@ -241,16 +241,10 @@ select#sc-select{width:100%;background:#333;color:var(--text);border:1px solid v
 .sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px;}
 .sbtn{padding:4px 2px;font-size:.74em;border-radius:3px;}
 .sbtn.on{background:var(--blue);border-color:var(--blue);}
-#pg-btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}
-/* 追1(2026-08-24 引継ぎ15回目): ページ数が多いPDF(54p超等)で、ボタン一覧が
-   画面外まで縦に伸びてしまい下の方が押せなくなる不具合の修正。
-   列数を段階的に増やす案は閾値が際限なく増える／文字が潰れるため不採用とし、
-   #pg-modalの.modal-cだけmax-height+overflow-yを付けてスクロール対応にした。
-   他の.modal-c共用箇所(sc-modal/confirm-modal等)には影響しないようスコープを絞っている。 */
-#pg-modal .modal-c{max-height:78vh;overflow-y:auto;}
+/* r041: #pg-btns / #pg-modal .modal-c のCSSを削除(ページ選択モーダルごと廃止。ページ数が多いPDFのスクロール対応(15回目)は起動ダイアログ側が受け持つ: #su-dlgにmax-height+overflow) */
 /* r023(30回目セッション、マスター指示・著作権クリアランス対応): 使用ライブラリの
    ライセンス表記(Credits)モーダル。項目数が多く左寄せの長文になるため、
-   pg-modalと同様にスクロール対応させた上でtext-align/widthだけ個別指定する。 */
+   (旧pg-modalと同様に)スクロール対応させた上でtext-align/widthだけ個別指定する。 */
 #license-modal .modal-c{max-height:78vh;overflow-y:auto;width:540px;max-width:92vw;text-align:left;}
 
 /* トースト */
@@ -412,6 +406,36 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
   display:none;white-space:nowrap;
 }
 </style>
+<!-- 【r041 削除一覧 / v0131(38回目)】起動フロー改造(v0129〜)で使われなくなった旧要素を整理。挙動は変えていない。
+     削除: #pg-modal(ページ選択モーダル)とそのCSS(#pg-btns, #pg-modal .modal-c) / #rot-modal(角度調整するか確認するモーダル)
+           / sc-modal内の方眼紙用ボタン(#sc-gridpaper-confirm-wrap) / sc-modal内の空だった用紙サイズ欄(#paper-size-info)
+     理由: ページ選択・角度調整の確認・方眼紙の縮尺設定は、すべて起動ダイアログ(#su-overlay)に統合したため。
+     残した: #sc-modal(縮尺の「変更」ボタン専用になった) -->
+<style id="su-style">
+/* r039(38回目): 起動ダイアログ。姉妹ソフトArecal(A040)の#su-*をそのまま移植。外部CSSには触れず、このブロックだけで完結させる */
+#su-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:8600;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#su-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:20px 24px 18px;width:min(470px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+#su-dlg .su-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0;min-height:40px;}
+#su-dlg .su-row.su-off{opacity:.35;pointer-events:none;}
+#su-dlg .su-lab{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-weight:700;font-size:1.05em;color:#fff;}
+#su-dlg .su-paper{font-weight:400;font-size:.72em;color:#6ea8ff;}
+#su-dlg select,#su-dlg input[type=number]{background:#2f2f2f;color:#e4e4e4;border:2px solid #555;border-radius:8px;padding:7px 10px;font-size:.95em;min-width:132px;}
+#su-dlg select:disabled{opacity:.6;}
+#su-dlg input[type=checkbox]{width:26px;height:26px;accent-color:#2196f3;cursor:pointer;flex:none;}
+#su-dlg .su-ic{flex:none;width:22px;height:22px;border-radius:50%;border:1px solid #6ea8ff;background:transparent;color:#6ea8ff;font-size:.8em;font-weight:700;line-height:1;padding:0;cursor:pointer;}
+#su-dlg .su-custom{display:none;align-items:center;justify-content:flex-end;gap:8px;margin:-6px 0 12px;color:#ddd;}
+#su-dlg .su-custom input{min-width:0;width:92px;text-align:center;}
+#su-dlg .su-err{min-height:1.2em;margin:0 0 6px;color:#ff7b7b;font-size:.85em;text-align:right;}
+#su-dlg .su-readwrap{text-align:center;margin:10px 0 12px;}
+#su-read{background:#fff;color:#111;border:2px solid #888;border-radius:10px;padding:8px 22px;font-size:.95em;font-weight:600;text-decoration:underline;cursor:pointer;}
+#su-dlg .su-agree{font-size:.88em;font-weight:700;line-height:1.7;margin:6px 0 14px;color:#f2f2f2;}
+#su-dlg .su-foot{text-align:right;}
+#su-back{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;margin-right:12px;}
+#su-back:active{filter:brightness(.9);}
+#su-start{background:#2196f3;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
+#su-start:active{filter:brightness(.9);}
+#su-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;white-space:pre-line;box-shadow:0 2px 12px rgba(0,0,0,.6);pointer-events:none;}
+</style>
 </head>
 <body>
 <noscript>
@@ -444,7 +468,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0128</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0133</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -493,10 +517,32 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
     </div>
     <div id="drop-overlay"><span>📄 ここにドロップ</span></div>
     <div id="drop-hint">
+      <!-- r039(38回目): 旧・起動時免責画面にあったロゴ/アプリ名/ブックマーク案内/Credits導線を、
+           起動画面(=このdrop-hint)へ移設。免責は起動ダイアログ(su-overlay)の「了解してはじめる」で同意する方式に変更 -->
+      <div style="display:flex;align-items:flex-end;justify-content:center;gap:10px;margin-bottom:18px;">
+        <img id="logo-splash-img" alt="OSAKI Tech Lab" style="height:42px;width:auto;border-radius:4px;display:block;">
+<script>document.getElementById('logo-splash-img').src = OSAKI_LOGO_B64;</script>
+        <div style="display:flex;flex-direction:column;align-items:center;line-height:1;">
+          <div style="font-size:.72em;color:#88aaff;letter-spacing:.2em;margin-bottom:4px;position:relative;top:4px;">ボルディア</div>
+          <div style="font-size:1.7em;font-weight:800;color:#fff;letter-spacing:.03em;text-shadow:0 0 12px rgba(33,150,243,.5);">Voldia</div>
+        </div>
+      </div>
       <p style="white-space:pre;line-height:1.5;">📄 最初から作図する場合は「PDF」ファイルを
 前回の続きを行う場合は「Vold」ファイルを
 D&D or クリックでロードしてください</p>
       <small>画面のどこにでもドロップできます</small>
+      <div style="color:#aab;font-size:.8em;margin-top:16px;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;">
+        <span style="display:inline-flex;gap:4px;">
+          <kbd style="background:#333;border:1px solid #666;border-bottom:2px solid #555;border-radius:5px;padding:3px 9px;font-family:inherit;font-weight:700;color:#e8a020;box-shadow:0 1px 0 #000;">Ctrl</kbd>
+          <span style="color:#889;">+</span>
+          <kbd style="background:#333;border:1px solid #666;border-bottom:2px solid #555;border-radius:5px;padding:3px 9px;font-family:inherit;font-weight:700;color:#e8a020;box-shadow:0 1px 0 #000;">D</kbd>
+        </span>
+        <span>でブックマークしておくと、便利です</span>
+      </div>
+      <!-- r023(30回目、マスター指示): 使用ライブラリのライセンス表記への導線(r039でここへ移設) -->
+      <div style="margin-top:10px;">
+        <a id="open-license-modal" href="#" style="color:#7a95c9;font-size:.75em;text-decoration:underline;">使用ライブラリのライセンス表記 (Credits)</a>
+      </div>
       <input type="file" id="file-in" accept=".pdf,.vold,.json" style="display:none">
     </div>
     <!-- r062: 方眼紙ボタンをdrop-hint内(画面中央、内容次第で高さがはみ出すことがあった)から
@@ -629,24 +675,15 @@ D&D or クリックでロードしてください</p>
   <!-- Fix9: 距離測定結果 固定表示（画面下部） -->
    <div id="dist-result" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8000;padding:8px 20px;background:rgba(10,20,35,.92);border:1px solid #4fc3f7;border-radius:20px;font-size:.88em;color:#e0f7fa;font-weight:600;white-space:nowrap;box-shadow:0 2px 16px rgba(0,0,0,.6);"></div>
 
-<!-- ページ選択 -->
-<div id="pg-modal" class="modal">
-  <div class="modal-c">
-    <h3>ページを選択</h3>
-    <div id="pg-btns"></div>
-  </div>
-</div>
+<!-- r041: ページ選択モーダル(#pg-modal)を削除。起動ダイアログに統合 -->
 
 <!-- スケール選択 -->
-<!-- 新1(2026-08-24 引継ぎ16回目): Arecalとレイアウトを統一。1/60・1/1000を追加し、
-     文言・数値入力欄の見た目をAreCal側に合わせた。paper-size-info欄はAreCal側の
-     用紙サイズ自動判定表示だが、Voldia側にはその判定ロジックが無いため、枠だけ
-     用意して空欄のままにしている（表示上は空行になるだけで実害はない）。
-     この用紙サイズ表示機能自体をVoldiaにも実装するかはマスターに確認要。 -->
+<!-- 新1(2026-08-24 引継ぎ16回目): Arecalとレイアウトを統一。1/60・1/1000を追加し、文言・数値入力欄の見た目をAreCal側に合わせた。
+     r041: 空のまま残っていた用紙サイズ欄(#paper-size-info)を削除。用紙サイズ表示は起動ダイアログ(#su-paper)に実装済み。
+     このモーダルは縮尺の「変更」ボタン専用。 -->
 <div id="sc-modal" class="modal">
   <div class="modal-c">
     <h3>スケール比を設定</h3>
-    <p id="paper-size-info" style="font-size:.82em;color:#7af;margin:4px 0 8px;min-height:1.2em;"></p>
     <p>縮尺を選択してください</p>
     <div class="sgrid" id="sc-grid-modal">
       <button class="sbtn" data-sc="1/30">1/30</button>
@@ -669,12 +706,6 @@ D&D or クリックでロードしてください</p>
       <span style="color:#CACACA;font-size:.9em;white-space:nowrap;">1 /</span>
       <input type="number" id="sc-init-in" placeholder="75" min="1" step="0.1" style="width:48px;text-align:center;">
       <button id="sc-confirm">設定</button>
-    </div>
-    <!-- v0.0011: 方眼紙モード用ボタン（通常時は非表示） -->
-    <div id="sc-gridpaper-confirm-wrap" style="display:none;margin-top:14px;text-align:center;">
-      <button id="sc-gridpaper-confirm" style="background:#37474f;color:#cfd8dc;border:1px solid #546e7a;border-radius:6px;padding:9px 28px;font-size:.95em;cursor:pointer;font-weight:bold;">
-        📐 この縮尺で方眼紙作図を開始
-      </button>
     </div>
   </div>
 </div>
@@ -901,56 +932,71 @@ D&D or クリックでロードしてください</p>
 </div>
 
 <!-- 免責ダイアログ -->
-<div id="disclaimer-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-  <!-- 新9(2026-08-28 引継ぎ18回目マスター指示): 画面全体を少し上にずらし、
-       枠の下にブックマーク案内を追加するため、既存の中身をラッパーdivで包んで
-       transform:translateY()で全体を上に押し上げる -->
-  <div style="transform:translateY(-4vh);display:flex;flex-direction:column;align-items:center;">
-  <!-- 新5改修(v0091): AreCal本家(disc-header/disc-name-stack)を確認した結果、
-       ロゴ上・アプリ名下の「縦積み」が誤りで、正しくはロゴ左・(フリガナ上+アプリ名下)を
-       右に置く「横並び」だった。マスター指摘どおり修正。フリガナは「ヴォ」が言いにくいとの
-       理由で「ボルディア」を採用(マスター指示)。 -->
-  <div style="display:flex;align-items:flex-end;gap:10px;margin-bottom:18px;">
-    <img id="logo-splash-img" alt="OSAKI Tech Lab" style="height:42px;width:auto;border-radius:4px;display:block;">
-<script>document.getElementById('logo-splash-img').src = OSAKI_LOGO_B64;</script>
-    <div style="display:flex;flex-direction:column;align-items:center;line-height:1;">
-      <div style="font-size:.72em;color:#88aaff;letter-spacing:.2em;margin-bottom:4px;position:relative;top:4px;">ボルディア</div>
-      <div style="font-size:1.7em;font-weight:800;color:#fff;letter-spacing:.03em;text-shadow:0 0 12px rgba(33,150,243,.5);">Voldia</div>
-    </div>
-  </div>
-  <div style="background:#1a1a2e;border:1px solid #446;border-radius:12px;padding:28px 32px;max-width:540px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.7);">
+<!-- r039(38回目): 「起動時に最初に出る画面」から「起動ダイアログのリンクで開く別窓」に変更(Arecal A040と同じ)。
+     初期は非表示。表示はJS(_showDisclaimer)がstyle.display='flex'にして行う。
+     同意は起動ダイアログの「了解してはじめる」ボタン。.voldを直接開く場合はこの窓が「了解してはじめる」モードで開く。 -->
+<div id="disclaimer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;">
+  <div style="background:#1a1a2e;border:1px solid #446;border-radius:12px;padding:28px 32px;max-width:540px;width:90%;max-height:92vh;overflow:auto;box-sizing:border-box;box-shadow:0 8px 40px rgba(0,0,0,.7);">
     <h3 style="color:#88aaff;margin:0 0 16px;font-size:1em;text-align:center;letter-spacing:.05em;">⚠ ご利用前にお読みください</h3>
-    <!-- Voldia版: 開発中止告知は一旦非表示（マスター指示・28回目フィードバック）。再表示依頼が来たらこのコメントを外す
-    <div style="color:#ffb74d;font-size:1.05em;font-weight:700;line-height:1.7;text-align:center;margin:0 0 18px;padding:12px 10px;background:rgba(255,183,77,.08);border:1px solid #664d1a;border-radius:8px;white-space:pre-line;">当アプリは開発を継続出来なくなったので、
-現在公開出来る部分のみ公開します。</div>
-    -->
-    <p style="color:#ccc;font-size:.82em;line-height:1.85;margin:0 0 20px;white-space:pre-line;">本ツールは簡易的な補助ツールとして提供されます。
-本ツールは当社社員による社内利用を前提としています。
-外部への提供、共有、持ち出しは禁止します。
+    <!-- Voldia版: 開発中止告知は一旦非表示（マスター指示・28回目フィードバック）。再表示依頼が来たらここへ戻す -->
+    <!-- r042(38回目 v0132): 本文をマスター承認の見直し案に差し替え。旧文言の「当社社員による社内利用を前提/外部への提供、共有、持ち出しは禁止」は、他社の人が使う現場運用と矛盾するため削除し、
+         Arecalと同じ「当社および関連プロジェクトの業務関係者の利用を想定」に変更。現状有姿・MG/出来形/精算での別途検算・図面データの権利・仕様変更や停止の可能性・間接損害の免責を追加。 -->
+    <p style="color:#ccc;font-size:.82em;line-height:1.85;margin:0 0 20px;white-space:pre-line;">本ツールは簡易的な補助ツールとして、現状有姿で提供されます。
+当社および関連プロジェクトの業務関係者の利用を想定していますが、
+不特定多数への公開や無断再配布、複製、改造などは固く禁止します。
 
-本ツールはPDF等の図面を元に計測・体積計算を行うため、
-元図面の解像度・スケール・作成方法により、
-結果に誤差が生じる場合があります。
+本ツールはPDF等の図面を元に計測・体積計算を行うため、元図面の作成方法・
+解像度・スケール等により、結果に誤差が生じる場合があります。
+計算結果および出力データ(LandXML・GLB等)は参考値であり、正確性・完全性・
+特定目的への適合性は保証されません。
 
-計算結果は参考値であり、精度および正確性は保証されていません。
-最終的な判断および業務への利用は利用者の責任で行ってください。
-本ツールの使用によって生じたいかなる損害についても、
-制作者および所属組織は一切の責任を負いません。</p>
-    <button id="disclaimer-ok" style="display:block;width:100%;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.95em;cursor:pointer;font-weight:700;letter-spacing:.05em;">了解しました</button>
+出来形管理、数量の精算、構造・安全の検討、重機の制御(MG)等に使用する場合は、
+必ず利用者自身で別途検算・確認を行ってください。
+読み込む図面等のデータの権利・取扱い(守秘義務を含む)は利用者の責任です。
+予告なく仕様の変更や提供の停止を行う場合があり、サポートや修正を約束するものではありません。
+
+最終的な判断および業務への利用は、利用者の完全な自己責任となります。
+本ツールの使用によって生じたいかなる損害(間接的な損害を含む)やトラブルについても、
+制作者および所属組織は一切の責任を負いません。
+
+「了解してはじめる」をクリックした時点で、上記すべての
+免責事項および、完全な自己責任での利用に同意したものとみなします。</p>
+    <button id="disclaimer-ok" style="display:block;width:100%;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.95em;cursor:pointer;font-weight:700;letter-spacing:.05em;">閉じる</button>
   </div>
-  <div style="color:#aab;font-size:.8em;margin-top:16px;display:flex;align-items:center;gap:8px;">
-    <span style="display:inline-flex;gap:4px;">
-      <kbd style="background:#333;border:1px solid #666;border-bottom:2px solid #555;border-radius:5px;padding:3px 9px;font-family:inherit;font-weight:700;color:#e8a020;box-shadow:0 1px 0 #000;">Ctrl</kbd>
-      <span style="color:#889;">+</span>
-      <kbd style="background:#333;border:1px solid #666;border-bottom:2px solid #555;border-radius:5px;padding:3px 9px;font-family:inherit;font-weight:700;color:#e8a020;box-shadow:0 1px 0 #000;">D</kbd>
-    </span>
-    <span>でブックマークしておくと、便利です</span>
+</div>
+
+<!-- r039(38回目): 起動ダイアログ(ページ選択・元図の線・スケール比・角度調整を1画面に統合)。Arecal A040の移植 -->
+<div id="su-overlay">
+  <div id="su-dlg" role="dialog" aria-modal="true">
+    <div class="su-row" id="su-row-page">
+      <div class="su-lab">ページを選択</div>
+      <select id="su-page"></select>
+    </div>
+    <div class="su-row" id="su-row-vec">
+      <div class="su-lab"><span data-tip="vec">元図の線を読込む</span><button type="button" class="su-ic" data-tip="vec" aria-label="説明">?</button></div>
+      <input type="checkbox" id="su-vec" checked>
+    </div>
+    <div class="su-row">
+      <div class="su-lab"><span data-tip="scale">スケール比を設定</span><span class="su-paper" id="su-paper"></span><button type="button" class="su-ic" data-tip="scale" aria-label="説明">?</button></div>
+      <select id="su-scale">
+        <option value="1/30">1/30</option><option value="1/40">1/40</option><option value="1/50">1/50</option>
+        <option value="1/60">1/60</option><option value="1/80">1/80</option><option value="1/100">1/100</option>
+        <option value="1/200">1/200</option><option value="1/250">1/250</option><option value="1/300">1/300</option>
+        <option value="1/400">1/400</option><option value="1/500">1/500</option><option value="1/1000">1/1000</option>
+        <option value="custom">任意入力</option>
+      </select>
+    </div>
+    <div class="su-custom" id="su-custom-row">1 / <input type="number" id="su-custom" value="100" min="1" step="0.1"></div>
+    <div class="su-row" id="su-row-rot">
+      <div class="su-lab"><span data-tip="rot">図面の角度を調整する</span><button type="button" class="su-ic" data-tip="rot" aria-label="説明">?</button></div>
+      <input type="checkbox" id="su-rot">
+    </div>
+    <div class="su-err" id="su-err"></div>
+    <div class="su-readwrap"><button type="button" id="su-read">⚠ ご利用前にお読みください</button></div>
+    <p class="su-agree">「了解してはじめる」をクリックした時点で、すべての免責事項および完全な自己責任での利用に同意したものとみなします。</p>
+    <div class="su-foot"><button type="button" id="su-back" style="display:none">戻る</button><button type="button" id="su-start">了解してはじめる</button></div>
   </div>
-  <!-- r023(30回目セッション、マスター指示): 使用ライブラリのライセンス表記への導線 -->
-  <div style="margin-top:10px;">
-    <a id="open-license-modal" href="#" style="color:#7a95c9;font-size:.75em;text-decoration:underline;">使用ライブラリのライセンス表記 (Credits)</a>
-  </div>
-  </div>
+  <div id="su-tip"></div>
 </div>
 
 <!-- ライセンス表記(Credits)モーダル -->
@@ -960,6 +1006,11 @@ D&D or クリックでロードしてください</p>
      一項目追加すること。追加コード側だけ直してここを更新し忘れると、この表記自体が
      嘘になってしまう(次回引継ぎプロンプトにも同様の注意書きを入れてあるので、
      引継ぎを読んだ次回セッションのClaudeもこの点を確認すること)。 -->
+<!-- r042(38回目 v0132): Creditsを見直し。実際に読み込んでいる版のnpm公式パッケージ(LICENSE・ヘッダ)で裏を取って更新。
+     追加: manifold-3d(Apache-2.0、voldia3d.jsがjsDelivrから動的に読込。内部にClipper2=Boost 1.0を含む) / OrbitControls(配置モード。three.js付属・MIT)
+     更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
+     v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
+     ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
 <div id="license-modal" class="modal">
   <div class="modal-c">
     <h3 style="text-align:center;">使用ライブラリ ライセンス表記 (Credits)</h3>
@@ -976,12 +1027,12 @@ D&D or クリックでロードしてください</p>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">Javascript Clipper</strong>（同梱・lib/clipper.js, v6.4.2.2）<br>
         Copyright Angus Johnson 2010-2017 / Timo Kähkönen 2012-2017 — Boost Software License 1.0<br>
-        JSBN (BigInteger) by Tom Wu を含む(BSD系ライセンス)<br>
-        <span style="color:#889;">http://www.angusj.com / http://www.boost.org/LICENSE_1_0.txt</span>
+        JSBN (BigInteger) を含む — Copyright (c) 2003-2005 Tom Wu(MIT系の許諾。再配布時は著作権表示と免責文を完全な形で残す条件つき)<br>
+        <span style="color:#889;">http://www.angusj.com / http://www.boost.org/LICENSE_1_0.txt / http://www-cs-students.stanford.edu/~tjw/jsbn/</span>
       </div>
       <div style="margin-bottom:14px;">
-        <strong style="color:#88aaff;">three.js</strong>（CDN読込、r128）+ <strong style="color:#88aaff;">GLTFLoader</strong><br>
-        Copyright © 2010-2024 three.js authors — MIT License<br>
+        <strong style="color:#88aaff;">three.js</strong>（CDN読込、r128）+ <strong style="color:#88aaff;">GLTFLoader</strong> + <strong style="color:#88aaff;">OrbitControls</strong>（配置モード）<br>
+        Copyright © 2010-2021 three.js authors — MIT License<br>
         <span style="color:#889;">https://github.com/mrdoob/three.js</span>
       </div>
       <div style="margin-bottom:14px;">
@@ -990,17 +1041,24 @@ D&D or クリックでロードしてください</p>
         <span style="color:#889;">https://github.com/mozilla/pdf.js</span>
       </div>
       <div style="margin-bottom:14px;">
-        <strong style="color:#88aaff;">xlsx-js-style</strong>（CDN読込、SheetJSベース）<br>
+        <strong style="color:#88aaff;">manifold-3d</strong>（CDN読込、v3.5.1）<br>
+        Apache License 2.0<br>
+        内部に Clipper2 (Angus Johnson) を含む — Boost Software License 1.0<br>
+        <span style="color:#889;">https://github.com/elalish/manifold / https://github.com/AngusJohnson/Clipper2</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">xlsx-js-style</strong>（CDN読込、v1.2.0。SheetJS Community Editionに基本的なセル書式を追加したもの）<br>
         Apache License 2.0<br>
         <span style="color:#889;">https://github.com/gitbrent/xlsx-js-style</span>
       </div>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">jsPDF</strong>（CDN読込、v2.5.1）<br>
-        MIT License<br>
+        Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH — MIT License<br>
         <span style="color:#889;">https://github.com/parallax/jsPDF</span>
       </div>
       <div style="margin-bottom:4px;">
         <strong style="color:#88aaff;">JSZip</strong>（CDN読込、v3.10.1）<br>
+        Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso<br>
         MIT License（デュアルライセンスのうちMIT側を適用）<br>
         <span style="color:#889;">https://github.com/Stuk/jszip</span>
       </div>
@@ -1009,17 +1067,7 @@ D&D or クリックでロードしてください</p>
   </div>
 </div>
 
-<!-- 回転確認モーダル -->
-<div id="rot-modal" class="modal">
-  <div class="modal-c">
-    <h3>📐 図面の角度を調整しますか？</h3>
-    <p style="color:#aaa;font-size:.85em;margin-bottom:16px;">図面の角度を調整できます。</p>
-    <div style="display:flex;gap:12px;justify-content:center;">
-      <button id="rot-yes" style="padding:8px 28px;background:#333;border:1px solid #666;border-radius:5px;color:#ccc;font-size:.9em;cursor:pointer;">Yes — 調整する</button>
-      <button id="rot-no"  style="padding:8px 28px;background:#333;border:1px solid #666;border-radius:5px;color:#ccc;font-size:.9em;cursor:pointer;">No — そのまま</button>
-    </div>
-  </div>
-</div>
+<!-- r041: 回転確認モーダル(#rot-modal)を削除。角度調整は起動ダイアログのチェックで決まる -->
 
 <!-- クロスヘアオーバーレイ -->
 <div id="rot-overlay" style="position:fixed;inset:0;z-index:9500;display:none;pointer-events:none;">
