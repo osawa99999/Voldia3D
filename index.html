@@ -436,6 +436,44 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #su-start:active{filter:brightness(.9);}
 #su-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;white-space:pre-line;box-shadow:0 2px 12px rgba(0,0,0,.6);pointer-events:none;}
 </style>
+<style id="gm-style">
+/* v0134(40回目): 「3D生成方法」ダイアログ(#gm-*)と、3D結果画面の右UI整理用クラス(.rb-*, .out-row)。
+   起動ダイアログ(#su-*)と同じ見た目の作法。既存CSSには触れず、このブロックだけで完結させる。 */
+#gm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:8600;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#gm-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:14px 24px 18px;width:min(500px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+#gm-dlg .gm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid #3a3a3a;min-height:40px;}
+#gm-dlg .gm-row.gm-gl{border-bottom:1px solid #2196f3;}
+#gm-dlg .gm-row.gm-last{border-bottom:none;}
+#gm-dlg .gm-row.gm-off{opacity:.35;}
+#gm-dlg .gm-lab{font-weight:700;font-size:1.05em;color:#fff;white-space:nowrap;}
+#gm-dlg .gm-ctl{display:flex;align-items:center;gap:8px;}
+#gm-dlg .gm-unit{color:#8a9bb0;min-width:2.2em;}
+#gm-dlg .gm-mode-btn{padding:8px 16px;font-size:.95em;border-radius:8px;border:1px solid #555;background:#2f2f2f;color:#aaa;cursor:pointer;}
+#gm-dlg .gm-mode-btn.on{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
+#gm-dlg input.doboku-inp{width:112px;flex:none;padding:7px 10px;font-size:1rem;border:1px solid #555;border-radius:8px;background:#2f2f2f;color:#e4e4e4;text-align:right;}
+#gm-dlg input.doboku-inp:disabled{cursor:not-allowed;}
+#gm-dlg .gm-slope{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;flex:1;max-width:310px;}
+#gm-dlg .gm-slope .slope-ang-btn{padding:8px 0;font-size:.95em;border-radius:8px;border:1px solid #555;background:#2f2f2f;color:#aaa;cursor:pointer;}
+#gm-dlg .gm-slope .slope-ang-btn.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
+#gm-dlg .gm-slope .slope-ang-btn:disabled{cursor:not-allowed;}
+#gm-dlg .gm-note{color:#f7e24a;font-weight:700;font-size:.82em;text-align:center;margin:16px 0 14px;line-height:1.6;}
+#gm-dlg .gm-foot{display:flex;gap:12px;}
+#gm-back{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
+#gm-start{flex:1.6;background:#2196f3;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
+#gm-back:active,#gm-start:active{filter:brightness(.9);}
+#gm-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
+/* 起動ダイアログの「キャンセル」(「了解してはじめる」の右) */
+#su-cancel{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;margin-left:12px;}
+#su-cancel:active{filter:brightness(.9);}
+/* 3D結果画面: メッシュ/影/色の3トグル(ON/OFFはボタン色)と、下段の出力ボタン行 */
+.rb-row{display:flex;gap:6px;margin-bottom:6px;}
+.rb-tgl{flex:1;padding:7px 0;border-radius:5px;border:1px solid #666;background:#3a3a3a;color:#999;font-size:.82em;cursor:pointer;text-align:center;white-space:nowrap;}
+.rb-tgl.on{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
+.out-row{display:flex;gap:6px;margin-top:8px;}
+.out-row .btn-glb{width:auto;flex:1;min-width:0;padding:8px 2px;font-size:.78em;white-space:nowrap;}
+.btn-cls.btn-cls-main{padding:6px 16px;font-size:.88em;font-weight:700;background:#b71c1c;border-color:#e57373;color:#fff;}
+.btn-cls.btn-cls-main:hover{background:#d32f2f;border-color:#ef9a9a;color:#fff;}
+</style>
 </head>
 <body>
 <noscript>
@@ -468,7 +506,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0133</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0134</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -772,103 +810,39 @@ D&D or クリックでロードしてください</p>
     <div class="calc-hd">
       <div style="display:flex;align-items:center;">
         <span class="calc-hd-title">Voldia_３Dイメージ</span>
-        <span class="calc-hd-sub" id="calc-hd-sub">計算方法を選択して実行</span>
+        <span class="calc-hd-sub" id="calc-hd-sub"></span>
       </div>
-      <button class="btn-cls" onclick="closeCalcModal()">✕ 閉じる</button>
+      <button class="btn-cls btn-cls-main" onclick="closeCalcModal()">✕ 閉じる</button>
     </div>
     <div class="calc-body">
       <div class="c3d" id="c3d-pane">
         <div class="c3d-label">3D PREVIEW</div>
         <div class="c3d-hint">ドラッグ: 回転 ／ ホイール: ズーム</div>
       </div>
-      <div class="crp">
-        <div>
-          <div class="sec-ttl" style="margin-bottom:5px;">計算方法</div>
-          <div style="font-size:.75em;color:#4fc3f7;padding:6px 8px;background:#0a1a2a;border-radius:4px;border:1px solid #1a3a5a;">
-            📐 層別スライスUNION法（ClipperLib）<br>
-            <span style="color:#888;">重複なし・高精度・ポリゴン実形状対応</span>
-          </div>
-        </div>
-        <!-- 計算方法選択パネル（計算前） -->
+<div class="crp">
+        <!-- 【v0134(40回目) 3D右UIの整理・削除/移設一覧】挙動は変えていない(体積計算・runCalcは無改造)。
+             削除: 「計算方法 📐層別スライスUNION法」の解説ブロック(注記は新ダイアログ#gm-overlayの下部へ) /
+                   「◀ 戻る」ボタン(#btn-calc-back。画面右上の「✕ 閉じる」に一本化) / 計算前の解説文・方式ボタン前の説明ボックス
+             移設: 「現状地盤GL」「捨コン+砕石」「余掘り」「法面角度ボタン」は#gm-overlay(3D生成方法ダイアログ)へ。
+                   idは据え置き(gl-offset-mm / conc-thick / global-overdig / .slope-ang-btn)なのでJS側の参照は無改造。
+                   「メッシュ」「影」「色」は上段の横並び3トグルへ。「スクショ」「3D配置モード」「データ出力」は下段の1行へ。
+             残した: #btn-calc-run / #btn-calc-doboku は画面に出さない(display:none)。runCalc()が実行中表示のために
+                   document.getElementById(...)で参照しているため(消すとnullエラー)。方式の選択と実行は新ダイアログが行う。
+             ※「影」ボタンはr101以来JSが動的に複製していたが、ここに常設した(ensureShadowButtonは既存ボタンがあれば何もしない)。 -->
         <div id="calc-select-panel">
-          <div style="margin:8px 0;padding:8px;background:#0d1f0d;border:1px solid #1a4a1a;border-radius:5px;font-size:.72em;line-height:1.7;color:#aaa;">
-            <span style="color:#f0c040;font-weight:700;">通常計算</span>：オブジェクト形状をそのまま押し出し。<br>余掘り・捨コン+砕石は<b style="color:#ef9a9a;">含みません</b>。<br><br>
-            <span style="color:#69f0ae;font-weight:700;">土量計算</span>：余掘り・捨コン+砕石を加味。<br>天端がプラス（GL上）→ GL面でカット。<br>天端がマイナス（GL下）→ GL面まで上に伸ばして計算。
-          </div>
-          <div style="display:flex;gap:6px;margin-top:6px;">
-            <div style="flex:1;position:relative;">
-              <button class="btn-calc" id="btn-calc-run" onclick="runCalc('normal')" style="width:100%;"
-                title="通常計算：余掘り・捨コン+砕石を含まない&#10;オブジェクト形状の下端〜上端をそのまま押し出し（法面反映）">⚡ 通常計算</button>
-            </div>
-            <div style="flex:1;position:relative;">
-              <button class="btn-calc" id="btn-calc-doboku" onclick="runCalc('doboku')" style="width:100%;background:#2e7d32;"
-                title="土量計算：余掘り＋捨コン+砕石を含む&#10;基準高±0まで押し出し（法面反映）">⚡ 土量計算</button>
-            </div>
-          </div>
-          <!-- Voldia版: 捨コン+砕石・法面角度・余掘りをここに集約（旧・左UI個別設定から移設） -->
-          <!-- 新5(2026-08-24 引継ぎ16回目): 3項目とも.doboku-rowで統一
-               （ラベル左寄せ／数値入力+単位 or 角度ボタン群を右寄せの一列表示）。
-               conc-thick/global-overdig等の既存IDはJS参照があるためそのまま維持。 -->
-          <!-- 新4(2026-08-25引継ぎ19回目マスター指示): 「現状地盤GL」は他の3項目(捨コン+砕石・
-               余掘り・法面角度)と適用対象が違う(こちらはmode==='doboku'かつ通常計算にも
-               将来影響しうる特別枠)ため、独立した1項目のみの区画に繰り上げ。 -->
-          <div style="margin-top:8px;padding:8px;background:rgba(255,255,255,.04);border-radius:5px;">
-            <!-- 新4(2026-08-24引継ぎ19回目→2026-08-25引継ぎ17回目でマスター仕様確定・実装済み):
-                 現況地盤とGLの差。入力は「+」省略可(未入力=正)・「-」必須、表示は常に
-                 符号(+/-)を補完する。デフォルト値は0(="+0")。
-                 土量計算のみ反映(mode==='doboku'時、fsのDにwindow._glOffsetMmを加算)。 -->
-            <div class="doboku-row" style="margin:0;" title="現況地盤とGLの差。マイナスの場合のみ「-」を付けて入力(例: -200)">
-              <label>現状地盤 GL</label>
-              <div class="doboku-inp-wrap">
-                <input type="text" class="doboku-inp" id="gl-offset-mm" value="+0" placeholder="-200" autocomplete="off"
-                  inputmode="numeric" onchange="onGlOffsetChange()">
-                <span class="doboku-unit">mm</span>
-              </div>
-            </div>
-          </div>
-          <div style="margin-top:8px;padding:8px;background:rgba(255,255,255,.04);border-radius:5px;">
-            <div style="font-size:.7em;color:#88a0b8;margin-bottom:6px;" title="以下の3項目は土量計算にのみ適用されます">※以下3項目は土量計算のみ適用</div>
-            <div class="doboku-row" title="土量計算で全オブジェクト共通に使う捨てコン+砕石厚み">
-              <label>捨コン+砕石</label>
-              <div class="doboku-inp-wrap">
-                <input type="number" class="doboku-inp" id="conc-thick" value="110" min="0" step="10">
-                <span class="doboku-unit">mm</span>
-              </div>
-            </div>
-            <div class="doboku-row" title="土量計算で全オブジェクト共通に使う余掘り量">
-              <label>余掘り</label>
-              <div class="doboku-inp-wrap">
-                <input type="number" class="doboku-inp" id="global-overdig" value="200" min="0" step="10">
-                <span class="doboku-unit">mm</span>
-              </div>
-            </div>
-            <div id="slope-angle-row" class="doboku-row" style="margin:0;" title="土量計算時、全オブジェクトに共通適用される法面角度">
-              <label>法面角度</label>
-              <div class="doboku-ang-group">
-                <button class="slope-ang-btn" data-ang="73.3">1:0.3</button>
-                <button class="slope-ang-btn" data-ang="51.34">1:0.8</button>
-                <button class="slope-ang-btn active" data-ang="45">1:1.0</button>
-                <button class="slope-ang-btn" data-ang="39.81">1:1.2</button>
-                <button class="slope-ang-btn" data-ang="33.69">1:1.5</button>
-                <button class="slope-ang-btn" data-ang="26.57">1:2.0</button>
-              </div>
-            </div>
+          <div style="display:none;" aria-hidden="true">
+            <button class="btn-calc" id="btn-calc-run" tabindex="-1">⚡ 通常計算</button>
+            <button class="btn-calc" id="btn-calc-doboku" tabindex="-1">⚡ 土量計算</button>
           </div>
         </div>
-        <!-- 計算後パネル -->
+        <!-- 計算後パネル(runCalcが表示する。体積表示・透過・出力ボタンもこの中) -->
         <div id="calc-result-panel" style="display:none;">
-          <div style="display:flex;gap:6px;margin-bottom:6px;">
-            <button id="btn-calc-back" onclick="resetCalcToSelect()" style="background:#444;border:1px solid #666;color:#ccc;border-radius:4px;padding:4px 12px;font-size:.75em;cursor:pointer;">◀ 戻る</button>
-            <!-- v0.0024: 基準高さ(GL=y0)メッシュ表示ON/OFFトグル。JS側関数は3D-r035から実装済み -->
-            <!-- r072マスター指示: 「基準メッシュ」→「メッシュ」に短縮、デフォルトOFFに変更。
-                 文字が短くなった分、幅を132px→76pxに縮小してスクショボタンのはみ出しを解消 -->
-            <button id="btn-base-grid-toggle" onclick="toggleBaseGridVisibility()" style="background:#444;border:1px solid #666;color:#ccc;border-radius:4px;padding:4px 10px;font-size:.75em;cursor:pointer;min-width:92px;flex-shrink:0;text-align:center;white-space:nowrap;opacity:.5;">▦ メッシュ OFF</button>
-            <!-- r059: 3Dプレビューのスクリーンショット保存ボタン -->
-            <!-- r062: SHIFT+CTRL+クリックでGLB保存を行う隠しデバッグ機能を追加(判定はJS側handleCalc3DScreenshotClickで実施) -->
-            <button id="btn-calc-screenshot" onclick="handleCalc3DScreenshotClick(event)" style="background:#444;border:1px solid #666;color:#ccc;border-radius:4px;padding:4px 12px;font-size:.75em;cursor:pointer;flex-shrink:0;">📷 スクショ</button>
+          <div class="rb-row">
+            <button id="btn-base-grid-toggle" class="rb-tgl" onclick="toggleBaseGridVisibility()" title="基準メッシュ(GL面の方眼)の表示ON/OFF">メッシュ</button>
+            <button id="btn-shadow-toggle" class="rb-tgl" onclick="toggleShadowVisibility()" title="影の表示ON/OFF(グラデ表示時のみ有効)">影</button>
+            <button id="btn-solid-toggle" class="rb-tgl on" onclick="toggleMeshSolid()" title="色: ON=グラデ(高さで色分け) / OFF=ソリッド(単色)">色</button>
           </div>
-        </div>
-        <div class="csep"></div>
+          <div class="csep"></div>
         <div class="res-box" id="res-box">
           <div class="vol-big" id="res-vol">—<span>m³</span></div>
           <div class="vol-label" id="res-vol-label">切土量（ブール和）</div>
@@ -900,32 +874,30 @@ D&D or クリックでロードしてください</p>
               oninput="updMeshOpacity(this.value)">
             <span id="opacity-val" style="min-width:28px;text-align:right;">100%</span>
           </div>
-          <!-- v0.0013: ソリッド/グラデ切替 -->
-          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.78em;color:#aaa;">
-            <span>色</span>
-            <button id="btn-solid-toggle" onclick="toggleMeshSolid()"
-              style="flex:1;padding:4px 0;border-radius:4px;border:1px solid #555;background:#2a2a3a;color:#ccc;cursor:pointer;font-size:.9em;">
-              🎨 グラデ → ソリッド
-            </button>
-          </div>
         </div>
-        <button class="btn-glb" id="btn-glb" onclick="voldiaConfirmGLB()">📦 GLB 保存</button>
-        <!-- Voldia版: オブジェクト配置モード。土量計算の結果画面でのみ表示 -->
-        <button class="btn-glb" id="btn-placement" onclick="openPlacementMode()"
-          style="border-color:#ffb74d;color:#ffb74d;">🏗 3D配置モード</button>
-        <!-- r070: エビル(Evidence Builder)統合 — 通常計算の結果画面でのみ表示 -->
-        <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')"
-          style="border-color:#4fc3f7;color:#4fc3f7;">📊 躯体解析（データ出力）</button>
-        <!-- r070: エビル(Evidence Builder)統合 — 土量計算の結果画面でのみ表示 -->
-        <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')"
-          style="border-color:#4fc3f7;color:#4fc3f7;">📊 掘削土量解析（データ出力）</button>
+          <button class="btn-glb" id="btn-glb" onclick="voldiaConfirmGLB()">📦 GLB 保存</button>
+          <div class="out-row">
+            <!-- Voldia版: オブジェクト配置モード(通常計算・土量計算どちらの結果画面でも表示) -->
+            <button class="btn-glb" id="btn-placement" onclick="openPlacementMode()"
+              style="border-color:#ffb74d;color:#ffb74d;">🏗 3D配置モード</button>
+            <!-- r059/r062: スクショ(SHIFT+CTRL+クリックでGLB保存の隠しデバッグ機能はJS側handleCalc3DScreenshotClickで判定) -->
+            <button class="btn-glb show" id="btn-calc-screenshot" onclick="handleCalc3DScreenshotClick(event)"
+              style="border-color:#888;color:#ccc;">📷 スクショ</button>
+            <!-- r070: エビル統合。「データ出力」は通常計算の結果画面では躯体解析、土量計算の結果画面では掘削土量解析を呼ぶ
+                 (どちらを出すかはrunCalcがmodeで切替え済み=従来どおり。ボタンは同時に1つしか出ない) -->
+            <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')"
+              title="通常計算の結果を躯体解析データ(Excel/PNG/PDF/GLB)として出力します"
+              style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
+            <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')"
+              title="土量計算の結果を掘削土量解析データ(Excel/PNG/PDF/GLB)として出力します"
+              style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
+          </div>
         <div class="exp-prog" id="exp-prog">
           <div class="ep-title">⚙ GLB 生成中...</div>
           <div class="ep-bar-wrap"><div class="ep-bar" id="ep-bar"></div></div>
           <div class="ep-msg" id="ep-msg"></div>
         </div>
-        <!-- r025(マスター指示): 計算方法の解説欄、「法面ON」という実在しないラベルの
-             記載や固定45°前提など実態と合わない内容があったため、全削除 -->
+        </div>
       </div>
     </div>
   </div>
@@ -994,9 +966,65 @@ D&D or クリックでロードしてください</p>
     <div class="su-err" id="su-err"></div>
     <div class="su-readwrap"><button type="button" id="su-read">⚠ ご利用前にお読みください</button></div>
     <p class="su-agree">「了解してはじめる」をクリックした時点で、すべての免責事項および完全な自己責任での利用に同意したものとみなします。</p>
-    <div class="su-foot"><button type="button" id="su-back" style="display:none">戻る</button><button type="button" id="su-start">了解してはじめる</button></div>
+    <div class="su-foot"><button type="button" id="su-back" style="display:none">戻る</button><button type="button" id="su-start">了解してはじめる</button><button type="button" id="su-cancel">キャンセル</button></div>
   </div>
   <div id="su-tip"></div>
+</div>
+
+<!-- v0134(40回目): 「3D生成方法」ダイアログ。Voldia本体の「3Dイメージ」ボタンで開く。
+     作成方法(通常計算/土量計算)・現状地盤GL・捨コン+砕石・余掘り・法面角度を、3D表示の前に1画面で確認・設定する。
+     入力欄のidは旧3D右UIから据え置き(gl-offset-mm / conc-thick / global-overdig / .slope-ang-btn)。
+     「作図開始」は選択中の方式でrunCalc('normal'|'doboku')を呼ぶだけ(計算ロジックは無改造)。
+     捨コン+砕石・余掘り・法面角度は土量計算のときだけ有効(通常計算ではグレーアウト+disabled)。値は保持される。
+     設定値と作成方法は.voldに保存される(作成方法=calcMode)。 -->
+<div id="gm-overlay">
+  <div id="gm-dlg" role="dialog" aria-modal="true">
+    <div class="gm-row">
+      <div class="gm-lab">作成方法</div>
+      <div class="gm-ctl">
+        <button type="button" class="gm-mode-btn" id="gm-mode-normal" data-gmtip="mode-normal">通常計算</button>
+        <button type="button" class="gm-mode-btn on" id="gm-mode-doboku" data-gmtip="mode-doboku">土量計算</button>
+      </div>
+    </div>
+    <div class="gm-row gm-gl" data-gmtip="gl">
+      <div class="gm-lab">現状地盤 GL</div>
+      <div class="gm-ctl">
+        <input type="text" class="doboku-inp" id="gl-offset-mm" value="+0" placeholder="-200" autocomplete="off" inputmode="numeric" onchange="onGlOffsetChange()">
+        <span class="gm-unit">mm</span>
+      </div>
+    </div>
+    <div class="gm-row gm-doboku-only" data-gmtip="conc">
+      <div class="gm-lab">捨てコン＋砕石</div>
+      <div class="gm-ctl">
+        <input type="number" class="doboku-inp" id="conc-thick" value="110" min="0" step="10">
+        <span class="gm-unit">mm</span>
+      </div>
+    </div>
+    <div class="gm-row gm-doboku-only" data-gmtip="overdig">
+      <div class="gm-lab">余掘り</div>
+      <div class="gm-ctl">
+        <input type="number" class="doboku-inp" id="global-overdig" value="300" min="0" step="10">
+        <span class="gm-unit">mm</span>
+      </div>
+    </div>
+    <div class="gm-row gm-doboku-only gm-last" id="slope-angle-row">
+      <div class="gm-lab">法面角度</div>
+      <div class="gm-slope">
+        <button type="button" class="slope-ang-btn" data-ang="73.3">1:0.3</button>
+        <button type="button" class="slope-ang-btn" data-ang="51.34">1:0.8</button>
+        <button type="button" class="slope-ang-btn active" data-ang="45">1:1.0</button>
+        <button type="button" class="slope-ang-btn" data-ang="39.81">1:1.2</button>
+        <button type="button" class="slope-ang-btn" data-ang="33.69">1:1.5</button>
+        <button type="button" class="slope-ang-btn" data-ang="26.57">1:2.0</button>
+      </div>
+    </div>
+    <div class="gm-note">※体積は層別スライスＵＮＩＯＮ法（ClipperLib）を使用した概算値です</div>
+    <div class="gm-foot">
+      <button type="button" id="gm-back">戻る</button>
+      <button type="button" id="gm-start">作図開始</button>
+    </div>
+  </div>
+  <div id="gm-tip"></div>
 </div>
 
 <!-- ライセンス表記(Credits)モーダル -->
@@ -1011,6 +1039,8 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0134(40回目): 「3D生成方法」ダイアログ(#gm-overlay)を新設。3Dイメージの通常計算/土量計算ボタンと設定欄(現状地盤GL・捨コン+砕石・余掘り・法面角度)をここへ集約。
+     3D結果画面の右UIを整理(メッシュ/影/色の3トグル、下段にスクショ・3D配置モード・データ出力)。起動ダイアログに「キャンセル」を追加。余掘りの既定値を200→300mmに変更。計算ロジックは無改造。 -->
 <div id="license-modal" class="modal">
   <div class="modal-c">
     <h3 style="text-align:center;">使用ライブラリ ライセンス表記 (Credits)</h3>

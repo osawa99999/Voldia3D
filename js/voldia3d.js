@@ -1,6 +1,10 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r113】(40回目。見た目のみ・計算ロジック無改造) 3D結果画面の右UI整理に伴い、メッシュ/影/色の3ボタンの表示を
+//  「文字の差し替え(▦ メッシュ ON/OFF 等)+透明度」から「ボタン色(.on クラス)」に変更。ボタン本体はHTML(Voldia_v0134)に常設
+//  (影ボタンはr101以来のJS動的生成をやめた。ensureShadowButtonは既存ボタンがあれば何もしないので、中の複製処理は到達しなくなった=次回の整理候補)。
+//  対象: toggleBaseGridVisibility / updateShadowButtonLabel / toggleMeshSolid(2か所)/ ソリッド⇔グラデ復帰時の初期化1か所 / メッシュ状態の同期1か所。
 // 【r111 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロと確認した関数だけを削除。挙動は変えていない)
 //  isPointInsideFrustumExcavation / getLineSegmentsIntersection / getPolygonIntersections(旧Vertex-First方式の部品)
 //  getJSTTimestamp(getVoldiaTimestampに統一済み) / classifyPathsSafe(誰も呼んでいなかった) / _removeCollinearPts / _delaunayFlip(earcut後処理)
@@ -2285,7 +2289,7 @@ function toggleMeshSolid(){
       return bm;
     });
     _meshMaterials = newMats;
-    if(btn) btn.textContent='⬜ ソリッド → グラデ';
+    if(btn) btn.classList.remove('on'); // r113: 色ボタン OFF=ソリッド
   } else {
     // グラデモード: 元のPhongマテリアル（ウォームゴールド系＋陰影）に戻す
     // r045→6D改修: 同上の理由でhatchMap有無による汎用判定に変更
@@ -2314,7 +2318,7 @@ function toggleMeshSolid(){
       return pm;
     });
     _meshMaterials = newMats;
-    if(btn) btn.textContent='🎨 グラデ → ソリッド';
+    if(btn) btn.classList.add('on'); // r113: 色ボタン ON=グラデ
     // r103: マテリアルが新規に作り直されたので、影ON中なら影の設定(shadowSide等)を掛け直す
     try{ if(window._shadowVisible === true) applyShadowState(); }catch(e){}
   }
@@ -3371,7 +3375,9 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
 
   // v0.0013: ソリッド/グラデ切替ボタン状態をリセット
   const _solidBtn = document.getElementById('btn-solid-toggle');
-  if(_solidBtn) _solidBtn.textContent = '🎨 グラデ → ソリッド';
+  if(_solidBtn) _solidBtn.classList.add('on'); // r113: 3D生成のたびグラデ(=色ON)に戻る
+  // r113: メッシュ(基準グリッド)のON/OFFは再計算をまたいで保持される(window._baseGridVisible)ので、ボタン色もそれに合わせる
+  { const _gridBtn = document.getElementById('btn-base-grid-toggle'); if(_gridBtn) _gridBtn.classList.toggle('on', window._baseGridVisible === true); }
 
   // v0.0015: AIS提案①②採用
   // ①「1pxの壁」突破: 擬似太線テクニック（同じLineSegmentsを微小オフセットで3回重ね描画）
@@ -3856,8 +3862,7 @@ function toggleBaseGridVisibility(){
   if(threeGrid){ threeGrid.visible = window._baseGridVisible; }
   const btn = document.getElementById('btn-base-grid-toggle');
   if(btn){
-    btn.textContent = window._baseGridVisible ? '▦ メッシュ ON' : '▦ メッシュ OFF';
-    btn.style.opacity = window._baseGridVisible ? '1' : '.5';
+    btn.classList.toggle('on', window._baseGridVisible === true); // r113: ON/OFFはボタン色で表す
   }
 }
 
@@ -3902,8 +3907,7 @@ function updateShadowButtonLabel(){
   const b = document.getElementById('btn-shadow-toggle');
   if(!b) return;
   const on = window._shadowVisible === true;
-  b.textContent = on ? '☀ 影 ON' : '☀ 影 OFF';
-  b.style.opacity = on ? '1' : '.5';
+  b.classList.toggle('on', on); // r113: ON/OFFはボタン色で表す(文字は常に「影」)
 }
 function ensureShadowButton(){
   let b = document.getElementById('btn-shadow-toggle');
@@ -4167,7 +4171,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r112(base:VoldiaM r069)"; // r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r113(base:VoldiaM r069)"; // r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

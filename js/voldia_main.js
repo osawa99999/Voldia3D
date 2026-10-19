@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -331,6 +331,8 @@ function isToolsLocked(){
   if(scm&&scm.style.display==='block')return true;
   const suo=document.getElementById('su-overlay'); // r039: 起動ダイアログ表示中もツールをロック
   if(suo&&suo.style.display==='flex')return true;
+  const gmo=document.getElementById('gm-overlay'); // r044: 3D生成方法ダイアログ表示中もツールをロック
+  if(gmo&&gmo.style.display==='flex')return true;
   if(rotctrl&&rotctrl.style.display==='flex')return true;
   return false; // toolsLocked変数は使わない
 }
@@ -882,8 +884,10 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       console.error("調査結果: 不正な座標データを持つ図形があります", invalid);
     }
 
-    console.log("showCalcModalを呼び出します...");
-    showCalcModal();
+    // r044(40回目): 3Dイメージ画面を直接開かず、先に「3D生成方法」ダイアログ(作成方法・GL・捨コン+砕石・余掘り・法面角度)を出す。
+    // 「作図開始」でshowCalcModal()+runCalc(mode)が呼ばれる(_gmStart)。
+    console.log("showGenDialogを呼び出します...");
+    showGenDialog();
   });
 
   // スナップトグル
@@ -983,9 +987,10 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
     const calcModalOpen = document.getElementById('calc-modal') && document.getElementById('calc-modal').classList.contains('show');
     const scModalOpen = document.getElementById('sc-modal') && document.getElementById('sc-modal').classList.contains('show');
     const suOpen = document.getElementById('su-overlay') && document.getElementById('su-overlay').style.display==='flex'; // r039
+    const gmOpen = document.getElementById('gm-overlay') && document.getElementById('gm-overlay').style.display==='flex'; // r044: 3D生成方法ダイアログ
     const ioPanelOpen = document.getElementById('io-float-panel') && document.getElementById('io-float-panel').style.display!=='none';
     const placementOpen = document.getElementById('placement-overlay') && document.getElementById('placement-overlay').style.display!=='none';
-    return isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||suOpen||ioPanelOpen||placementOpen;
+    return isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||suOpen||gmOpen||ioPanelOpen||placementOpen;
   }
 
   // キーボード
@@ -1010,9 +1015,10 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       const calcModalOpen = document.getElementById('calc-modal') && document.getElementById('calc-modal').classList.contains('show');
       const scModalOpen = document.getElementById('sc-modal') && document.getElementById('sc-modal').classList.contains('show');
     const suOpen = document.getElementById('su-overlay') && document.getElementById('su-overlay').style.display==='flex'; // r039
+      const gmOpen = document.getElementById('gm-overlay') && document.getElementById('gm-overlay').style.display==='flex'; // r044: 3D生成方法ダイアログ
       const ioPanelOpen = document.getElementById('io-float-panel') && document.getElementById('io-float-panel').style.display!=='none';
       const placementOpen = document.getElementById('placement-overlay') && document.getElementById('placement-overlay').style.display!=='none';
-      const anyBlocking = isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||suOpen||ioPanelOpen||placementOpen||surveyMode||distMode||selUnionMode||subMode||yamadomeEditMode;
+      const anyBlocking = isFormFocus||confirmModalOpen||calcModalOpen||scModalOpen||suOpen||gmOpen||ioPanelOpen||placementOpen||surveyMode||distMode||selUnionMode||subMode||yamadomeEditMode;
       if(!anyBlocking){
         e.preventDefault();
         startTool(_lastDrawToolForRepeat);
@@ -1368,6 +1374,7 @@ function _suInit(){
   _suEl('su-custom').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();_suStart();}});
   _suEl('su-read').addEventListener('click',()=>_showDisclaimer(false));
   _suEl('su-start').addEventListener('click',_suStart);
+  _suEl('su-cancel').addEventListener('click',_suCancel); // r044(40回目): 「了解してはじめる」の右に「キャンセル」
   // r040: 方眼紙モードで開いた時だけ「戻る」(PDF入力画面へ)。枠の外をクリックしても閉じない(誤操作防止)
   _suEl('su-back').addEventListener('click',()=>{
     _suEl('su-overlay').style.display='none';_suGridMode=false;_suHideTip();
@@ -1389,6 +1396,89 @@ function _suInit(){
     if(!e.target.closest('.su-ic'))_suHideTip();
   });
 }
+// ================================================================
+//  3D生成方法ダイアログ (r044 / 40回目新設)
+//  「3Dイメージ」ボタン → このダイアログ → 「作図開始」で showCalcModal() + runCalc(mode)。
+//  入力欄(gl-offset-mm / conc-thick / global-overdig / .slope-ang-btn)は旧3D右UIからid据え置きで移設したので、
+//  runCalc・各export・.vold保存復元は従来のまま同じ要素を読む。ここは「見せ方」と「方式の選択」だけを担当する。
+//  作成方法(window._genMode: 'normal'|'doboku'、既定'doboku')は.voldのcalcMode(voldia_export.js)に保存・復元する。
+//  捨コン+砕石・余掘り・法面角度は土量計算でのみ使われるため、通常計算の時はグレーアウト+disabled(値は保持)。
+//  ※GLは通常計算でも使う(配置モードへ渡すオブジェクトの高さをGL分ずらす。voldia_export.js buildNormalCalcPlacementGLB)ので常時有効。
+// ================================================================
+window._genMode = 'doboku';
+const _GM_TIPS={
+  'mode-normal':'オブジェクトを設定した天端/下端の値で３D化して表示します',
+  'mode-doboku':'オブジェクトの形状に各種値を加え、想定される根切形状を３Dで表示します',
+  'gl':'現状の地盤面の高さを設定します',
+  'conc':'この値は設定した下端の値に加味され、その分深く掘削した計算を行います',
+  'overdig':'この値の分、オブジェクトを外側に拡張し、掘削面積が広くなります'
+};
+let _gmInited=false,_gmTipTimer=null;
+function _gmEl(id){return document.getElementById(id);}
+function _gmApplyMode(mode){
+  if(mode!=='normal'&&mode!=='doboku')mode='doboku';
+  window._genMode=mode;
+  _gmEl('gm-mode-normal').classList.toggle('on',mode==='normal');
+  _gmEl('gm-mode-doboku').classList.toggle('on',mode==='doboku');
+  const off=(mode!=='doboku');
+  document.querySelectorAll('#gm-dlg .gm-doboku-only').forEach(row=>{
+    row.classList.toggle('gm-off',off);
+    row.querySelectorAll('input,button').forEach(c=>{c.disabled=off;});
+  });
+}
+window._gmApplyMode=_gmApplyMode; // voldia_export.js(.vold読込)から呼ぶ
+function _gmShowTip(el,key){
+  const tip=_gmEl('gm-tip');
+  const txt=_GM_TIPS[key];
+  if(!tip||!txt)return;
+  tip.textContent=txt;tip.style.display='block';
+  const r=el.getBoundingClientRect();
+  const tw=tip.offsetWidth;
+  let left=r.left+r.width/2-tw/2;
+  left=Math.max(6,Math.min(left,window.innerWidth-tw-6));
+  tip.style.left=left+'px';
+  tip.style.top=(r.bottom+6)+'px';
+}
+function _gmHideTip(){
+  const tip=_gmEl('gm-tip');if(tip)tip.style.display='none';
+  if(_gmTipTimer){clearTimeout(_gmTipTimer);_gmTipTimer=null;}
+}
+function _gmInit(){
+  if(_gmInited)return;_gmInited=true;
+  _gmEl('gm-mode-normal').addEventListener('click',()=>_gmApplyMode('normal'));
+  _gmEl('gm-mode-doboku').addEventListener('click',()=>_gmApplyMode('doboku'));
+  _gmEl('gm-back').addEventListener('click',()=>{_gmEl('gm-overlay').style.display='none';_gmHideTip();}); // 2D画面へ戻る
+  _gmEl('gm-start').addEventListener('click',_gmStart);
+  // ヘルプ: マウスはホバー、タッチ端末(ホバー無し)はタップで3.5秒表示。法面角度は既存のホバー表示(slope-hover-tip)をそのまま使う
+  document.querySelectorAll('#gm-dlg [data-gmtip]').forEach(t=>{
+    const key=t.getAttribute('data-gmtip');
+    t.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')_gmShowTip(t,key);});
+    t.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')_gmHideTip();});
+    t.addEventListener('click',e=>{
+      if(e.pointerType==='mouse'||e.pointerType===undefined&&!('ontouchstart' in window))return;
+      _gmShowTip(t,key);
+      if(_gmTipTimer)clearTimeout(_gmTipTimer);
+      _gmTipTimer=setTimeout(_gmHideTip,3500);
+    });
+  });
+}
+function showGenDialog(){
+  _gmInit();
+  _gmApplyMode(window._genMode); // .vold読込・前回の選択を反映(未設定なら土量計算)
+  _gmHideTip();
+  _gmEl('gm-overlay').style.display='flex';
+}
+function _gmStart(){
+  const mode=(window._genMode==='normal')?'normal':'doboku';
+  _gmEl('gm-overlay').style.display='none';_gmHideTip();
+  showCalcModal(); // 3Dイメージ画面を開く(従来と同じ。内部でresetCalcToSelect→initThree_preview)
+  const sub=_gmEl('calc-hd-sub');
+  if(sub)sub.textContent='作成方法: '+(mode==='normal'?'通常計算':'土量計算');
+  // モーダルがレイアウトされてから計算を始める(従来は人がボタンを押す時点で必ず済んでいた)。runCalc側も開始時に2フレーム待つ。
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    Promise.resolve(runCalc(mode)).catch(err=>{console.error('[3D生成] runCalcで例外:',err);});
+  }));
+}
 // pdf=読込済みPDF(通常) / grid=true で方眼紙モード(ページ・元図の線・角度調整はグレーアウト)
 function showStartupDialog(pdf,grid){
   _suGridMode=!!grid;_suPdf=grid?null:pdf;_suInit();
@@ -1408,12 +1498,26 @@ function showStartupDialog(pdf,grid){
   // r040: 縮尺の既定値は1/100(マスター指示。毎回の選択の手間を省く)。用紙サイズ表示と見比べて違えば変更する
   _suEl('su-scale').value='1/100';
   _suEl('su-back').style.display=grid?'inline-block':'none';
+  _suEl('su-cancel').style.display=grid?'none':'inline-block'; // r044: 方眼紙モードは左の「戻る」が同じ役目(重複させない)
   _suEl('su-custom-row').style.display='none';
   _suEl('su-custom').value='100';
   _suEl('su-err').textContent='';
   _suHideTip();
   _suUpdatePaper();
   _suEl('su-overlay').style.display='flex';
+}
+// r044(40回目): 起動ダイアログの「キャンセル」(PDFモード)。loadPDF()はダイアログを出す前に
+//  ・pdfDocを保持 ・drop-hint(PDFドロップ領域)と「方眼紙から作図する」ボタンを非表示 ・左右パネルのブロックを解除
+// している。キャンセルでこれを全て元に戻し、PDFを選ぶ前の起動画面へ戻す(別のPDFをドロップし直せる)。
+// PDFを読み込んだだけでは図形・縮尺・回転などの状態は何も変わっていない(「了解してはじめる」で初めて確定)ので、戻すのは上の3点と_suPdfのみ。
+function _suCancel(){
+  _suEl('su-overlay').style.display='none';_suHideTip();
+  if(_suGridMode){_suGridMode=false;return;} // 方眼紙モードは「戻る」と同じ(通常はこのボタンを出さない)
+  pdfDoc=null;_suPdf=null;
+  document.getElementById('drop-hint').style.display='';
+  document.getElementById('grid-paper-btn').style.display='';
+  if(typeof showUiBlockOverlays==='function')showUiBlockOverlays();
+  toast('キャンセルしました。PDFをドロップして始めてください');
 }
 function _suStart(){
   const sv=_suEl('su-scale').value;

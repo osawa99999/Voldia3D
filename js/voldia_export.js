@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -30,6 +30,8 @@ async function exportCSV(){
     // r038(37回目): 現状地盤GL(mm)もVoldファイルに保存する。従来は保存も復元もされず、読込後は
     // 入力欄の見た目と適用値(window._glOffsetMm)が食い違う原因になっていた。
     glOffsetMm: (typeof window._glOffsetMm==='number' && !isNaN(window._glOffsetMm)) ? window._glOffsetMm : 0,
+    // r042(40回目): 「3D生成方法」ダイアログの作成方法(通常計算/土量計算)も保存する。捨てコン+砕石・余掘り・法面角度・GLは上で保存済み。
+    calcMode: (window._genMode==='normal') ? 'normal' : 'doboku',
     backgroundImageDataURL: bgDataURL,
     placementObjects: placementObjects,
     surveyPts: (surveyPts||[]).map(p=>({x:pxToMm(p.x), y:pxToMm(p.y)})), // r024(AreCal移植): 測点もmm座標で保存
@@ -163,6 +165,12 @@ async function applyVoldData(data){
     window._glOffsetMm = _g;
     const _glEl = document.getElementById('gl-offset-mm');
     if(_glEl) _glEl.value = (_g>=0?'+':'') + _g;
+  }
+  // r042(40回目): 作成方法(calcMode)を復元。キーが無い旧ファイルは既定の土量計算に戻す(GLと同じく「読込=状態を確定」扱い)。
+  {
+    const _cm = (data.calcMode==='normal') ? 'normal' : 'doboku';
+    window._genMode = _cm;
+    if(typeof window._gmApplyMode==='function') window._gmApplyMode(_cm);
   }
   // r020(至急修正): 読込後にスタート画面の「PDFをD&D」表示が消えず、作図画面に
   // 進めなかったバグを修正。PDF読込(loadPDF)・方眼紙モード開始(startGridPaperMode)
