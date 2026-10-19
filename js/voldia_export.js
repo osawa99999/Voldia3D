@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -112,7 +112,9 @@ function loadBackgroundImageDataURL(dataURL){
 // を呼んでscaleDenomだけ差し替える」という順序になっており、保存時と読込時で
 // スケールが異なる場合にshapesのpx座標がズレるバグがあった。ここでは
 // 「先にスケールを確定→その後にmm→pxへ変換」の順序に修正している。
-async function applyVoldData(data){
+async function applyVoldData(data, opts){
+  // r043: opts.loadVec===false の時だけ、保存されている元図の線(vecSegsMm)を読み込まない(Voldファイル読込ダイアログの「元図の線を読込む」)。省略時は従来どおり読み込む
+  const _loadVec = !(opts && opts.loadVec===false);
   if(!data.shapes)throw new Error('shapes not found');
   pushUndo();
   await loadBackgroundImageDataURL(data.backgroundImageDataURL);
@@ -228,7 +230,7 @@ async function applyVoldData(data){
   // px座標に戻してvecSegs/vecPtsを復元し、buildVecGrid()で空間インデックスを
   // 再構築する。旧形式のVoldファイル(vecSegsMm未保存)はvecSegs=[]のままになり、
   // 元図スナップは単に効かない状態に留まる(壊れはしない)。
-  if(data.vecSegsMm && data.vecSegsMm.length){
+  if(_loadVec && data.vecSegsMm && data.vecSegsMm.length){
     vecSegs = data.vecSegsMm.map(s=>({
       a:{x:mmToPx(s.a.x), y:mmToPx(s.a.y)},
       b:{x:mmToPx(s.b.x), y:mmToPx(s.b.y)}
@@ -263,17 +265,9 @@ function importCSV(){
   document.getElementById('imp-in').value='';
 }
 
-// r013: スタート画面のドラッグ&ドロップ／ファイル選択から.voldを読み込む
-function loadVoldFile(file){
-  const r=new FileReader();
-  r.onload=async e=>{
-    try{
-      const data=JSON.parse(e.target.result);
-      await applyVoldData(data);
-    }catch(ex){alert('読込エラー: '+ex.message);}
-  };
-  r.readAsText(file);
-}
+// 【r043 削除】loadVoldFile(file): スタート画面のドロップ/選択から.voldを読み込んでいた関数(FileReader→JSON.parse→applyVoldData)。
+//  Voldファイル読込ダイアログ化(voldia_main.js r046 _openVoldDialog)で、読込・解析・適用をmain側が行うようになり呼び出し元が無くなった。
+//  (ボタン経由のimportCSVは別経路のまま残してある)
 
 // ================================================================
 //  Fix11: Excel出力（SheetJS CSV形式で代替、xlsxライブラリなし）

@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -483,10 +483,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(!f)return;
     if(isVoldFile(f)){
       // r039: 起動ダイアログを通らない読込は、読込前に免責の別窓で同意確認する
-      _requireConsent(()=>{
-        if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
-        loadVoldFile(f);
-      });
+      _openVoldDialog(f); // r046: 免責の長文表示ではなく、起動ダイアログ(Voldモード)で同意・「元図の線」選択を行う
       return;
     }
     if(pdfDoc){toast('⚠ PDFは1枚のみ。全消去してからお試しください');return;}
@@ -565,10 +562,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(isVoldFile(f)){
       fin.value='';
       // r039: 起動ダイアログを通らない読込は、読込前に免責の別窓で同意確認する
-      _requireConsent(()=>{
-        if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
-        loadVoldFile(f);
-      });
+      _openVoldDialog(f); // r046: 免責の長文表示ではなく、起動ダイアログ(Voldモード)で同意・「元図の線」選択を行う
       return;
     }
     if(pdfDoc){toast('⚠ PDFは1枚のみ。全消去してからお試しください');fin.value='';return;}
@@ -1286,6 +1280,7 @@ let _consentGiven=false;       // このセッションで免責に同意済み�
 let _discConsentMode=false;    // 免責の別窓が「同意確認」モードか(false=読むだけ)
 let _discCb=null;
 let _suPdf=null,_suInited=false,_suPaperSeq=0,_suTipOwner=null,_suGridMode=false;
+let _suVoldMode=false,_suVoldCb=null; // r046: Voldファイル読込モード(起動ダイアログの再利用)
 const _SU_TIPS={
   vec:'マウスが線にピタッと吸着する機能を使えるようにします\n（CADから変換されたPDFにのみ有効）\n※読込に時間がかかったり、動作が重くなる場合があります\n※この設定は後から変更できません（有効化には再読込が必要）',
   scale:'PDF図面の縮尺を選んでください。\n間違うと正確な面積・体積が計測出来ません',
@@ -1305,10 +1300,9 @@ function _discClose(){
     if(f)f();
   }
 }
-function _requireConsent(cb){
-  if(_consentGiven){cb();return;}
-  _showDisclaimer(true,cb);
-}
+// 【r046 削除】_requireConsent(cb): Voldファイルを直接開く時に、長文の免責モーダルを「同意確認モード」で出していた関数。
+//  Voldファイルの読込は起動ダイアログ(Voldモード)で同意を取る方式に変えたため呼び出し元が無くなった。
+//  (_showDisclaimer(true,...)の同意確認モード側の分岐は、今は到達しない。次回の整理候補)
 function _suEl(id){return document.getElementById(id);}
 function _suHideTip(){const t=_suEl('su-tip');if(t)t.style.display='none';_suTipOwner=null;}
 function _suShowTip(target){
@@ -1375,10 +1369,8 @@ function _suInit(){
   _suEl('su-read').addEventListener('click',()=>_showDisclaimer(false));
   _suEl('su-start').addEventListener('click',_suStart);
   _suEl('su-cancel').addEventListener('click',_suCancel); // r044(40回目): 「了解してはじめる」の右に「キャンセル」
-  // r040: 方眼紙モードで開いた時だけ「戻る」(PDF入力画面へ)。枠の外をクリックしても閉じない(誤操作防止)
-  _suEl('su-back').addEventListener('click',()=>{
-    _suEl('su-overlay').style.display='none';_suGridMode=false;_suHideTip();
-  });
+  // 【r045 削除】方眼紙モード専用だった「戻る」(#su-back)のクリック処理。「キャンセル」(#su-cancel / _suCancel)に統一した(マスター指示)。
+  //  動作は同じ(ダイアログを閉じて_suGridMode=false)。枠の外をクリックしても閉じない(誤操作防止)仕様は従来どおり。
   // 解説: マウスはホバーで表示。タッチ端末は「?」ボタンのタップで表示/非表示(ホバーが無いため)。
   document.querySelectorAll('#su-dlg [data-tip]').forEach(t=>{
     t.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')_suShowTip(t);});
@@ -1480,8 +1472,15 @@ function _gmStart(){
   }));
 }
 // pdf=読込済みPDF(通常) / grid=true で方眼紙モード(ページ・元図の線・角度調整はグレーアウト)
+// r046: Voldモードで隠した行・タイトルを戻す(PDF/方眼紙モードで開く時は必ず通す)
+function _suResetVoldView(){
+  _suVoldMode=false;_suVoldCb=null;
+  _suEl('su-title').style.display='none';
+  ['su-row-page','su-row-vec','su-row-scale','su-row-rot'].forEach(id=>{_suEl(id).style.display='';});
+}
 function showStartupDialog(pdf,grid){
   _suGridMode=!!grid;_suPdf=grid?null:pdf;_suInit();
+  _suResetVoldView();
   const sel=_suEl('su-page');sel.innerHTML='';
   if(!grid){
     for(let i=1;i<=pdf.numPages;i++){
@@ -1497,13 +1496,45 @@ function showStartupDialog(pdf,grid){
   ['su-row-page','su-row-vec','su-row-rot'].forEach(id=>_suEl(id).classList.toggle('su-off',!!grid));
   // r040: 縮尺の既定値は1/100(マスター指示。毎回の選択の手間を省く)。用紙サイズ表示と見比べて違えば変更する
   _suEl('su-scale').value='1/100';
-  _suEl('su-back').style.display=grid?'inline-block':'none';
-  _suEl('su-cancel').style.display=grid?'none':'inline-block'; // r044: 方眼紙モードは左の「戻る」が同じ役目(重複させない)
+  // r045: 「戻る」(#su-back)は削除し、PDF/方眼紙どちらのモードでも「キャンセル」(#su-cancel)に統一した
   _suEl('su-custom-row').style.display='none';
   _suEl('su-custom').value='100';
   _suEl('su-err').textContent='';
   _suHideTip();
   _suUpdatePaper();
+  _suEl('su-overlay').style.display='flex';
+}
+// ================================================================
+//  Voldファイル読込ダイアログ (r046 / 40回目)
+//  .voldのドロップ/選択 → 起動ダイアログをVoldモードで開く(ページ/縮尺/角度の行は隠す)。
+//  ・元図の線が保存されているVoldだけ「元図の線を読込む」を表示(既定ON)。外すと線(vecSegs)は読み込まない。
+//  ・同意済み(_consentGiven)かつ選択肢が無い(元図の線なし)Voldは、従来どおりダイアログ無しで即読込。
+//  ・「了解してはじめる」で同意扱い(_consentGiven=true)→(現在の内容があれば破棄の確認)→applyVoldData(data,{loadVec})。
+// ================================================================
+async function _openVoldDialog(f){
+  let data;
+  try{ data=JSON.parse(await f.text()); }
+  catch(ex){ alert('読込エラー: '+ex.message); return; }
+  const hasVec=!!(data&&data.vecSegsMm&&data.vecSegsMm.length);
+  const run=(loadVec)=>{
+    if((shapes.length||pdfW) && !confirm('現在の内容を破棄して、このVoldファイルを読み込みますか？')) return;
+    Promise.resolve(applyVoldData(data,{loadVec:!!loadVec})).catch(ex=>{alert('読込エラー: '+ex.message);});
+  };
+  if(_consentGiven && !hasVec){ run(true); return; }
+  _suShowVold(hasVec,run);
+}
+function _suShowVold(hasVec,cb){
+  _suInit();
+  _suGridMode=false;_suPdf=null;
+  _suVoldMode=true;_suVoldCb=cb;
+  _suEl('su-title').style.display='';
+  ['su-row-page','su-row-scale','su-row-rot'].forEach(id=>{_suEl(id).style.display='none';});
+  _suEl('su-custom-row').style.display='none';
+  _suEl('su-row-vec').style.display=hasVec?'':'none';
+  _suEl('su-row-vec').classList.remove('su-off');
+  _suEl('su-vec').disabled=false;_suEl('su-vec').checked=true;
+  _suEl('su-err').textContent='';
+  _suHideTip();
   _suEl('su-overlay').style.display='flex';
 }
 // r044(40回目): 起動ダイアログの「キャンセル」(PDFモード)。loadPDF()はダイアログを出す前に
@@ -1512,7 +1543,8 @@ function showStartupDialog(pdf,grid){
 // PDFを読み込んだだけでは図形・縮尺・回転などの状態は何も変わっていない(「了解してはじめる」で初めて確定)ので、戻すのは上の3点と_suPdfのみ。
 function _suCancel(){
   _suEl('su-overlay').style.display='none';_suHideTip();
-  if(_suGridMode){_suGridMode=false;return;} // 方眼紙モードは「戻る」と同じ(通常はこのボタンを出さない)
+  if(_suVoldMode){_suVoldMode=false;_suVoldCb=null;toast('キャンセルしました');return;} // r046: Vold読込をやめる(何も読み込まない・現在の内容はそのまま)
+  if(_suGridMode){_suGridMode=false;return;} // 方眼紙モード: PDFは読み込んでいない(drop-hint等も触っていない)ので、閉じるだけ(旧「戻る」と同じ動作)
   pdfDoc=null;_suPdf=null;
   document.getElementById('drop-hint').style.display='';
   document.getElementById('grid-paper-btn').style.display='';
@@ -1520,6 +1552,14 @@ function _suCancel(){
   toast('キャンセルしました。PDFをドロップして始めてください');
 }
 function _suStart(){
+  if(_suVoldMode){ // r046: Voldモード。縮尺などの入力検証は不要(Vold内の値を使う)
+    const cb=_suVoldCb,loadVec=_suEl('su-vec').checked;
+    _consentGiven=true; // 「了解してはじめる」=免責に同意
+    _suEl('su-overlay').style.display='none';_suHideTip();
+    _suVoldMode=false;_suVoldCb=null;
+    if(cb)cb(loadVec);
+    return;
+  }
   const sv=_suEl('su-scale').value;
   const err=_suEl('su-err');
   let denom=null;
@@ -2427,12 +2467,11 @@ function updSidebar(){
     if(n===0)return '\u00b10';
     return (n>0?'+':'-')+Math.abs(n).toLocaleString('en-US');
   }
-  // Voldia版: 法面角度は土量計算時に全オブジェクト共通で使うため、常に有効表示にする
-  const slopeRow = document.getElementById('slope-angle-row');
-  if(slopeRow){
-    slopeRow.style.opacity = '1';
-    slopeRow.style.pointerEvents = '';
-  }
+  // 【r045 削除】(40回目) ここにあった「法面角度行(#slope-angle-row)のstyle.opacity='1'・pointerEvents=''を毎回直書きする」処理を削除。
+  //  何だったか: 旧3D右UIで、法面角度を常に有効表示にするための初期化(updSidebar()が呼ばれるたびに実行)。
+  //  なぜ消したか: 3D生成方法ダイアログ(#gm-overlay)で、通常計算の時に法面角度行をグレーアウト(.gm-off)するようにした。
+  //  この直書き(インラインstyle)はクラスのopacityより優先されるため、通常計算でも法面行だけグレーアウトされなかった(マスター報告)。
+  //  方式別の有効/無効は _gmApplyMode() が一括で管理するので、ここでの強制は不要になった。
   const list=document.getElementById('sh-list');
   list.innerHTML='';
   let idxOrder=[...shapes.keys()];
