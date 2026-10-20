@@ -508,7 +508,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0137</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0138</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1042,6 +1042,9 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0138(40回目): Credits(ライセンス表記)の追記(実ファイルの調査結果を反映)。内包物を明記: jsPDF→fflate(MIT)、JSZip→pako(MIT AND Zlib)・lie・immediate・setimmediate・readable-stream(MIT)、manifold.wasm→Emscripten・musl(MIT)・libc++/libc++abi(Apache 2.0 with LLVM Exceptions)。
+     xlsx-js-styleのバンドルにfflateは含まれていない(package.jsonの依存宣言のみ)ため書いていない。JSZipの依存は set-immediate-shim ではなく setimmediate(Barnesandnoble.com, llc, Donavon West, Domenic Denicola)。
+     全文欄にZlib License・LLVM Exceptionsの項を追加。three.jsの著作権者表記は配布ファイルのヘッダ(Three.js Authors)、PDF.jsは Copyright 2021 Mozilla Foundation に合わせた。 -->
 <!-- v0137(40回目): Credits(ライセンス表記)の追記。manifold-3d=Copyright The Manifold Authors(各ソースヘッダで確認)、xlsx-js-style=SheetJS LLC(SheetJS CE)+fork作者gitbrent(Brent Ely)を明記。
      ※manifold-3dはv3.0.0でGLM(linalgに置換)・外部QuickHull(自前実装に置換)・Thrustを廃止し、TBBはオプション(既定OFF。emscripten PAR=ONは非推奨)。本アプリのv3.5.1には該当しないため、これらは記載していない(書くと事実と食い違うため)。
      実際に配布されるwasmの中身そのものは未検査。manifold-3dを更新する時は、READMEのDependenciesとリリースノートを見直すこと。 -->
@@ -1071,12 +1074,12 @@ D&D or クリックでロードしてください</p>
       </div>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">three.js</strong>（CDN読込、r128）+ <strong style="color:#88aaff;">GLTFLoader</strong> + <strong style="color:#88aaff;">OrbitControls</strong>（配置モード）<br>
-        Copyright © 2010-2021 three.js authors — MIT License<br>
+        Copyright 2010-2021 Three.js Authors — MIT License<br>
         <span style="color:#889;">https://github.com/mrdoob/three.js</span>
       </div>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">PDF.js</strong>（CDN読込、v2.12.313）<br>
-        Copyright Mozilla and PDF.js contributors — Apache License 2.0<br>
+        Copyright 2021 Mozilla Foundation — Apache License 2.0<br>
         <span style="color:#889;">https://github.com/mozilla/pdf.js</span>
       </div>
       <div style="margin-bottom:14px;">
@@ -1084,6 +1087,7 @@ D&D or クリックでロードしてください</p>
         Copyright The Manifold Authors — Apache License 2.0<br>
         内部に Clipper2 (Angus Johnson) を含む — Boost Software License 1.0<br>
         凸包(quickhull)はAntti Kuukka氏のパブリックドメイン作品に由来、ベクトル演算(linalg)はSterling Orsten氏のlinalg.h(パブリックドメイン)に基づく<br>
+        WASMバイナリはEmscriptenでビルドされ、ランタイムとして musl libc (MIT License)、LLVM libc++/libc++abi (Apache 2.0 with LLVM Exceptions)、Emscripten ランタイム (MIT License) を含みます。<br>
         <span style="color:#889;">https://github.com/elalish/manifold / https://github.com/AngusJohnson/Clipper2</span>
       </div>
       <div style="margin-bottom:14px;">
@@ -1094,13 +1098,15 @@ D&D or クリックでロードしてください</p>
       </div>
       <div style="margin-bottom:14px;">
         <strong style="color:#88aaff;">jsPDF</strong>（CDN読込、v2.5.1）<br>
-        Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH — MIT License<br>
+        Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH ほか(全員の著作権者は下の全文欄) — MIT License<br>
+        内部に fflate (Copyright (c) 2020 Arjun Barrett — MIT License) を含みます。<br>
         <span style="color:#889;">https://github.com/parallax/jsPDF</span>
       </div>
       <div style="margin-bottom:4px;">
         <strong style="color:#88aaff;">JSZip</strong>（CDN読込、v3.10.1）<br>
         Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso<br>
         MIT License（デュアルライセンスのうちMIT側を適用）<br>
+        内部に pako (Copyright (C) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn — MIT AND Zlib)、lie (MIT)、immediate・setimmediate (Barnesandnoble.com, llc, Donavon West, Domenic Denicola ほか — MIT)、readable-stream (Node.js contributors — MIT) を含みます。<br>
         <span style="color:#889;">https://github.com/Stuk/jszip</span>
       </div>
     </div>
@@ -1110,13 +1116,26 @@ D&D or クリックでロードしてください</p>
     </p>
     <div style="font-size:.74em;">
       <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
-        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">MIT License <span style="color:#889;font-weight:400;">— three.js / GLTFLoader / OrbitControls / jsPDF / JSZip</span></summary>
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">MIT License <span style="color:#889;font-weight:400;">— three.js / GLTFLoader / OrbitControls / jsPDF(+fflate) / JSZip(+pako, lie, immediate, setimmediate, readable-stream) / Emscripten / musl</span></summary>
         <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">three.js / GLTFLoader / OrbitControls (r128):
-  Copyright © 2010-2021 three.js authors
+  Copyright 2010-2021 Three.js Authors
 jsPDF (v2.5.1):
-  Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH
-JSZip (v3.10.1):
+  Copyright (c) 2010-2021 James Hall; 2015-2021 yWorks GmbH; 2015-2021 Lukas Holländer; 2016-2018 Aras Abbasi;
+  2010 Aaron Spike; 2012 Willow Systems Corporation; 2012 Pablo Hess; 2012 Florian Jenett; 2013 Warren Weckesser;
+  2013 Youssef Beddad; 2013 Lee Driscoll; 2013 Stefan Slonevskiy; 2013 Jeremy Morel; 2013 Christoph Hartmann;
+  2014 Juan Pablo Gaviria; 2014 James Makes; 2014 Diego Casorran; 2014 Steven Spungin; 2014 Kenneth Glassey
+  内包: fflate — Copyright (c) 2020 Arjun Barrett
+JSZip (v3.10.1。MIT or GPLv3 のうち MIT を選択):
   Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+  内包: pako — Copyright (C) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn (MIT AND Zlib。Zlib部分は下の Zlib License の項)
+        lie — MIT (配布物に著作権者の表記なし。リポジトリ: calvinmetcalf/lie)
+        immediate — Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, Domenic Denicola, Brian Cavalier
+        setimmediate — Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola
+        readable-stream — Copyright Node.js contributors
+manifold-3d の wasm に Emscripten 経由で含まれるもの:
+  Emscripten — Copyright (c) 2010-2014 Emscripten authors, see AUTHORS file (MIT と UIUC/NCSA のデュアル。MIT を選択)
+  musl libc — Copyright © 2005-2020 Rich Felker, et al.
+    (muslの一部のファイルには別の許諾(パブリックドメイン・MIT風等)がある。詳細は musl の COPYRIGHT ファイル参照)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -1170,19 +1189,36 @@ In addition, the following condition applies:
 All redistributions must retain an intact copy of this copyright notice and disclaimer.</pre>
       </details>
       <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
-        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Apache License 2.0 <span style="color:#889;font-weight:400;">— PDF.js / manifold-3d / xlsx-js-style</span></summary>
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Zlib License <span style="color:#889;font-weight:400;">— pako(JSZipに内包)のzlib由来部分</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">pako (JSZip に内包。v1.0.11 のソースヘッダの表記):
+  (C) 1995-2013 Jean-loup Gailly and Mark Adler
+  (C) 2014-2017 Vitaly Puzrin and Andrey Tupitsin
+
+This software is provided &#x27;as-is&#x27;, without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Apache License 2.0 <span style="color:#889;font-weight:400;">— PDF.js / manifold-3d / xlsx-js-style(SheetJS CE)</span></summary>
         <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">PDF.js (v2.12.313):
-  Copyright Mozilla and PDF.js contributors
+  Copyright 2021 Mozilla Foundation (配布ファイル pdf.min.js / pdf.worker.min.js のヘッダの表記)
 manifold-3d (v3.5.1):
   Copyright The Manifold Authors (各ソースのヘッダに「Copyright &lt;年&gt; The Manifold Authors」と記載。ライブラリの開始者は Emmett Lalish)
   内蔵: Clipper2 — Copyright Angus Johnson (Boost Software License 1.0。上のBoostの項を参照)
   派生元の明記: 凸包(quickhull)の実装は Antti Kuukka (akuukka/quickhull) のパブリックドメイン作品に由来、
   ベクトル演算(linalg)は Sterling Orsten の linalg.h (パブリックドメイン) に基づく。
   いずれもmanifoldのソースではThe Manifold AuthorsのApache 2.0のファイルとして配布されている
+  wasm は Emscripten でビルドされ、libc++/libc++abi (LLVM Project) と musl libc、Emscripten ランタイムを含む(MITの項、LLVM Exceptions付きApacheの項を参照)
 xlsx-js-style (v1.2.0):
   SheetJS Community Edition — Copyright (C) 2012-present SheetJS LLC
+  (SheetJS CE 本体に含まれる SSF・CFB・CRC-32・ADLER-32 などもSheetJS作でApache 2.0。著作権者は同じ)
   xlsx-js-style は gitbrent (Brent Ely) によるSheetJS CEのfork。sheetjs-style (ShanaMaid) と
   sheetjs-style-v2 (Raul Gonzalez) のコードも取り込んでいる(いずれもApache 2.0。同プロジェクトのREADMEに記載)
+  ※ fflate は package.json の依存に挙がるが、配布される xlsx.bundle.js には含まれていない(fflate固有の文字列がない)
 
 Apache License
 Version 2.0, January 2004
@@ -1239,6 +1275,19 @@ You may add Your own copyright statement to Your modifications and may provide a
 9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
 
 END OF TERMS AND CONDITIONS</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Apache License 2.0 with LLVM Exceptions (追加の例外条項) <span style="color:#889;font-weight:400;">— libc++ / libc++abi(manifold.wasmに内包)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">libc++ / libc++abi — The LLVM Project (各ファイルのヘッダ参照)
+  Emscripten が manifold.wasm に静的リンクしている(wasm内に libcxxabi のパス文字列を確認)。
+  The LLVM Project is under the Apache License v2.0 with LLVM Exceptions。Apache 2.0 の全文は上の項のとおり。
+  追加される例外条項は以下。
+
+---- LLVM Exceptions to the Apache 2.0 License ----
+
+As an exception, if, as a result of your compiling your source code, portions of this Software are embedded into an Object form of such source code, you may redistribute such embedded portions in such Object form without complying with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+
+In addition, if you combine or link compiled forms of this Software with software that is licensed under the GPLv2 (&quot;Combined Software&quot;) and if a court of competent jurisdiction determines that the patent provision (Section 3), the indemnity provision (Section 9) or other Section of the License conflicts with the conditions of the GPLv2, you may retroactively and prospectively choose to deem waived or otherwise exclude such Section(s) of the License, but only in their entirety and only with respect to the Combined Software.</pre>
       </details>
     </div>
     <button id="license-modal-close" style="display:block;width:100%;margin-top:18px;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.9em;cursor:pointer;font-weight:700;">閉じる</button>
