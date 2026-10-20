@@ -5,15 +5,28 @@ VOLDIA 使用ライブラリ ライセンス全文 / Third-Party Licenses
 
 ============================================================
 MIT License
-対象: three.js / GLTFLoader / OrbitControls / jsPDF / JSZip
+対象: three.js / GLTFLoader / OrbitControls / jsPDF(+fflate) / JSZip(+pako, lie, immediate, setimmediate, readable-stream) / Emscripten / musl
 ============================================================
 
 three.js / GLTFLoader / OrbitControls (r128):
-  Copyright © 2010-2021 three.js authors
+  Copyright 2010-2021 Three.js Authors
 jsPDF (v2.5.1):
-  Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH
-JSZip (v3.10.1):
+  Copyright (c) 2010-2021 James Hall; 2015-2021 yWorks GmbH; 2015-2021 Lukas Holländer; 2016-2018 Aras Abbasi;
+  2010 Aaron Spike; 2012 Willow Systems Corporation; 2012 Pablo Hess; 2012 Florian Jenett; 2013 Warren Weckesser;
+  2013 Youssef Beddad; 2013 Lee Driscoll; 2013 Stefan Slonevskiy; 2013 Jeremy Morel; 2013 Christoph Hartmann;
+  2014 Juan Pablo Gaviria; 2014 James Makes; 2014 Diego Casorran; 2014 Steven Spungin; 2014 Kenneth Glassey
+  内包: fflate — Copyright (c) 2020 Arjun Barrett
+JSZip (v3.10.1。MIT or GPLv3 のうち MIT を選択):
   Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+  内包: pako — Copyright (C) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn (MIT AND Zlib。Zlib部分は下の Zlib License の項)
+        lie — MIT (配布物に著作権者の表記なし。リポジトリ: calvinmetcalf/lie)
+        immediate — Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, Domenic Denicola, Brian Cavalier
+        setimmediate — Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola
+        readable-stream — Copyright Node.js contributors
+manifold-3d の wasm に Emscripten 経由で含まれるもの:
+  Emscripten — Copyright (c) 2010-2014 Emscripten authors, see AUTHORS file (MIT と UIUC/NCSA のデュアル。MIT を選択)
+  musl libc — Copyright © 2005-2020 Rich Felker, et al.
+    (muslの一部のファイルには別の許諾(パブリックドメイン・MIT風等)がある。詳細は musl の COPYRIGHT ファイル参照)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -76,22 +89,42 @@ In addition, the following condition applies:
 All redistributions must retain an intact copy of this copyright notice and disclaimer.
 
 ============================================================
+Zlib License
+対象: pako(JSZipに内包)のzlib由来部分
+============================================================
+
+pako (JSZip に内包。v1.0.11 のソースヘッダの表記):
+  (C) 1995-2013 Jean-loup Gailly and Mark Adler
+  (C) 2014-2017 Vitaly Puzrin and Andrey Tupitsin
+
+This software is provided 'as-is', without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+============================================================
 Apache License 2.0
-対象: PDF.js / manifold-3d / xlsx-js-style
+対象: PDF.js / manifold-3d / xlsx-js-style(SheetJS CE)
 ============================================================
 
 PDF.js (v2.12.313):
-  Copyright Mozilla and PDF.js contributors
+  Copyright 2021 Mozilla Foundation (配布ファイル pdf.min.js / pdf.worker.min.js のヘッダの表記)
 manifold-3d (v3.5.1):
   Copyright The Manifold Authors (各ソースのヘッダに「Copyright <年> The Manifold Authors」と記載。ライブラリの開始者は Emmett Lalish)
   内蔵: Clipper2 — Copyright Angus Johnson (Boost Software License 1.0。上のBoostの項を参照)
   派生元の明記: 凸包(quickhull)の実装は Antti Kuukka (akuukka/quickhull) のパブリックドメイン作品に由来、
   ベクトル演算(linalg)は Sterling Orsten の linalg.h (パブリックドメイン) に基づく。
   いずれもmanifoldのソースではThe Manifold AuthorsのApache 2.0のファイルとして配布されている
+  wasm は Emscripten でビルドされ、libc++/libc++abi (LLVM Project) と musl libc、Emscripten ランタイムを含む(MITの項、LLVM Exceptions付きApacheの項を参照)
 xlsx-js-style (v1.2.0):
   SheetJS Community Edition — Copyright (C) 2012-present SheetJS LLC
+  (SheetJS CE 本体に含まれる SSF・CFB・CRC-32・ADLER-32 などもSheetJS作でApache 2.0。著作権者は同じ)
   xlsx-js-style は gitbrent (Brent Ely) によるSheetJS CEのfork。sheetjs-style (ShanaMaid) と
   sheetjs-style-v2 (Raul Gonzalez) のコードも取り込んでいる(いずれもApache 2.0。同プロジェクトのREADMEに記載)
+  ※ fflate は package.json の依存に挙がるが、配布される xlsx.bundle.js には含まれていない(fflate固有の文字列がない)
 
 Apache License
 Version 2.0, January 2004
@@ -148,3 +181,19 @@ You may add Your own copyright statement to Your modifications and may provide a
 9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
 
 END OF TERMS AND CONDITIONS
+
+============================================================
+Apache License 2.0 with LLVM Exceptions (追加の例外条項)
+対象: libc++ / libc++abi(manifold.wasmに内包)
+============================================================
+
+libc++ / libc++abi — The LLVM Project (各ファイルのヘッダ参照)
+  Emscripten が manifold.wasm に静的リンクしている(wasm内に libcxxabi のパス文字列を確認)。
+  The LLVM Project is under the Apache License v2.0 with LLVM Exceptions。Apache 2.0 の全文は上の項のとおり。
+  追加される例外条項は以下。
+
+---- LLVM Exceptions to the Apache 2.0 License ----
+
+As an exception, if, as a result of your compiling your source code, portions of this Software are embedded into an Object form of such source code, you may redistribute such embedded portions in such Object form without complying with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+
+In addition, if you combine or link compiled forms of this Software with software that is licensed under the GPLv2 ("Combined Software") and if a court of competent jurisdiction determines that the patent provision (Section 3), the indemnity provision (Section 9) or other Section of the License conflicts with the conditions of the GPLv2, you may retroactively and prospectively choose to deem waived or otherwise exclude such Section(s) of the License, but only in their entirety and only with respect to the Combined Software.
