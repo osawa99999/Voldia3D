@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r047 (41回目: ①ファイル名の日付を yymmdd_hhmm に統一(CSV・GLB・データ出力ZIP。名前を先頭・日付を後ろに) ②配置モードのiframe参照を voldia_placement_v0080.html に変更)。 r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -774,7 +774,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0079.html'; // r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
+      iframe.src='voldia_placement_v0080.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);

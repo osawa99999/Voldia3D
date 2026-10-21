@@ -1,17 +1,23 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
+// 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
 // ============================================================
 
 console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み完了', 'color:#0f0;font-weight:bold;');
   window.addEventListener('contextmenu', e => e.preventDefault());
 
   let tTimer;
-  function showToast(msg) {
+  function showToast(msg, ms) { // 41回目: 表示時間を任意指定できるように(省略時は従来どおり3秒)
     const el = document.getElementById('toast');
     el.textContent = msg;
     el.style.opacity = '1';
     clearTimeout(tTimer);
-    tTimer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
+    tTimer = setTimeout(() => { el.style.opacity = '0'; }, ms || 3000);
+  }
+  // 41回目: 出力ファイル名の日付 yymmdd_hhmm(本体側 getVoldiaTimestamp と同じ書式。iframe内なので自前で持つ)
+  function _fileStamp() {
+    const d = new Date(), pad = n => String(n).padStart(2, '0');
+    return `${String(d.getFullYear()).slice(2)}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
   }
 
   // ==========================================
@@ -981,6 +987,73 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     return total;
   }
 
+  // 41回目: 範囲スクショ。ボタン→画面全体が範囲選択モード(トーストで案内)→ドラッグで範囲指定→指を離すとその範囲を
+  // そのままPNG保存。背景色の変更は無し(印刷と同じく3Dビュー(WebGLキャンバス)だけが対象で、パネル類は写らない)。
+  // 中止: Esc / 右クリック / もう一度ボタン。選択中は下の3Dビュー・オブジェクトには一切触れない(全画面の選択面が操作を受ける)。
+  (function () {
+    const btn = document.getElementById('voldia-shot-btn');
+    const ov = document.getElementById('shot-select-overlay');
+    const box = document.getElementById('shot-select-box');
+    let active = false, drag = null;
+    function setActive(on) {
+      active = on; drag = null;
+      ov.style.display = on ? 'block' : 'none';
+      box.style.display = 'none';
+      btn.classList.toggle('active', on);
+    }
+    function rectOf(d) {
+      return { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
+    }
+    function drawBox() {
+      const r = rectOf(drag);
+      box.style.display = 'block';
+      box.style.left = r.x + 'px'; box.style.top = r.y + 'px';
+      box.style.width = r.w + 'px'; box.style.height = r.h + 'px';
+    }
+    function capture(r) {
+      renderer.render(scene, camera); // 描画と同じ処理内で複写する(preserveDrawingBuffer未設定のため)
+      const cv = renderer.domElement, cr = cv.getBoundingClientRect();
+      const kx = cv.width / cr.width, ky = cv.height / cr.height; // 画面px→キャンバスpx(高DPI対応)
+      let sx = Math.round((r.x - cr.left) * kx), sy = Math.round((r.y - cr.top) * ky);
+      let sw = Math.round(r.w * kx), sh = Math.round(r.h * ky);
+      if (sx < 0) { sw += sx; sx = 0; } if (sy < 0) { sh += sy; sy = 0; }
+      sw = Math.min(sw, cv.width - sx); sh = Math.min(sh, cv.height - sy);
+      if (sw < 2 || sh < 2) { showToast('⚠ 範囲が3Dビューの外です'); return; }
+      const out = document.createElement('canvas'); out.width = sw; out.height = sh;
+      out.getContext('2d').drawImage(cv, sx, sy, sw, sh, 0, 0, sw, sh);
+      const a = Object.assign(document.createElement('a'), { href: out.toDataURL('image/png'), download: `Voldia_Place_${_fileStamp()}.png` });
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      showToast('📷 範囲スクショを保存しました');
+    }
+    btn.addEventListener('click', () => {
+      if (active) { setActive(false); showToast('範囲スクショを中止しました'); return; }
+      setActive(true);
+      showToast('📷 スクショしたい範囲をドラッグで選択してください（Esc/右クリックで中止）', 6000);
+    });
+    ov.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault(); ov.setPointerCapture(e.pointerId);
+      drag = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+      drawBox();
+    });
+    ov.addEventListener('pointermove', e => {
+      if (!drag) return;
+      drag.x1 = e.clientX; drag.y1 = e.clientY; drawBox();
+    });
+    ov.addEventListener('pointerup', e => {
+      if (!drag || e.button !== 0) return;
+      drag.x1 = e.clientX; drag.y1 = e.clientY;
+      const r = rectOf(drag);
+      setActive(false);
+      if (r.w < 8 || r.h < 8) { showToast('⚠ 範囲が小さすぎます。もう一度ボタンを押して選び直してください'); return; }
+      capture(r);
+    });
+    ov.addEventListener('contextmenu', e => { e.preventDefault(); setActive(false); showToast('範囲スクショを中止しました'); });
+    document.addEventListener('keydown', e => {
+      if (active && e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); setActive(false); showToast('範囲スクショを中止しました'); }
+    }, true);
+  })();
+
   document.getElementById('voldia-print-btn').addEventListener('click', () => {
     const btn = document.getElementById('voldia-print-btn');
     try{
@@ -992,9 +1065,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       const pdfBytes = _buildSingleImagePDF(jpegDataURL, pageW, pageH);
       const blob = new Blob([pdfBytes], {type:'application/pdf'});
       const url = URL.createObjectURL(blob);
-      const d = new Date();
-      const pad = n => String(n).padStart(2,'0');
-      const stamp = `${String(d.getFullYear()).slice(2)}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`; // 41回目: 他の出力ファイルと同じ yymmdd_hhmm に統一
+      const stamp = _fileStamp(); // 41回目: 他の出力ファイルと同じ yymmdd_hhmm に統一
       const a = Object.assign(document.createElement('a'), {href:url, download:`Vold3DScreen_${stamp}.pdf`});
       a.click(); URL.revokeObjectURL(url);
       btn.textContent = '✓ 印刷完了';

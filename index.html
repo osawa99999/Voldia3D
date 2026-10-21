@@ -460,7 +460,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #gm-back{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
 #gm-start{flex:1.6;background:#2196f3;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
 #gm-back:active,#gm-start:active{filter:brightness(.9);}
-#gm-tip{display:none;position:fixed;z-index:21500;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
+#gm-tip{display:none;position:fixed;white-space:pre-line;z-index:21500;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
 /* 起動ダイアログの「キャンセル」(「了解してはじめる」の右) */
 #su-cancel{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;}
 /* v0136: ボタン順を「キャンセル → 了解してはじめる」(マスター提示の画像どおり)。PDF/方眼紙/Voldの3モード共通 */
@@ -476,6 +476,18 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .btn-glb.is-off{opacity:.38;cursor:not-allowed;}
 .btn-glb.is-off:hover{background:transparent;}
 /* v0141(41回目): GLB出力/LANDXML出力の確認ダイアログ(#lx-*)。#calc-modal(z-index:20000)より前・#confirm-modal(20500)より後ろ */
+/* v0144(41回目): 3Dスクショの背景色選択ダイアログ(#ss-*)。#lx-overlayと同じ重なり順 */
+#ss-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20400;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#ss-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:16px 22px 18px;width:min(420px,100%);box-sizing:border-box;color:#eee;box-shadow:0 8px 40px rgba(0,0,0,.6);text-align:center;}
+#ss-dlg .ss-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
+#ss-dlg .ss-q{font-size:.88em;color:#cfd8e3;margin:4px 0 14px;}
+#ss-dlg .ss-btns{display:flex;gap:10px;}
+#ss-dlg .ss-btns button{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 6px 10px;background:#2f2f2f;color:#eee;border:1px solid #555;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;}
+#ss-dlg .ss-btns button:hover{border-color:#4fc3f7;background:#363c44;}
+#ss-dlg .ss-btns button:active{filter:brightness(.9);}
+#ss-dlg .ss-sw{display:block;width:56px;height:36px;border:1px solid #888;border-radius:6px;}
+#ss-dlg .ss-sw-chk{background:conic-gradient(#ccc 25%,#fff 0 50%,#ccc 0 75%,#fff 0) 0 0/14px 14px;}
+#ss-dlg .ss-note{font-size:.75em;color:#8a9bb0;margin-top:12px;line-height:1.6;}
 #lx-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20400;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
 #lx-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:16px 24px 18px;width:min(480px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
 #lx-dlg .lx-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
@@ -526,7 +538,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0142</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0144</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1074,6 +1086,19 @@ D&D or クリックでロードしてください</p>
     <div class="lx-foot"><button id="lx-no">いいえ</button><button id="lx-yes">はい</button></div>
   </div>
 </div>
+<!-- v0144(41回目): 3Dスクショの背景色選択。ボタンを押した時点で確定(その色で保存)。枠の外・Escで中止。 -->
+<div id="ss-overlay">
+  <div id="ss-dlg">
+    <div class="ss-title">📷 スクリーンショット</div>
+    <div class="ss-q">背景色を選んでください（押すと保存します）</div>
+    <div class="ss-btns">
+      <button type="button" data-bg="black"><span class="ss-sw" style="background:#06080c"></span>黒</button>
+      <button type="button" data-bg="white"><span class="ss-sw" style="background:#fff"></span>白</button>
+      <button type="button" data-bg="transparent"><span class="ss-sw ss-sw-chk"></span>透明</button>
+    </div>
+    <div class="ss-note">透明は、背景と方眼を除いたPNGになります。</div>
+  </div>
+</div>
 <div id="gm-tip"></div>
 
 <!-- ライセンス表記(Credits)モーダル -->
@@ -1088,6 +1113,8 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0144(41回目): 3Dスクショボタンで背景色(黒/白/透明)の選択ダイアログ(#ss-overlay)を出すようにした(voldia3d.js r116)。 -->
+<!-- v0143(41回目): ヘルプ吹き出し(#gm-tip)に white-space:pre-line を追加(ヘルプ文中の\nで改行できるように。文言の改行位置はvoldia_main.js r052)。 -->
 <!-- v0142(41回目): 出力ダイアログ(#lx-overlay)とヘルプ吹き出し(#gm-tip)が3D結果画面で見えなかった不具合を修正。
      原因: この2つが、非表示の#gm-overlay(3D生成方法ダイアログ)の子要素になっていた(#gm-overlayの閉じタグが#gm-tipの後ろにあった)。
      非表示の親の子は表示されず、さらに親の重なり順(z-index:8600)が3D画面(20000)より下だった。#gm-overlayを先に閉じ、2つをbody直下の兄弟にした。 -->

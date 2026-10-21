@@ -1,5 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  Land Logic  ★現行バージョン: r015 (41回目セッション)
+//   r016(41回目): GLB出力の三角形の向きを上向き(表)にそろえた(_llOrientUp)。PowerPointで上から見ると底面が透明に見えた不具合の修正。LANDXML側は元から向きを正規化済みなので無変更
 //   r015(41回目): ①構築部分を_llBuildNorthUpMesh()に分離 ②LANDXML出力(buildAndDownloadLandXML)を新設(書式はcsv_to_landxml v2.5.11準拠。座標=北・東・標高[m]、原点=選択測点・北上げ済み)
 //         ③GLBの出力名を Test3D_origin.glb → VoldiaGLB_yymmdd_hhmm.glb に変更 ④3D結果画面の「GLB出力」「LANDXML出力」ボタンから呼ばれる(Shift+Lは従来どおりGLB出力を直接実行)
 //   r001: 34回目新設 / r006: Y軸符号修正 / r007: 既存躯体を本番buildManifoldUnionGeom+noSlope微テーパー方式へ変更
@@ -378,12 +379,31 @@
 
   // ── GLB出力(土量計算用 / 原点・北上げ済み) ─────────────────
   // r015: 出力ファイル名を VoldiaGLB_yymmdd_hhmm.glb に変更(旧 Test3D_origin.glb)。成功=true / 失敗=false
+  // r016: 三角形の向きを「上向き(真上から見て反時計回り=表)」にそろえてから書き出す。
+  //   Land Logicのメッシュは「掘削する土のかたまり」の外向き法線(底面は下向き)なので、そのまま書き出すと、
+  //   PowerPointなど裏面を描かないビューアで上から見た時に、底面が裏面扱いになって透明に見えた(マスター指摘)。
+  //   LANDXML出力と同じ規約(TINは上向き)にそろえる。真上から見て面積ほぼ0の面(垂直面)は向きを決められないので元のまま。
+  function _llOrientUp(positions, indices){
+    const out = new Uint32Array(indices.length);
+    let flipped = 0, vertical = 0;
+    for(let t = 0; t < indices.length; t += 3){
+      const a = indices[t], b = indices[t+1], c = indices[t+2];
+      const ax = positions[a*3], an = -positions[a*3+2];
+      const cz = (positions[b*3] - ax) * (-positions[c*3+2] - an) - (positions[c*3] - ax) * (-positions[b*3+2] - an); // (東E,北N)平面の外積: >0 なら真上から見て反時計回り
+      if(Math.abs(cz) / 2 < 1e-6){ out[t] = a; out[t+1] = b; out[t+2] = c; vertical++; }
+      else if(cz < 0){ out[t] = a; out[t+1] = c; out[t+2] = b; flipped++; }
+      else { out[t] = a; out[t+1] = b; out[t+2] = c; }
+    }
+    return { indices: out, flipped: flipped, vertical: vertical };
+  }
   async function buildAndDownloadLandLogicGLB(){
     const m = await _llBuildNorthUpMesh();
     if(!m) return false;
+    const up = _llOrientUp(m.positions, m.indices);
+    console.log('[LAND-LOGIC] GLB: 三角形の向きを上向きにそろえました (反転=' + up.flipped + ' / 垂直面でそのまま=' + up.vertical + ')');
     const glbBytes = encodeMultiGLB([{
       positions: m.positions,
-      indices: m.indices,
+      indices: up.indices,
       name: 'LandLogic_Test'
     }]);
     const fname = 'VoldiaGLB_' + _llTs() + '.glb';
@@ -498,6 +518,7 @@
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
   window._buildAndDownloadLandXML = buildAndDownloadLandXML;   // r015: LANDXML出力ボタン(voldia_main.js)から呼ぶ
   window._llMeshToLandXML = _llMeshToLandXML;                  // 検証用
+  window._llOrientUp = _llOrientUp;                            // 検証用
   window._llBuildGLHoleLids = buildGLHoleLids;   // 検証用
-  console.log('[LAND-LOGIC] r015 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
+  console.log('[LAND-LOGIC] r016 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
 })();

@@ -30,13 +30,17 @@
   }
   #voldia-save-btn:hover { background: #388e3c; }
   #voldia-save-btn:disabled { opacity: 0.6; cursor: default; }
-  #voldia-print-btn {
+  #voldia-print-btn, #voldia-shot-btn {
     background: #37474f; color: #cfd8dc; border: 1px solid #607d8b; border-radius: 4px;
     padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
     margin-top: 6px;
   }
-  #voldia-print-btn:hover { background: #455a64; }
-  #voldia-print-btn:disabled { opacity: 0.6; cursor: default; }
+  #voldia-print-btn:hover, #voldia-shot-btn:hover { background: #455a64; }
+  #voldia-print-btn:disabled, #voldia-shot-btn:disabled { opacity: 0.6; cursor: default; }
+  #voldia-shot-btn.active { background: #0277bd; border-color: #4fc3f7; color: #fff; }
+  /* v0080(41回目): 範囲スクショの選択面(全画面)と選択枠。トースト(1000)より下、左パネル(10)・ヘルプ(250)より上 */
+  #shot-select-overlay { display: none; position: fixed; inset: 0; z-index: 900; cursor: crosshair; background: rgba(0,0,0,0.12); touch-action: none; }
+  #shot-select-box { display: none; position: fixed; border: 2px dashed #4fc3f7; background: rgba(79,195,247,0.15); pointer-events: none; box-sizing: border-box; }
 
   /* 「使い方」ボタン周り */
   /* r062: マウスオーバー表示→クリックで開閉するボタン式に変更。
@@ -279,6 +283,7 @@
 <div id="left-panel">
   <button id="voldia-back-btn" style="width:100%;box-sizing:border-box;">◀ Voldiaに戻る</button>
   <button id="voldia-save-btn" style="width:100%;box-sizing:border-box;">📤 Vold出力</button>
+  <button id="voldia-shot-btn" style="width:100%;box-sizing:border-box;">📷 範囲スクショ</button>
   <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷(A3 PDF)</button>
   <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
 
@@ -490,6 +495,8 @@
 </div>
 
 <script src="data/voldia_models.js"></script>
+<!-- v0080(41回目): 左パネルの「印刷」の上に「📷 範囲スクショ」を追加(#voldia-shot-btn)。押すと画面全体が範囲選択モードになり(#shot-select-overlay)、ドラッグした範囲をそのままPNG保存する。背景色の変更は無し。ロジックは voldia_placement.js の「範囲スクショ」ブロック。 -->
+<div id="shot-select-overlay"><div id="shot-select-box"></div></div>
 <!-- v0079(40回目): 【削除】data/LOW_1TOKO_geo.js と data/voldia_worker_toko.js を読み込んでいたscriptタグ2行。
      何だったか: r079(37回目)で作業員の新モデル(LOW_1TOKO)を別ファイルで読み込んでいた。
      なぜ消したか: 作業員のモデルデータ(LOW_1TOKO_GEO)と生成関数(createWorkerFromModel)はr073でdata/voldia_models.js内に統合済み(別ファイル不要)。

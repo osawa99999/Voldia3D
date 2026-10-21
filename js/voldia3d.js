@@ -4042,25 +4042,82 @@ function handleCalc3DScreenshotClick(e){
     exportGLB();
     return;
   }
-  screenshotCalc3D();
+  showScreenshotDialog(); // r116: 背景色(黒/白/透明)を選んでからスクショ
 }
 
 // r059: 3Dプレビューのスクリーンショット保存。requestAnimationFrameの
 // 継続描画ループに依存せず確実に最新フレームを取得するため、キャプチャ直前に
 // 明示的に1回render()してからtoDataURL()する(preserveDrawingBuffer不要)。
-function screenshotCalc3D(){
+// r116(41回目): 背景色を「黒/白/透明」から選べるようにした(マスター要望: 黒背景は印刷時のトナーを無駄に使う)。
+//   ボタン(handleCalc3DScreenshotClick)→ 背景選択ダイアログ(#ss-overlay)→ 押した色で確定 → screenshotCalc3D(bg)。
+//   黒 = 画面と同じ背景(従来のスクショと同じ見た目) / 白 = 背景だけ白(方眼は画面のまま) / 透明 = 背景と方眼を除いたPNG(PowerPoint等に貼る用)。
+//   透明の作り方: レンダラーはα無し(不透明)のまま、背景を「黒」と「白」で2回描いて、2枚の差から各ピクセルの不透明度を逆算する
+//   (半透明の面・アンチエイリアスの縁も正しく抜ける。レンダラーの設定は変えないので3D表示への影響なし)。
+let _ssInited=false;
+function _ssEl(id){return document.getElementById(id);}
+function _ssClose(){const o=_ssEl('ss-overlay');if(o)o.style.display='none';}
+function showScreenshotDialog(){
   if(!threeR || !threeS || !threeC){ toast('⚠️ 3Dプレビューが準備できていません'); return; }
+  if(!_ssInited){
+    _ssInited=true;
+    _ssEl('ss-overlay').addEventListener('click',e=>{ if(e.target===_ssEl('ss-overlay')) _ssClose(); }); // 枠の外を押したら中止
+    document.querySelectorAll('#ss-dlg [data-bg]').forEach(btn=>{
+      btn.addEventListener('click',()=>{ const bg=btn.getAttribute('data-bg'); _ssClose(); screenshotCalc3D(bg); }); // 押したら確定
+    });
+    document.addEventListener('keydown',e=>{
+      if(e.key==='Escape' && _ssEl('ss-overlay').style.display==='flex'){ e.stopPropagation(); e.preventDefault(); _ssClose(); }
+    },true);
+  }
+  _ssEl('ss-overlay').style.display='flex';
+}
+function _ssGrab(clearHex){ // 指定の背景色で1回描画し、結果を2Dキャンバスに複写して返す(preserveDrawingBuffer不要: 描画と同じ処理内で複写する)
+  threeR.setClearColor(clearHex,1);
+  threeR.render(threeS,threeC);
+  const src=threeR.domElement;
+  const cv=document.createElement('canvas'); cv.width=src.width; cv.height=src.height;
+  cv.getContext('2d').drawImage(src,0,0);
+  return cv;
+}
+function screenshotCalc3D(bg){
+  if(!threeR || !threeS || !threeC){ toast('⚠️ 3Dプレビューが準備できていません'); return; }
+  const grids=threeS.children.filter(o=>o.type==='GridHelper'); // 画面の方眼(透明PNGでは宙に浮いてしまうので消す)
+  const gridVis=grids.map(g=>g.visible);
   try {
-    threeR.render(threeS, threeC);
-    const dataUrl = threeR.domElement.toDataURL('image/png');
-    const fname = `Voldia_3D_${getVoldiaTimestamp()}.png`; // r115: 日付表記を yymmdd_hhmm に統一
-    const a = document.createElement('a');
-    a.href = dataUrl; a.download = fname;
+    let outCv;
+    if(bg==='transparent'){
+      grids.forEach(g=>{g.visible=false;});
+      const cb=_ssGrab(0x000000), cw=_ssGrab(0xffffff);
+      const w=cb.width, h=cb.height;
+      const ib=cb.getContext('2d').getImageData(0,0,w,h);
+      const iw=cw.getContext('2d').getImageData(0,0,w,h);
+      const B=ib.data, W=iw.data;
+      for(let i=0;i<B.length;i+=4){
+        const diff=((W[i]-B[i])+(W[i+1]-B[i+1])+(W[i+2]-B[i+2]))/3; // 0=完全に不透明 … 255=完全に透明
+        let a=1-diff/255; if(a<0)a=0; if(a>1)a=1;
+        if(a<0.004){ B[i]=0;B[i+1]=0;B[i+2]=0;B[i+3]=0; }
+        else{
+          B[i]=Math.min(255,Math.round(B[i]/a)); B[i+1]=Math.min(255,Math.round(B[i+1]/a)); B[i+2]=Math.min(255,Math.round(B[i+2]/a));
+          B[i+3]=Math.round(a*255);
+        }
+      }
+      cb.getContext('2d').putImageData(ib,0,0);
+      outCv=cb;
+    } else {
+      outCv=_ssGrab(bg==='white' ? 0xffffff : 0x06080c); // 黒=画面の背景色(従来のスクショと同じ)
+    }
+    const dataUrl=outCv.toDataURL('image/png');
+    const fname=`Voldia_3D_${getVoldiaTimestamp()}.png`; // r115: 日付表記を yymmdd_hhmm に統一
+    const a=document.createElement('a');
+    a.href=dataUrl; a.download=fname;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    toast('📷 スクリーンショットを保存しました');
+    toast('📷 スクリーンショットを保存しました（背景: '+(bg==='white'?'白':bg==='transparent'?'透明':'黒')+'）');
   } catch(e) {
     console.error('[SCREENSHOT] 保存失敗', e);
     toast('⚠️ スクリーンショットの保存に失敗しました');
+  } finally {
+    grids.forEach((g,i)=>{g.visible=gridVis[i];});
+    threeR.setClearColor(0x06080c,1); // 画面の背景色に戻す
+    threeR.render(threeS,threeC);
   }
 }
 // ────────────────────────────────────────────────────────────────
@@ -4169,7 +4226,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r115(base:VoldiaM r069)"; // r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r116(base:VoldiaM r069)"; // r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
