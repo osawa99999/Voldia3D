@@ -1840,7 +1840,7 @@ function getVoldiaZipDate(){
   return new Date(d.getTime()+9*60*60*1000+d.getTimezoneOffset()*60*1000);
 }
 function getConcThick(){
-  const v = parseFloat(document.getElementById('conc-thick')?.value);
+  const v = parseInputNum(document.getElementById('conc-thick'));
   return isNaN(v) ? 110 : v;
 }
 function getOuter(sh){ return sh.outer || sh.pts || []; }
@@ -1921,7 +1921,7 @@ function shapeToFrustum(sh){
   const o = parseFloat(sh.overdig);
   if(isNaN(b) || isNaN(o) || o < 0) return null;
   
-  const c = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const c = ( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   const tl = parseFloat(sh.topLevel)||0;
   // D = 天端(tl) - 下端(b) + 捨コン(c)
   // 例: tl=0, b=-1800 → D = 0-(-1800)+110 = 1910mm
@@ -2498,12 +2498,12 @@ async function runCalc(mode){
     closeCalcModal();
     return;
   }
-  const concVal=( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const concVal=( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   // Voldia版: 個別「垂直/法面」「余掘」UIを廃止し、計算モードで全オブジェクト一律に統一
   if(mode==='normal'){
     fs = fs.map(f=>({...f, noSlope:true}));
   } else if(mode==='doboku'){
-    const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value));
+    const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseInputNum(document.getElementById('global-overdig')));
     // 6C(2026-08-28 引継ぎ18回目→26回目セッションで紫に移設): 従来は全オブジェクト
     // 一律noSlope:falseで個別の垂直指定が消し飛んでいた。紫色のオブジェクトだけ垂直面
     // (+DOBOKU_VERTICAL_TAPER_FIXED_MMの微勾配)にする条件分岐に変更。
@@ -4171,7 +4171,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r113(base:VoldiaM r069)"; // r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r114(base:VoldiaM r069)"; // r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

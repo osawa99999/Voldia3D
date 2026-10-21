@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -1389,6 +1389,56 @@ function _suInit(){
   });
 }
 // ================================================================
+//  mm入力欄(捨てコン+砕石・余掘り)の共通処理 (r048 / 40回目)
+//  ・負の値は不可: 入力されたら「負の値は使用できません」をトースト表示して0に戻す。
+//  ・桁区切り(1,000)で表示する。編集中(フォーカス中)は区切り無しで編集しやすくし、確定(change/blur)で整形。
+//  ・欄のvalue文字列は「1,000」のようにカンマを含むため、読み取る側は必ずparseInputNum()を使う(parseFloat(el.value)だと1になってしまう)。
+//    voldia3d.js / voldia_export.js の読み取り箇所はこの関数に置き換え済み。.vold保存は従来どおり数値。
+//  ・全角数字・全角のカンマ/ピリオド/マイナスも半角に直して解釈する。数値でない入力は直前の正しい値に戻す。
+// ================================================================
+function parseInputNum(el){ // カンマ入りの表示値も数値にする。要素が無い/数値でない時はNaN(従来のparseFloat(el.value)と同じ扱い)
+  if(!el)return NaN;
+  return parseFloat(String(el.value).replace(/,/g,''));
+}
+function _mmToAscii(s){
+  return String(s).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0))
+    .replace(/[，、]/g,',').replace(/[．。]/g,'.').replace(/[－−‐ー]/g,'-').replace(/＋/g,'+').replace(/[\s\u3000]/g,'');
+}
+function _mmFormat(n){return n.toLocaleString('en-US',{maximumFractionDigits:6});}
+// 値を確定して整形する。有効な(0以上の数値の)値ならtrue
+function _mmNormalize(el){
+  const raw=_mmToAscii(el.value).replace(/,/g,'');
+  if(!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(raw)){
+    toast('数値を入力してください');
+    el.value=el.dataset.lastValid||'0';
+    return false;
+  }
+  const v=parseFloat(raw)+0; // +0: -0を0にする
+  if(v<0){
+    toast('負の値は使用できません');
+    el.value='0';el.dataset.lastValid='0';
+    return false;
+  }
+  el.value=_mmFormat(v);el.dataset.lastValid=el.value;
+  return true;
+}
+// プログラムから値を入れる(.vold読込など)。負・非数は0。トーストは出さない
+function _setMmInput(id,n){
+  const el=document.getElementById(id);if(!el)return;
+  let v=(typeof n==='number'&&isFinite(n))?n:0;
+  if(v<0)v=0;
+  el.value=_mmFormat(v+0);el.dataset.lastValid=el.value;
+}
+window._setMmInput=_setMmInput;
+function _mmSetup(id){
+  const el=document.getElementById(id);if(!el)return;
+  const cur=parseInputNum(el);
+  _setMmInput(id,isNaN(cur)?0:cur); // 初期表示も整形
+  el.addEventListener('focus',()=>{el.value=el.value.replace(/,/g,'');el.select();});
+  el.addEventListener('change',()=>{_mmNormalize(el);});
+  el.addEventListener('blur',()=>{_mmNormalize(el);});
+}
+// ================================================================
 //  3D生成方法ダイアログ (r044 / 40回目新設)
 //  「3Dイメージ」ボタン → このダイアログ → 「作図開始」で showCalcModal() + runCalc(mode)。
 //  入力欄(gl-offset-mm / conc-thick / global-overdig / .slope-ang-btn)は旧3D右UIからid据え置きで移設したので、
@@ -1437,6 +1487,7 @@ function _gmHideTip(){
 }
 function _gmInit(){
   if(_gmInited)return;_gmInited=true;
+  _mmSetup('conc-thick');_mmSetup('global-overdig'); // r048: 負の値不可・桁区切り
   _gmEl('gm-mode-normal').addEventListener('click',()=>_gmApplyMode('normal'));
   _gmEl('gm-mode-doboku').addEventListener('click',()=>_gmApplyMode('doboku'));
   _gmEl('gm-back').addEventListener('click',()=>{_gmEl('gm-overlay').style.display='none';_gmHideTip();}); // 2D画面へ戻る
@@ -1461,6 +1512,8 @@ function showGenDialog(){
   _gmEl('gm-overlay').style.display='flex';
 }
 function _gmStart(){
+  // r048: 入力途中のまま「作図開始」が押されても、確定処理(負の値→0・桁区切り・数値チェック)を必ず通す
+  _mmNormalize(_gmEl('conc-thick'));_mmNormalize(_gmEl('global-overdig'));
   const mode=(window._genMode==='normal')?'normal':'doboku';
   _gmEl('gm-overlay').style.display='none';_gmHideTip();
   showCalcModal(); // 3Dイメージ画面を開く(従来と同じ。内部でresetCalcToSelect→initThree_preview)

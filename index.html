@@ -508,7 +508,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0138</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0139</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -999,14 +999,14 @@ D&D or クリックでロードしてください</p>
     <div class="gm-row gm-doboku-only" data-gmtip="conc">
       <div class="gm-lab">捨てコン＋砕石</div>
       <div class="gm-ctl">
-        <input type="number" class="doboku-inp" id="conc-thick" value="110" min="0" step="10">
+        <input type="text" class="doboku-inp" id="conc-thick" value="110" inputmode="decimal" autocomplete="off">
         <span class="gm-unit">mm</span>
       </div>
     </div>
     <div class="gm-row gm-doboku-only" data-gmtip="overdig">
       <div class="gm-lab">余掘り</div>
       <div class="gm-ctl">
-        <input type="number" class="doboku-inp" id="global-overdig" value="300" min="0" step="10">
+        <input type="text" class="doboku-inp" id="global-overdig" value="300" inputmode="decimal" autocomplete="off">
         <span class="gm-unit">mm</span>
       </div>
     </div>
@@ -1042,6 +1042,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0139(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を、負の値不可(「負の値は使用できません」をトースト表示して0に戻す)・桁区切り表示に変更。入力欄はtype=number→text(桁区切りのため)。値の読み取りはparseInputNum()経由(voldia_main.js r048)。 -->
 <!-- v0138(40回目): Credits(ライセンス表記)の追記(実ファイルの調査結果を反映)。内包物を明記: jsPDF→fflate(MIT)、JSZip→pako(MIT AND Zlib)・lie・immediate・setimmediate・readable-stream(MIT)、manifold.wasm→Emscripten・musl(MIT)・libc++/libc++abi(Apache 2.0 with LLVM Exceptions)。
      xlsx-js-styleのバンドルにfflateは含まれていない(package.jsonの依存宣言のみ)ため書いていない。JSZipの依存は set-immediate-shim ではなく setimmediate(Barnesandnoble.com, llc, Donavon West, Domenic Denicola)。
      全文欄にZlib License・LLVM Exceptionsの項を追加。three.jsの著作権者表記は配布ファイルのヘッダ(Three.js Authors)、PDF.jsは Copyright 2021 Mozilla Foundation に合わせた。 -->

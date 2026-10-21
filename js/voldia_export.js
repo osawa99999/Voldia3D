@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -22,10 +22,10 @@ async function exportCSV(){
     scale:sc,
     scaleDenom:scaleDenom,
     gridPaperMode: _gridPaperActive||false, // モードフラグを保存
-    concThick:( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value)),
+    concThick:( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick'))),
     // r074マスター指示: 土量計算のグローバル設定(勾配=法面角度・余掘り)もVoldファイルに保存する。
     // concThick(捨てコン+砕石)は既にr013時点から保存済みだったが、この2つは未保存だった。
-    globalOverdig:( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value)),
+    globalOverdig:( v => isNaN(v) ? 200 : Math.max(0,v))(parseInputNum(document.getElementById('global-overdig'))),
     slopeAngleDeg: (typeof slopeAngleDeg==='number' && !isNaN(slopeAngleDeg)) ? slopeAngleDeg : 45,
     // r038(37回目): 現状地盤GL(mm)もVoldファイルに保存する。従来は保存も復元もされず、読込後は
     // 入力欄の見た目と適用値(window._glOffsetMm)が食い違う原因になっていた。
@@ -141,13 +141,15 @@ async function applyVoldData(data, opts){
   // globalOverdig/slopeAngleDeg側は既にtypeof+isNaNの正しい書き方だったので、
   // それに合わせる。
   if(typeof data.concThick==='number' && !isNaN(data.concThick)){
-    document.getElementById('conc-thick').value = data.concThick;
+    if(typeof window._setMmInput==='function') window._setMmInput('conc-thick', data.concThick); // r045: 桁区切り表示・負の値は0(トーストなし)
+    else document.getElementById('conc-thick').value = data.concThick;
   }
   // r074マスター指示: 余掘り・法面角度(勾配)もVoldファイルから復元する。
   // 旧バージョンのVoldファイル(これらのキーが無い)を読んでも壊れないよう、値が
   // 無い場合はUIのデフォルト値(#global-overdigのvalue属性・45°)をそのまま維持する。
   if(typeof data.globalOverdig==='number' && !isNaN(data.globalOverdig)){
-    document.getElementById('global-overdig').value = data.globalOverdig;
+    if(typeof window._setMmInput==='function') window._setMmInput('global-overdig', data.globalOverdig); // r045: 同上
+    else document.getElementById('global-overdig').value = data.globalOverdig;
   }
   if(typeof data.slopeAngleDeg==='number' && !isNaN(data.slopeAngleDeg)){
     slopeAngleDeg = data.slopeAngleDeg;
@@ -274,7 +276,7 @@ function importCSV(){
 // ================================================================
 function exportXlsx(){
   const sc=document.getElementById('sc-d').textContent||'未設定';
-  const conc=( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const conc=( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   const hdr=['オブジェクト名','色','面積(m2)','躯体下端GL-(mm)','余掘り(mm)','法面','実掘深さ(mm)','備考'];
   const rowsArr=[
     ['※ この表はオブジェクト単体の寸法です。Unionされた値ではありません。'],
@@ -476,7 +478,7 @@ async function buildVoldiaGLBBytes(progressCb, excludeExistingStruct){
   // 差し引いてD=tl-bに戻す(仕様通り「描いた形状そのまま」)。これを忘れていたため、
   // 配置モードの既存躯体だけ下端が捨てコン厚さ分(既定110mm)深くなり、地形の床面と
   // 高さが一致してz-fighting(白い板が浮いて見える不具合)を起こしていた。
-  const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const _concVal = ( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   // r035(36回目): 土量計算(doboku)後のみ、既存躯体の底面を最深まで延長(底面∞)。
   // 通常計算後(structure解析等)は従来通り。最深値の算出は共通関数に一本化(voldia3d.js r100)。
   const _siteBotEs = (window._lastCalcModeForPlacement === 'doboku')
@@ -578,13 +580,13 @@ async function buildExistingStructureOverlapGLBBytes(progressCb){
   if(calcMode==='normal'){
     fs = fs.map(f=>({...f, noSlope:true}));
   } else if(calcMode==='doboku'){
-    const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseFloat(document.getElementById('global-overdig').value));
+    const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseInputNum(document.getElementById('global-overdig')));
     fs = fs.map(f=>({...f, noSlope:(f.color==='purple'), OD:globalOD}));
   }
   fs._offsetX = fsRaw._offsetX; fs._offsetY = fsRaw._offsetY;
 
   excavFrustums = fs.filter(f=>f.color!=='gray');
-  const _concVal = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const _concVal = ( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   structFrustums = fs.filter(f=>f.color==='gray').map(f=>({...f, D: f.D - _concVal}));
   if(!structFrustums.length) return null;
   // r035(36回目): 土量計算(doboku)後のみ、既存躯体の底面∞。この関数のfsは生frustum系の座標
@@ -685,7 +687,7 @@ async function buildNormalCalcPlacementGLB(){
   // r010(27回目セッション): buildVoldiaGLBBytesと同様の理由で、キャッシュ
   // (_lastExistingStructGeoms)には依存せず、ここでfsから直接作り直す。
   // r011: 捨てコン厚さの除外漏れ修正(理由はbuildVoldiaGLBBytes側のr011コメント参照)
-  const _concVal2 = ( v => isNaN(v) ? 110 : v)(parseFloat(document.getElementById('conc-thick').value));
+  const _concVal2 = ( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   const _existingStructGeomsFresh = fs.filter(f=>f.color==='gray')
     .map(f => buildFrustumGeometry({...f, D: f.D - _concVal2, noSlope:true, OD:0}))
     .filter(g => g.positions && g.positions.length);
