@@ -1,5 +1,7 @@
 // ════════════════════════════════════════════════════════════
-//  Land Logic  ★現行バージョン: r014 (37回目セッション)
+//  Land Logic  ★現行バージョン: r015 (41回目セッション)
+//   r015(41回目): ①構築部分を_llBuildNorthUpMesh()に分離 ②LANDXML出力(buildAndDownloadLandXML)を新設(書式はcsv_to_landxml v2.5.11準拠。座標=北・東・標高[m]、原点=選択測点・北上げ済み)
+//         ③GLBの出力名を Test3D_origin.glb → VoldiaGLB_yymmdd_hhmm.glb に変更 ④3D結果画面の「GLB出力」「LANDXML出力」ボタンから呼ばれる(Shift+Lは従来どおりGLB出力を直接実行)
 //   r001: 34回目新設 / r006: Y軸符号修正 / r007: 既存躯体を本番buildManifoldUnionGeom+noSlope微テーパー方式へ変更
 //   r008: 微テーパーを10mm(頂点量子化単位の整数倍)に確定。voldia3d.js r099のf.taperMm対応が前提
 //   r009: 紫(山留)は法面ではなく微テーパー垂直のまま出力 / 既存躯体の引き算でGL蓋に内側の穴(ドーナツ)ができたら蓋をする
@@ -210,7 +212,9 @@
   }
   window._llToNorthUp = _llToNorthUp; // 検証用
 
-  async function buildAndDownloadLandLogicGLB(){
+  // r015(41回目): 構築(Manifold差分〜原点・北上回転)をこの関数に分離。GLB出力とLANDXML出力が同じメッシュを使う。
+  // 成功: {positions(Float32Array: x=東E・y=高さ・z=-北N, 単位m, 原点=0), indices(Uint32Array), org} / 失敗: undefined(理由はtoast/consoleに出す)
+  async function _llBuildNorthUpMesh(){
     const fs = window._lastCalcFrustumsForLandLogic;
     const offsetX = window._lastCalcOffsetXForLandLogic;
     const offsetY = window._lastCalcOffsetYForLandLogic;
@@ -359,22 +363,141 @@
         if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y; if(z<mnz)mnz=z; if(z>mxz)mxz=z; }
       console.log(`[LAND-LOGIC] 出力範囲 東(E)=${mnx.toFixed(3)}〜${mxx.toFixed(3)} / 北(N)=${(-mxz).toFixed(3)}〜${(-mnz).toFixed(3)} / 高さ=${mny.toFixed(3)}〜${mxy.toFixed(3)} (m, 原点=0)`); }
 
-    const glbBytes = encodeMultiGLB([{
-      positions: finalPositions,
-      indices: new Uint32Array(cleanIdx),
-      name: 'LandLogic_Test'
-    }]);
-    const blob = new Blob([glbBytes], {type:'model/gltf-binary'});
+    return { positions: finalPositions, indices: new Uint32Array(cleanIdx), org: _org };
+  }
+
+  // ── ダウンロード共通 ───────────────────────────────────
+  function _llDownload(blob, filename){
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'Test3D_origin.glb';
+    a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    console.log('[LAND-LOGIC] Test3D_origin.glb をダウンロードしました');
+  }
+  function _llTs(){ return (typeof getVoldiaTimestamp === 'function') ? getVoldiaTimestamp() : 'nodate'; }
+
+  // ── GLB出力(土量計算用 / 原点・北上げ済み) ─────────────────
+  // r015: 出力ファイル名を VoldiaGLB_yymmdd_hhmm.glb に変更(旧 Test3D_origin.glb)。成功=true / 失敗=false
+  async function buildAndDownloadLandLogicGLB(){
+    const m = await _llBuildNorthUpMesh();
+    if(!m) return false;
+    const glbBytes = encodeMultiGLB([{
+      positions: m.positions,
+      indices: m.indices,
+      name: 'LandLogic_Test'
+    }]);
+    const fname = 'VoldiaGLB_' + _llTs() + '.glb';
+    _llDownload(new Blob([glbBytes], {type:'model/gltf-binary'}), fname);
+    console.log('[LAND-LOGIC] ' + fname + ' をダウンロードしました');
+    if(typeof toast === 'function') toast('📦 GLBを出力しました: ' + fname, 4000);
+    return true;
+  }
+
+  // ── LANDXML出力 ───────────────────────────────────────
+  // 書式・頂点/三角形の整理は csv_to_landxml v2.5.11(マスターの実績ツール)と同じ:
+  //   LandXML 1.2 / 単位=メートル / Surface(TIN) / P=「北(Northing) 東(Easting) 標高」(小数4桁) / F=頂点番号3つ
+  //   同一座標の頂点を統合 / 面積1e-4m²未満(縮退)の三角形と重複三角形を除外 / 未使用頂点を除いて番号を振り直す
+  // 座標: Land Logicの北上げ済みメッシュ(x=東E, y=高さ, z=-北N)から N=-z, E=x, 標高=y。原点=選んだ測点(0,0)・GL=0。
+  // 三角形の向き: 平面(E,N)を真上から見て反時計回り(=上向きの面)にそろえる。この変換は回転+移動のみ(行列式+1)なので
+  //   元の向きは保たれるが、ソースの巻き方向に依存しないよう三角形ごとに明示的に正規化する(TINの規約)。
+  function _llFix4(v){ const s = v.toFixed(4); return (s === '-0.0000') ? '0.0000' : s; }
+  function _llMeshToLandXML(positions, indices, surfaceName){
+    const EPS_AREA = 1e-4;                       // csv_to_landxmlと同じ(m²)
+    const vmap = new Map(), verts = [];          // verts: {n,e,z,sn,se,sz}
+    const idOf = function(vi){
+      const E = Number(_llFix4(positions[vi*3])), Z = Number(_llFix4(positions[vi*3+1])), N = Number(_llFix4(-positions[vi*3+2]));
+      const sn = _llFix4(-positions[vi*3+2]), se = _llFix4(positions[vi*3]), sz = _llFix4(positions[vi*3+1]);
+      const key = sn + ',' + se + ',' + sz;
+      let id = vmap.get(key);
+      if(!id){ verts.push({n:N, e:E, z:Z, sn:sn, se:se, sz:sz}); id = verts.length; vmap.set(key, id); }
+      return id;
+    };
+    const faces = [], faceSet = new Set();
+    let skipDegenerate = 0, skipDup = 0, flipped = 0, vertical = 0;
+    for(let i = 0; i < indices.length; i += 3){
+      let a = idOf(indices[i]), b = idOf(indices[i+1]), c = idOf(indices[i+2]);
+      if(a === b || b === c || c === a){ skipDegenerate++; continue; }
+      const A = verts[a-1], B = verts[b-1], C = verts[c-1];
+      const e1x = B.e-A.e, e1y = B.n-A.n, e1z = B.z-A.z, e2x = C.e-A.e, e2y = C.n-A.n, e2z = C.z-A.z;
+      const cx = e1y*e2z - e1z*e2y, cy = e1z*e2x - e1x*e2z, cz = e1x*e2y - e1y*e2x; // cz>0: 真上から見て反時計回り
+      if(Math.sqrt(cx*cx + cy*cy + cz*cz) / 2 < EPS_AREA){ skipDegenerate++; continue; }
+      const key = [a, b, c].sort(function(p, q){ return p - q; }).join('-');
+      if(faceSet.has(key)){ skipDup++; continue; }
+      faceSet.add(key);
+      if(Math.abs(cz) / 2 < 1e-6){ vertical++; }          // 真上から見て面積ほぼ0(=垂直面)。TINでは扱えない面なので件数だけ記録
+      else if(cz < 0){ const t = b; b = c; c = t; flipped++; }
+      faces.push([a, b, c]);
+    }
+    if(!faces.length) return null;
+    // 未使用頂点を除いて番号を振り直す
+    const used = new Set(); faces.forEach(function(f){ used.add(f[0]); used.add(f[1]); used.add(f[2]); });
+    const sorted = Array.from(used).sort(function(p, q){ return p - q; });
+    const remap = new Map(); const outVerts = [];
+    sorted.forEach(function(old, idx){ remap.set(old, idx + 1); outVerts.push(verts[old-1]); });
+    const pad = function(n){ return String(n).padStart(2, '0'); };
+    const now = new Date();
+    const dateStr = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate());
+    const timeStr = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    const esc = function(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;'); };
+    const x = [];
+    x.push('<?xml version="1.0" encoding="UTF-8"?>');
+    x.push('<LandXML');
+    x.push('  xmlns="http://www.landxml.org/schema/LandXML-1.2"');
+    x.push('  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"');
+    x.push('  xsi:schemaLocation="http://www.landxml.org/schema/LandXML-1.2 http://www.landxml.org/schema/LandXML-1.2/LandXML-1.2.xsd"');
+    x.push('  date="' + dateStr + '"');
+    x.push('  time="' + timeStr + '"');
+    x.push('  version="1.2"');
+    x.push('  language="English"');
+    x.push('  readOnly="false">');
+    x.push('  <Units>');
+    x.push('    <Metric');
+    x.push('      areaUnit="squareMeter"');
+    x.push('      linearUnit="meter"');
+    x.push('      volumeUnit="cubicMeter"');
+    x.push('      temperatureUnit="celsius"');
+    x.push('      pressureUnit="milliBars"');
+    x.push('      diameterUnit="millimeter"');
+    x.push('      angularUnit="decimal degrees"');
+    x.push('      directionUnit="decimal degrees"');
+    x.push('    />');
+    x.push('  </Units>');
+    x.push('  <Surfaces>');
+    x.push('    <Surface name="' + esc(surfaceName) + '" desc="TIN Surface">');
+    x.push('      <Definition surfType="TIN">');
+    x.push('        <Pnts>');
+    outVerts.forEach(function(v, i){ x.push('          <P id="' + (i+1) + '">' + v.sn + ' ' + v.se + ' ' + v.sz + '</P>'); });
+    x.push('        </Pnts>');
+    x.push('        <Faces>');
+    faces.forEach(function(f){ x.push('          <F>' + remap.get(f[0]) + ' ' + remap.get(f[1]) + ' ' + remap.get(f[2]) + '</F>'); });
+    x.push('        </Faces>');
+    x.push('      </Definition>');
+    x.push('    </Surface>');
+    x.push('  </Surfaces>');
+    x.push('</LandXML>');
+    return { xml: x.join('\n') + '\n', vertCount: outVerts.length, faceCount: faces.length, skipDegenerate: skipDegenerate, skipDup: skipDup, flipped: flipped, vertical: vertical };
+  }
+  async function buildAndDownloadLandXML(){
+    const m = await _llBuildNorthUpMesh();
+    if(!m) return false;
+    const r = _llMeshToLandXML(m.positions, m.indices, 'Voldia');
+    if(!r){
+      console.warn('[LAND-LOGIC] 有効な三角形が残らなかったためLANDXMLを出力しません');
+      if(typeof toast === 'function') toast('⚠ 有効な三角形がありません。LANDXMLを出力できませんでした', 4000);
+      return false;
+    }
+    console.log('[LAND-LOGIC] LANDXML: 頂点=' + r.vertCount + ' 三角形=' + r.faceCount + ' (縮退除外=' + r.skipDegenerate + ' 重複除外=' + r.skipDup + ' 向き反転=' + r.flipped + ' 真上から見て面積0(垂直面)=' + r.vertical + ')');
+    if(r.vertical > 0) console.warn('[LAND-LOGIC] 垂直に近い面が' + r.vertical + '枚あります(TINでは扱えない形)。重機側で読めない場合はこの面が原因の可能性があります');
+    const fname = 'VoldiaXML_' + _llTs() + '.xml';
+    _llDownload(new Blob([r.xml], {type:'application/xml'}), fname);
+    if(typeof toast === 'function') toast('🗺 LANDXMLを出力しました: ' + fname + '（頂点' + r.vertCount + '・三角形' + r.faceCount + '）', 5000);
+    return true;
   }
 
   // コンソールから手動でも呼べるようにしておく(Shift+L無しでのデバッグ用)
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
+  window._buildAndDownloadLandXML = buildAndDownloadLandXML;   // r015: LANDXML出力ボタン(voldia_main.js)から呼ぶ
+  window._llMeshToLandXML = _llMeshToLandXML;                  // 検証用
   window._llBuildGLHoleLids = buildGLHoleLids;   // 検証用
-  console.log('[LAND-LOGIC] r014 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
+  console.log('[LAND-LOGIC] r015 読み込み完了 (Shift+Lで実行 / 起動時の版確認用ログ。不要になったら削除可)');
 })();

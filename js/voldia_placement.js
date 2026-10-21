@@ -994,7 +994,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       const url = URL.createObjectURL(blob);
       const d = new Date();
       const pad = n => String(n).padStart(2,'0');
-      const stamp = `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}`;
+      const stamp = `${String(d.getFullYear()).slice(2)}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`; // 41回目: 他の出力ファイルと同じ yymmdd_hhmm に統一
       const a = Object.assign(document.createElement('a'), {href:url, download:`Vold3DScreen_${stamp}.pdf`});
       a.click(); URL.revokeObjectURL(url);
       btn.textContent = '✓ 印刷完了';

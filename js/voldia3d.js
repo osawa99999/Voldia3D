@@ -1806,19 +1806,16 @@ function _diagMeshVolume(geom){
 // ────────────────────────────────────────────────────────────────
 //  図形 → フラスタム変換
 // ────────────────────────────────────────────────────────────────
-function getJSTDateStr(){
-  const d=new Date();
-  const jst=new Date(d.getTime()+9*60*60*1000);
-  return jst.toISOString().slice(0,10);
-}
-// r111: getJSTTimestamp()(年4桁のタイムスタンプ)を削除。呼び出し元ゼロ。ファイル名のタイムスタンプは下の getVoldiaTimestamp()(YYMMDDHHMMSS・12桁)に統一済み。
-// r072マスター指定の命名規則(YYMMDDHHMMSS・12桁)用。Vold/DXF/データ出力の
-// ファイル名をこれで統一する(旧getJSTTimestamp()は年4桁だったが、呼び出しゼロのためr111で削除)。
+// r115(41回目): 日付のファイル名表記を「yymmdd_hhmm」(年月日と時分をアンダーバーで区切る)に統一(マスター指示)。
+// 旧: getJSTDateStr()(CSV専用・YYYY-MM-DD)を削除(呼び出しはCSV出力1か所だけで、getVoldiaTimestamp()に置き換えた)。
+// 旧: getVoldiaTimestamp()はYYMMDDHHMMSS(12桁・秒まで)だったのを、分までの「yymmdd_hhmm」に変更。
+// 対象: .vold / DXF / CSV / GLB / LANDXML / データ出力ZIP / 3Dスクショ(配置モードのPDFは別ファイルvoldia_placement.js側で同じ書式)。
+// 時刻は常にJST(ホストのタイムゾーン設定に依存しない「+9時間してUTC表記で読む」方式は従来のまま)。
 function getVoldiaTimestamp(){
   const d=new Date();
   const jst=new Date(d.getTime()+9*60*60*1000);
   const s=jst.toISOString(); // "YYYY-MM-DDTHH:MM:SS.sssZ"
-  return s.slice(2,4)+s.slice(5,7)+s.slice(8,10)+s.slice(11,13)+s.slice(14,16)+s.slice(17,19);
+  return s.slice(2,4)+s.slice(5,7)+s.slice(8,10)+'_'+s.slice(11,13)+s.slice(14,16);
 }
 // r025(30回目セッション、マスター指摘対応): ZIP内の各ファイルの更新日時(JSZipが
 // エクスプローラー等に表示する内部タイムスタンプ)が、フォルダ名(=getVoldiaTimestamp()の
@@ -2114,6 +2111,7 @@ function showCalcModal(){
   document.getElementById('btn-glb').classList.remove('show');
   const _bp=document.getElementById('btn-placement');if(_bp)_bp.classList.remove('show');
   window._lastCalcModeForPlacement=null;
+  if(typeof updateOutputButtons==='function') updateOutputButtons(); // r115: GLB出力/LANDXML出力ボタンを計算前の状態(非表示)に戻す
   const _ba0=document.getElementById('btn-analyze-structure');if(_ba0)_ba0.classList.remove('show');
   const _be0=document.getElementById('btn-analyze-earthwork');if(_be0)_be0.classList.remove('show');
   ['btn-calc-run','btn-calc-doboku'].forEach(id=>{
@@ -2332,6 +2330,7 @@ function resetCalcToSelect(){
   document.getElementById('btn-glb').classList.remove('show');
   const _bp=document.getElementById('btn-placement');if(_bp)_bp.classList.remove('show');
   window._lastCalcModeForPlacement=null;
+  if(typeof updateOutputButtons==='function') updateOutputButtons(); // r115
   const _ba1=document.getElementById('btn-analyze-structure');if(_ba1)_ba1.classList.remove('show');
   const _be1=document.getElementById('btn-analyze-earthwork');if(_be1)_be1.classList.remove('show');
   // r088(24回目・項目2): 透過スライダー/ソリッド-グラデ切替UIは計算結果表示中だけ
@@ -2889,6 +2888,7 @@ async function runCalc(mode){
     // r075: 通常計算後にも配置モードボタンを表示できるようにする(GL平面+押し出しオブジェクトの固定配置モード)
     { const _bp2=document.getElementById('btn-placement'); if(_bp2)_bp2.classList.add('show'); }
     window._lastCalcModeForPlacement = mode; // r075: openPlacementMode()がどちらのGLB生成経路を使うか判定するために保持
+    if(typeof updateOutputButtons==='function') updateOutputButtons(); // r115: 通常計算=GLB出力 / 土量計算=GLB出力+LANDXML出力(測点が無ければグレーアウト)
     // r098(34回目セッション、Land Logic用): LandXML向け試験出力(js/voldia_landlogic.js、
     // Shift+Lトリガー)が、この土量計算で確定したfrustum一式(法面勾配込み)と
     // 正規化オフセットをそのまま再利用できるよう、ここでキャッシュしておく。
@@ -4053,9 +4053,7 @@ function screenshotCalc3D(){
   try {
     threeR.render(threeS, threeC);
     const dataUrl = threeR.domElement.toDataURL('image/png');
-    const ts = new Date();
-    const pad = n => String(n).padStart(2,'0');
-    const fname = `Voldia_3D_${ts.getFullYear()}-${pad(ts.getMonth()+1)}-${pad(ts.getDate())}_${pad(ts.getHours())}-${pad(ts.getMinutes())}-${pad(ts.getSeconds())}.png`;
+    const fname = `Voldia_3D_${getVoldiaTimestamp()}.png`; // r115: 日付表記を yymmdd_hhmm に統一
     const a = document.createElement('a');
     a.href = dataUrl; a.download = fname;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -4171,7 +4169,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r114(base:VoldiaM r069)"; // r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r115(base:VoldiaM r069)"; // r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

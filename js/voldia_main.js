@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r051(41回目): ①オブジェクトスナップの優先度を「交点>端点>中点>線上」に(従来は最短距離優先で、線上の交点が選ばれにくかった) ②3D結果画面にGLB出力/LANDXML出力ボタン・出力ダイアログ・各ボタンのヘルプ文(voldiaConfirmGLBは撤去) / r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -1166,12 +1166,8 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
 //           呼び出しをPromiseキューで直列化し、addEventListenerは{once:true}化
 // ================================================================
 let _confirmQueue = Promise.resolve();
-// Voldia版: GLB保存前に確認ダイアログを挟む（LandXML/MG機能は未完成のため）
-function voldiaConfirmGLB(){
-  customConfirm('PowerPointなどで使える３Dデータとして保存します。\nMG重機用のLANDXML形式は現在未完成ですが、よろしいですか。').then(ok=>{
-    if(ok) exportGLB();
-  });
-}
+// r051(41回目): voldiaConfirmGLB()(「LANDXML形式は未完成ですがよろしいですか」付きの確認)を撤去。
+//   GLB出力/LANDXML出力は下の exportGlbClick()/exportLandXmlClick() に置き換え(3D結果画面の右UI)。
 
 // Voldia版: OKのみの単純な通知ダイアログ（confirm-modalを流用）
 function customAlert(msg){
@@ -1454,7 +1450,14 @@ const _GM_TIPS={
   'mode-doboku':'オブジェクトの形状に各種値を加え、想定される根切形状を３Dで表示します',
   'gl':'現状の地盤面の高さを設定します',
   'conc':'この値は設定した下端の値に加味され、その分深く掘削した計算を行います',
-  'overdig':'この値の分、オブジェクトを外側に拡張し、掘削面積が広くなります'
+  'overdig':'この値の分、オブジェクトを外側に拡張し、掘削面積が広くなります',
+  // r051(41回目): 3D結果画面の出力ボタン(マウスオーバーで表示。タッチ端末は、使えない状態のボタンをタップした時だけ表示)
+  'out-placement':'３Dで重機の配置などを行い現場のイメージを作るモードです',
+  'out-shot':'表示されている３Dを単一画像として保存します',
+  'out-data':'体積の計算表を出力します',
+  'out-glb':'PowerPointなどで使用できる３Dデータを出力します',
+  'out-xml':'MG重機で使用するデータを出力します',
+  'out-off':'測点（0，0）が無ければ使用できません'
 };
 let _gmInited=false,_gmTipTimer=null;
 function _gmEl(id){return document.getElementById(id);}
@@ -1480,7 +1483,9 @@ function _gmShowTip(el,key){
   let left=r.left+r.width/2-tw/2;
   left=Math.max(6,Math.min(left,window.innerWidth-tw-6));
   tip.style.left=left+'px';
-  tip.style.top=(r.bottom+6)+'px';
+  let top=r.bottom+6;
+  if(top+tip.offsetHeight>window.innerHeight-6) top=Math.max(6,r.top-tip.offsetHeight-6); // r051: 下に収まらない時はボタンの上に出す
+  tip.style.top=top+'px';
 }
 function _gmHideTip(){
   const tip=_gmEl('gm-tip');if(tip)tip.style.display='none';
@@ -1505,6 +1510,109 @@ function _gmInit(){
       _gmTipTimer=setTimeout(_gmHideTip,3500);
     });
   });
+}
+// ================================================================
+//  r051(41回目): 3D結果画面の出力ボタン(📦GLB出力 / 🗺LANDXML出力)とヘルプ・出力ダイアログ
+//   通常計算: GLB出力=従来のexportGLB(測点・北の向きは使わない)。LANDXML出力は非表示。
+//   土量計算: GLB出力=Land Logic(原点・北上げ済み) / LANDXML出力=Land Logic。どちらも測点が1つも無ければグレーアウト。
+//   グレーアウトは disabled ではなく .is-off + aria-disabled(disabledだと一部ブラウザでマウスオーバーのヘルプが出ないため)。
+//   土量計算の出力は確認ダイアログ(#lx-overlay)を出し、原点測点(複数ある時は選択)と北の向きを見せてから出力する。
+// ================================================================
+const _OUT_TIP_IDS=['btn-placement','btn-calc-screenshot','btn-analyze-structure','btn-analyze-earthwork','btn-glb','btn-landxml'];
+let _outTipInited=false;
+function _outIsOff(btn){return !!(btn&&btn.classList.contains('is-off'));}
+function updateOutputButtons(){
+  const g=document.getElementById('btn-glb'),x=document.getElementById('btn-landxml');
+  if(!g||!x)return;
+  const mode=window._lastCalcModeForPlacement; // 'normal' | 'doboku' | null(計算前)
+  g.classList.toggle('show',mode==='normal'||mode==='doboku');
+  x.classList.toggle('show',mode==='doboku');
+  const off=(mode==='doboku')&&!(typeof surveyPts!=='undefined'&&surveyPts.length>0); // 土量計算は測点(原点)が必須
+  g.classList.toggle('is-off',off);x.classList.toggle('is-off',off);
+  g.setAttribute('aria-disabled',off?'true':'false');x.setAttribute('aria-disabled',off?'true':'false');
+  g.setAttribute('data-gmtip',off?'out-off':'out-glb');
+  x.setAttribute('data-gmtip',off?'out-off':'out-xml');
+  _outTipInit();
+}
+function _outTipInit(){
+  if(_outTipInited)return;_outTipInited=true;
+  _OUT_TIP_IDS.forEach(id=>{
+    const t=document.getElementById(id);if(!t)return;
+    const key=()=>t.getAttribute('data-gmtip');
+    t.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse'&&key())_gmShowTip(t,key());});
+    t.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')_gmHideTip();});
+    t.addEventListener('click',e=>{
+      _gmHideTip(); // 押したらヘルプは消す(ダイアログが前に出るため)
+      if(e.pointerType==='mouse'||(e.pointerType===undefined&&!('ontouchstart' in window)))return;
+      if(_outIsOff(t)){ // タッチ端末: 使えないボタンを押した時だけ理由を3.5秒表示
+        _gmShowTip(t,key());
+        if(_gmTipTimer)clearTimeout(_gmTipTimer);
+        _gmTipTimer=setTimeout(_gmHideTip,3500);
+      }
+    });
+  });
+}
+function exportGlbClick(){
+  const mode=window._lastCalcModeForPlacement;
+  if(mode==='normal'){
+    customConfirm('GLB出力を行いますか？\n（PowerPointなどで使用できる３Dデータを保存します）').then(ok=>{if(ok)exportGLB();});
+  }else if(mode==='doboku'){
+    if(_outIsOff(document.getElementById('btn-glb')))return;
+    showExportDialog('glb');
+  }
+}
+function exportLandXmlClick(){
+  if(window._lastCalcModeForPlacement!=='doboku')return;
+  if(_outIsOff(document.getElementById('btn-landxml')))return;
+  showExportDialog('xml');
+}
+let _lxKind='xml',_lxInited=false;
+function _lxEl(id){return document.getElementById(id);}
+function _lxClose(){_lxEl('lx-overlay').style.display='none';}
+function _lxInit(){
+  if(_lxInited)return;_lxInited=true;
+  _lxEl('lx-no').addEventListener('click',_lxClose);
+  _lxEl('lx-yes').addEventListener('click',_lxYes);
+  document.addEventListener('keydown',e=>{ // Escは「いいえ」。3D画面側のEsc処理より先に取る
+    if(e.key==='Escape'&&_lxEl('lx-overlay').style.display==='flex'){e.stopPropagation();e.preventDefault();_lxClose();}
+  },true);
+}
+function showExportDialog(kind){
+  _lxInit();_lxKind=kind;
+  const isXml=(kind==='xml');
+  _lxEl('lx-title').textContent=isXml?'LANDXML出力':'GLB出力';
+  _lxEl('lx-q').textContent=isXml?'LANDXML出力を行いますか？':'GLB出力を行いますか？';
+  const sel=_lxEl('lx-origin');sel.innerHTML='';
+  surveyPts.forEach((p,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent='測点 No.'+(i+1);sel.appendChild(o);});
+  const def=(typeof originSurveyIdx==='number'&&surveyPts[originSurveyIdx])?originSurveyIdx:0; // 既定は測点1(ノースアロー設定で選択済みならそれ)
+  sel.value=String(def);
+  sel.disabled=(surveyPts.length<=1);
+  _lxEl('lx-origin-note').textContent=(surveyPts.length<=1)?'（測点が1つのため自動）':'';
+  const deg=(typeof northAngleDeg==='number'&&!isNaN(northAngleDeg))?northAngleDeg:0;
+  _lxEl('lx-north-rotor').setAttribute('transform','rotate('+deg+')');
+  _lxEl('lx-north-val').textContent=degToDMSStr(deg)+'（'+(((deg%360)+360)%360).toFixed(4)+'°）';
+  _lxEl('lx-warn').style.display=isXml?'':'none';
+  _lxEl('lx-overlay').style.display='flex';
+}
+async function _lxYes(){
+  const kind=_lxKind;
+  const sel=_lxEl('lx-origin');
+  const idx=parseInt(sel.value);
+  if(!isNaN(idx)&&surveyPts[idx]){originSurveyIdx=idx;updateNorthArrowUI();} // ここで選んだ原点測点は、ノースアロー設定の原点にも反映(.vold保存にも入る)
+  _lxClose();
+  const fn=(kind==='xml')?window._buildAndDownloadLandXML:window._buildAndDownloadLandLogicGLB;
+  if(typeof fn!=='function'){toast('⚠ 出力モジュール(voldia_landlogic.js)が読み込まれていません',4000);return;}
+  _showCalcProgress();
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); // 「計算中」表示を先に描画してから重い処理に入る
+  try{
+    const ok=await fn();
+    if(!ok)toast('⚠ 出力できませんでした（理由は直前の表示かコンソールを確認してください）',4000);
+  }catch(err){
+    console.error('[出力] 例外:',err);
+    toast('⚠ 出力に失敗しました（コンソールを確認してください）',4000);
+  }finally{
+    _hideCalcProgress();
+  }
 }
 // r050(41回目): 3Dイメージ画面の「◀ 戻る」。3D画面を閉じて(closeCalcModal=「✕ 閉じる」と同じ後始末)、3D生成方法ダイアログへ戻る。
 // ダイアログの入力値(作成方法・GL・捨てコン+砕石・余掘り・法面角度)は同じ要素を読むので、そのまま残る。
@@ -1808,15 +1916,21 @@ function getSnap(lx,ly){
   const TOL_MIDPOINT  = tol * 0.70; // 中点
   const TOL_ONLINE    = tol * 0.40; // 線上: 大幅に狭い（緊張しないで済む距離）
 
-  function chk(px,py,type,maxR){
+  // r051(41回目・マスター指示): 認識優先度を「測点 > 交点 > 端点 > 中点 > 線上 > 方眼」にする。元図もオブジェクトも同じ順位。
+  // 従来は「カーソルに一番近い候補」が勝ち、優先度は距離差0.5px以内の同点にしか効いていなかった。
+  // そのため線上にある交点は、カーソルが線に近いほど「線上」の方が近くなり、交点が選ばれにくかった(=スナップしにくい原因)。
+  // 今は、各タイプの有効半径(TOL_*)に入った候補だけを対象に、順位が高いものを先に採用し、同順位の中で最も近いものを選ぶ。
+  // 同順位でほぼ同じ位置(0.5px以内)に元図とオブジェクトの候補が重なった時は、従来どおりオブジェクト側を優先する。
+  const RANK={survey:5,intersect:4,vector_intersect:4,endpoint:3,vector_endpoint:3,yamadome:3,midpoint:2,online:1,vector_online:1,grid:0.5};
+  let bestRank=-1,bestIsObj=false;
+  function chk(px,py,type,maxR,rank){
     const d=Math.hypot(lx-px,ly-py);
     if(d > maxR) return; // 有効半径外は完全無視
-    // 同半径内ならタイプ優先度で比較: survey(測点・最優先)>intersect>endpoint>midpoint>online
-    // r064: 元図スナップをvector_endpoint/vector_intersect/vector_onlineに分割(元は一律'vector':2)
-    const PRI={survey:5,intersect:4,endpoint:3,yamadome:3,midpoint:2,online:1,vector_intersect:2.3,vector_endpoint:2.2,vector_online:2.1,first:99};
-    const score = PRI[type]||1;
-    if(best===null || d < bd - 0.5/zoom || (Math.abs(d-bd)<0.5/zoom && score > (PRI[best.type]||1))){
-      bd=d; best={x:px,y:py,type};
+    const r=(rank!==undefined)?rank:(RANK[type]!==undefined?RANK[type]:1);
+    const isObj=!type.startsWith('vector_');
+    const eps=0.5/zoom;
+    if(best===null || r>bestRank || (r===bestRank && (d<bd-eps || (Math.abs(d-bd)<=eps && isObj && !bestIsObj)))){
+      bd=d; bestRank=r; bestIsObj=isObj; best={x:px,y:py,type};
     }
   }
   // r064(マスター指示): 元図スナップが常に「元図」とだけ表示され、交点/端点/線上の
@@ -1849,11 +1963,11 @@ function getSnap(lx,ly){
     for(let i=0;i<yn;i++){
       const a=ypts[i], b=ypts[(i+1)%yn];
       segs.push({a,b});
-      chk(a.x,a.y,'yamadome',TOL_ENDPOINT);
-      chk((a.x+b.x)/2,(a.y+b.y)/2,'yamadome',TOL_MIDPOINT);
+      chk(a.x,a.y,'yamadome',TOL_ENDPOINT,3); // r051: 山留も端点/中点/線上の順位に合わせる
+      chk((a.x+b.x)/2,(a.y+b.y)/2,'yamadome',TOL_MIDPOINT,2);
     }
     for(const{a,b}of ypts.map((p,i)=>({a:p,b:ypts[(i+1)%yn]}))){
-      const p=nearestOnSeg(lx,ly,a,b);if(p)chk(p.x,p.y,'yamadome',TOL_ONLINE);
+      const p=nearestOnSeg(lx,ly,a,b);if(p)chk(p.x,p.y,'yamadome',TOL_ONLINE,1);
     }
   }
   for(const sh of shapes){

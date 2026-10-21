@@ -303,7 +303,7 @@ function exportXlsx(){
   const csv='\uFEFF'+csvLines.join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
-  const a=Object.assign(document.createElement('a'),{href:url,download:'VOLDIA_'+getJSTDateStr()+'.csv'});
+  const a=Object.assign(document.createElement('a'),{href:url,download:'VOLDIA_'+getVoldiaTimestamp()+'.csv'});
   a.click();URL.revokeObjectURL(url);
   toast('Excel用CSV出力完了（Excelで開けます）');
 }
@@ -723,7 +723,7 @@ async function exportGLB(){
     epSet(100,'完了！');
     const blob=new Blob([glb],{type:'model/gltf-binary'});
     const url=URL.createObjectURL(blob);
-    const a=Object.assign(document.createElement('a'),{href:url,download:'VOLDIA_union.glb'});
+    const a=Object.assign(document.createElement('a'),{href:url,download:'VoldiaGLB_'+getVoldiaTimestamp()+'.glb'});
     document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
     if(btn)btn.disabled=false;
     document.getElementById('exp-prog').classList.remove('show');
@@ -1716,9 +1716,10 @@ async function runEvidenceAnalysis(mode){
 
     epSet(95,'ZIPに圧縮中...');
     await new Promise(r=>setTimeout(r,20));
-    // r072マスター指定の命名規則: 「YYMMDDHHMMSS_Voldia_○○export」(○○=Structure/Earthwork)
+    // r046(41回目): 命名規則を「Voldia_○○export_yymmdd_hhmm」(○○=Structure/Earthwork)に変更(マスター指示: 全出力ファイルを「名前_日付」+日付はyymmdd_hhmmに統一)。
+    // 旧(r072): 「YYMMDDHHMMSS_Voldia_○○export」(日付が先頭・秒まで)
     const modeWord=(mode==='structure')?'Structure':'Earthwork';
-    const baseName=`${getVoldiaTimestamp()}_Voldia_${modeWord}export`;
+    const baseName=`Voldia_${modeWord}export_${getVoldiaTimestamp()}`;
     // r025(30回目セッション、マスター指摘対応): ZIP内の各ファイルの更新日時をフォルダ名と
     // 同じJST時刻に揃える(voldia3d.js側のgetVoldiaZipDate()のコメント参照)
     const _zipDate=getVoldiaZipDate();

@@ -460,7 +460,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #gm-back{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
 #gm-start{flex:1.6;background:#2196f3;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
 #gm-back:active,#gm-start:active{filter:brightness(.9);}
-#gm-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
+#gm-tip{display:none;position:fixed;z-index:21500;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
 /* 起動ダイアログの「キャンセル」(「了解してはじめる」の右) */
 #su-cancel{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;}
 /* v0136: ボタン順を「キャンセル → 了解してはじめる」(マスター提示の画像どおり)。PDF/方眼紙/Voldの3モード共通 */
@@ -473,6 +473,24 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .rb-tgl.on{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
 .out-row{display:flex;flex-direction:column;gap:6px;margin-top:8px;} /* v0135: 横並び→縦3段(「3D配置モード」の文字数が多く窮屈だったため) */
 .out-row .btn-glb{width:100%;padding:8px 6px;font-size:.82em;}
+.btn-glb.is-off{opacity:.38;cursor:not-allowed;}
+.btn-glb.is-off:hover{background:transparent;}
+/* v0141(41回目): GLB出力/LANDXML出力の確認ダイアログ(#lx-*)。#calc-modal(z-index:20000)より前・#confirm-modal(20500)より後ろ */
+#lx-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20400;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#lx-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:16px 24px 18px;width:min(480px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+#lx-dlg .lx-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
+#lx-dlg .lx-q{font-size:1.1em;font-weight:700;color:#fff;margin:6px 0 10px;}
+#lx-dlg .lx-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid #3a3a3a;min-height:40px;}
+#lx-dlg .lx-lab{font-weight:700;color:#fff;white-space:nowrap;}
+#lx-dlg .lx-ctl{display:flex;align-items:center;gap:8px;color:#d6e6ff;}
+#lx-dlg select{padding:7px 10px;font-size:1rem;border:1px solid #555;border-radius:8px;background:#2f2f2f;color:#e4e4e4;}
+#lx-dlg select:disabled{opacity:.7;cursor:not-allowed;}
+#lx-dlg .lx-note{font-size:.8em;color:#8a9bb0;}
+#lx-dlg .lx-warn{color:#f7e24a;font-weight:700;font-size:.82em;text-align:center;margin:14px 0 12px;line-height:1.7;border-top:1px solid #3a3a3a;padding-top:12px;}
+#lx-dlg .lx-foot{display:flex;gap:12px;margin-top:10px;}
+#lx-no{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
+#lx-yes{flex:1.6;background:#2196f3;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
+#lx-no:active,#lx-yes:active{filter:brightness(.9);}
 .btn-cls.btn-cls-main{padding:6px 16px;font-size:.88em;font-weight:700;background:#b71c1c;border-color:#e57373;color:#fff;}
 .btn-cls.btn-cls-main:hover{background:#d32f2f;border-color:#ef9a9a;color:#fff;}
 </style>
@@ -508,7 +526,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0140</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0141</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -880,22 +898,23 @@ D&D or クリックでロードしてください</p>
             <span id="opacity-val" style="min-width:28px;text-align:right;">100%</span>
           </div>
         </div>
-          <button class="btn-glb" id="btn-glb" onclick="voldiaConfirmGLB()">📦 GLB 保存</button>
           <div class="out-row">
             <!-- Voldia版: オブジェクト配置モード(通常計算・土量計算どちらの結果画面でも表示) -->
-            <button class="btn-glb" id="btn-placement" onclick="openPlacementMode()"
+            <button class="btn-glb" id="btn-placement" onclick="openPlacementMode()" data-gmtip="out-placement"
               style="border-color:#ffb74d;color:#ffb74d;">🏗 3D配置モード</button>
             <!-- r059/r062: スクショ(SHIFT+CTRL+クリックでGLB保存の隠しデバッグ機能はJS側handleCalc3DScreenshotClickで判定) -->
-            <button class="btn-glb show" id="btn-calc-screenshot" onclick="handleCalc3DScreenshotClick(event)"
+            <button class="btn-glb show" id="btn-calc-screenshot" onclick="handleCalc3DScreenshotClick(event)" data-gmtip="out-shot"
               style="border-color:#888;color:#ccc;">📷 スクショ</button>
             <!-- r070: エビル統合。「データ出力」は通常計算の結果画面では躯体解析、土量計算の結果画面では掘削土量解析を呼ぶ
                  (どちらを出すかはrunCalcがmodeで切替え済み=従来どおり。ボタンは同時に1つしか出ない) -->
-            <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')"
-              title="通常計算の結果を躯体解析データ(Excel/PNG/PDF/GLB)として出力します"
+            <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')" data-gmtip="out-data"
               style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
-            <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')"
-              title="土量計算の結果を掘削土量解析データ(Excel/PNG/PDF/GLB)として出力します"
+            <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')" data-gmtip="out-data"
               style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
+            <!-- v0141(41回目): GLB出力(通常計算=従来のGLB保存 / 土量計算=Land Logic)とLANDXML出力(土量計算のみ)。表示とグレーアウトは updateOutputButtons()(voldia_main.js)が制御 -->
+            <button class="btn-glb" id="btn-glb" onclick="exportGlbClick()" data-gmtip="out-glb">📦 GLB出力</button>
+            <button class="btn-glb" id="btn-landxml" onclick="exportLandXmlClick()" data-gmtip="out-xml"
+              style="border-color:#ffd54f;color:#ffd54f;">🗺 LANDXML出力</button>
           </div>
         <div class="exp-prog" id="exp-prog">
           <div class="ep-title">⚙ GLB 生成中...</div>
@@ -1030,7 +1049,31 @@ D&D or クリックでロードしてください</p>
       <button type="button" id="gm-start">作図開始</button>
     </div>
   </div>
-  <div id="gm-tip"></div>
+  <!-- v0141(41回目): GLB出力/LANDXML出力の確認ダイアログ。原点測点(複数ある時だけ選べる)と北の向きを見せてから出力する。 -->
+<div id="lx-overlay">
+  <div id="lx-dlg">
+    <div class="lx-title" id="lx-title">LANDXML出力</div>
+    <div class="lx-q" id="lx-q">LANDXML出力を行いますか？</div>
+    <div class="lx-row">
+      <span class="lx-lab">原点測点（0，0）</span>
+      <span class="lx-ctl"><select id="lx-origin"></select><span class="lx-note" id="lx-origin-note"></span></span>
+    </div>
+    <div class="lx-row">
+      <span class="lx-lab">北の向き</span>
+      <span class="lx-ctl">
+        <svg width="44" height="44" viewBox="-22 -22 44 44" aria-hidden="true">
+          <circle r="20" fill="#1b2430" stroke="#4488cc" stroke-width="1.5"/>
+          <g id="lx-north-rotor"><path d="M0,-17 L6,4 L0,0 L-6,4 Z" fill="#ff5252"/><text y="16" text-anchor="middle" font-size="9" fill="#d6e6ff">N</text></g>
+        </svg>
+        <span id="lx-north-val"></span>
+      </span>
+    </div>
+    <div class="lx-note" style="margin:2px 0 4px;">画面上=0°・時計回りが正。北の向きは2D画面右上の🧭で変更できます。</div>
+    <div class="lx-warn" id="lx-warn">MG重機が確実に動作するデータを出力する保証はありません！<br>オブジェクト数が多かったり、面形状が破綻している場合は<br>MG重機側がデータを処理できなかったり、正常な形状を<br>認識できない場合もあります。作業前に重機メーカーなどに<br>出力したXMLデータを渡して、確認してください</div>
+    <div class="lx-foot"><button id="lx-no">いいえ</button><button id="lx-yes">はい</button></div>
+  </div>
+</div>
+<div id="gm-tip"></div>
 </div>
 
 <!-- ライセンス表記(Credits)モーダル -->
@@ -1045,6 +1088,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0141(41回目): 3D結果画面に「📦 GLB出力」「🗺 LANDXML出力」ボタンと出力ダイアログ(#lx-overlay)を追加(旧・非表示の「GLB 保存」は撤去)。3Dの出力ボタン5個にマウスオーバーのヘルプ文。出力ファイル名の日付を yymmdd_hhmm に統一。 -->
 <!-- v0140(41回目): 3Dイメージ画面の右上、「✕ 閉じる」の左に「◀ 戻る」(#btn-calc-back-gm)を追加。押すと3D画面を閉じて3D生成方法ダイアログ(作成方法・GL等の設定)へ戻る(backToGenDialog=voldia_main.js r050)。「✕ 閉じる」は従来どおり。 -->
 <!-- v0139(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を、負の値不可(「負の値は使用できません」をトースト表示して0に戻す)・桁区切り表示に変更。入力欄はtype=number→text(桁区切りのため)。値の読み取りはparseInputNum()経由(voldia_main.js r048)。 -->
 <!-- v0138(40回目): Credits(ライセンス表記)の追記(実ファイルの調査結果を反映)。内包物を明記: jsPDF→fflate(MIT)、JSZip→pako(MIT AND Zlib)・lie・immediate・setimmediate・readable-stream(MIT)、manifold.wasm→Emscripten・musl(MIT)・libc++/libc++abi(Apache 2.0 with LLVM Exceptions)。
