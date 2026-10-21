@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -1064,6 +1064,7 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
 
   window.addEventListener('contextmenu',e=>{
     if(e.target!==drawCv)return;e.preventDefault();
+    if(editMode){_editEscape();return;} // r050: ✏修正モードは右クリックでもESCと同じ動作(ドラッグ中=ドラッグのキャンセル/それ以外=修正モード終了)
     if(!drawing)return;
     if(tool==='rect'){rectLoop=false;cancelDraw();toast('矩形モード終了');}
     else if(tool==='poly'&&cur&&cur.pts.length>0){
@@ -1504,6 +1505,12 @@ function _gmInit(){
       _gmTipTimer=setTimeout(_gmHideTip,3500);
     });
   });
+}
+// r050(41回目): 3Dイメージ画面の「◀ 戻る」。3D画面を閉じて(closeCalcModal=「✕ 閉じる」と同じ後始末)、3D生成方法ダイアログへ戻る。
+// ダイアログの入力値(作成方法・GL・捨てコン+砕石・余掘り・法面角度)は同じ要素を読むので、そのまま残る。
+function backToGenDialog(){
+  closeCalcModal();
+  showGenDialog();
 }
 function showGenDialog(){
   _gmInit();
@@ -2041,6 +2048,7 @@ function onMouseDown(e){
   if(isToolsLocked())return;
   if(e.button===1||spaceDown)return;
   if(e.button===2){
+    if(editMode)return; // r050: ✏修正モード中の右クリックは終了/キャンセル専用(contextmenu側)。ここへ入ると測点が右クリックで消えてしまう
     // 測点 右クリック削除（r024: AreCal移植。測点設置モード中もOFF中もどちらも削除可能）
     if(surveyPts.length>0 && !drawing && !distMode){
       const{x:lxS,y:lyS}=getLogi(e);
@@ -3504,12 +3512,15 @@ function setEditMode(on){
 }
 // ドラッグ解除(マウスを離した時)の判定・ESCキャンセル
 document.addEventListener('mouseup',e=>{ if(editMode && editDrag && e.button===0) editMouseUp(); });
+// r050: ESCと右クリックの共通動作。ドラッグ中ならそのドラッグだけを元に戻す/ドラッグしていなければ修正モードを終了する
+function _editEscape(){
+  if(!editMode) return;
+  if(editDrag){ _editRestore(editDrag); editDrag=null; showSnap(null); setToolBar('✏ 修正モード'); redraw(); toast('✏ 移動をキャンセルしました',1200); }
+  else setEditMode(false);
+}
 document.addEventListener('keydown',e=>{
   if(!editMode) return;
-  if(e.key==='Escape'){
-    if(editDrag){ _editRestore(editDrag); editDrag=null; showSnap(null); setToolBar('✏ 修正モード'); redraw(); toast('✏ 移動をキャンセルしました',1200); }
-    else setEditMode(false);
-  }
+  if(e.key==='Escape') _editEscape();
 });
 
 function toggleSub(idx){
