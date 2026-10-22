@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  Land Logic  ★現行バージョン: r015 (41回目セッション)
-//   r017(41回目): 土量計算のGLB出力の色を濃いグレーに(_LL_GLB_COLOR。他のGLB出力の色は従来のまま)
+//   r017(41回目): GLBの色指定を削除(色は全GLB共通でvoldia_export.jsのencodeMultiGLB側に一本化=濃いグレー)
 //   r016(41回目): GLB出力の三角形の向きを上向き(表)にそろえた(_llOrientUp)。PowerPointで上から見ると底面が透明に見えた不具合の修正。LANDXML側は元から向きを正規化済みなので無変更
 //   r015(41回目): ①構築部分を_llBuildNorthUpMesh()に分離 ②LANDXML出力(buildAndDownloadLandXML)を新設(書式はcsv_to_landxml v2.5.11準拠。座標=北・東・標高[m]、原点=選択測点・北上げ済み)
 //         ③GLBの出力名を Test3D_origin.glb → VoldiaGLB_yymmdd_hhmm.glb に変更 ④3D結果画面の「GLB出力」「LANDXML出力」ボタンから呼ばれる(Shift+Lは従来どおりGLB出力を直接実行)
@@ -378,10 +378,6 @@
   }
   function _llTs(){ return (typeof getVoldiaTimestamp === 'function') ? getVoldiaTimestamp() : 'nodate'; }
 
-  // r017: GLBの材質色。従来色(0.32,0.33,0.36)は、glTFのbaseColorFactorがリニア値のため見た目は明るいグレー(約#999)で、
-  //   PowerPointで照明が当たると白っぽくなり、紙に印刷すると見にくかった(マスター指摘)。濃いグレー(見た目で約#464646)にする。
-  //   もっと濃く/薄くしたい時はこの3つの数値(リニア値。0に近いほど黒)だけ変えればよい。
-  const _LL_GLB_COLOR = [0.06, 0.06, 0.065, 1.0];
   // ── GLB出力(土量計算用 / 原点・北上げ済み) ─────────────────
   // r015: 出力ファイル名を VoldiaGLB_yymmdd_hhmm.glb に変更(旧 Test3D_origin.glb)。成功=true / 失敗=false
   // r016: 三角形の向きを「上向き(真上から見て反時計回り=表)」にそろえてから書き出す。
@@ -410,7 +406,7 @@
       positions: m.positions,
       indices: up.indices,
       name: 'LandLogic_Test'
-    }], { baseColor: _LL_GLB_COLOR });
+    }]);
     const fname = 'VoldiaGLB_' + _llTs() + '.glb';
     _llDownload(new Blob([glbBytes], {type:'model/gltf-binary'}), fname);
     console.log('[LAND-LOGIC] ' + fname + ' をダウンロードしました');
