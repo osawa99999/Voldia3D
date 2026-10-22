@@ -1,5 +1,5 @@
 // ============================================================
-// 現行バージョン: r048 (41回目: encodeMultiGLBに材質色の指定opts.baseColorを追加(省略時は従来色)。土量計算のGLB出力だけ濃いグレーにするため)。r047 (41回目: ①ファイル名の日付を yymmdd_hhmm に統一(CSV・GLB・データ出力ZIP。名前を先頭・日付を後ろに) ②配置モードのiframe参照を voldia_placement_v0080.html に変更)。 r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r048 (41回目: GLBの材質色を濃いグレーに変更(全GLB出力共通。encodeMultiGLB内のGLB_BASE_COLOR)。r047 (41回目: ①ファイル名の日付を yymmdd_hhmm に統一(CSV・GLB・データ出力ZIP。名前を先頭・日付を後ろに) ②配置モードのiframe参照を voldia_placement_v0080.html に変更)。 r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -391,7 +391,7 @@ function exportDXF3D(){
 }
 
 // GLB（ポリゴン実形状フラスタム）
-function encodeMultiGLB(meshes, opts){ // r048(41回目): opts.baseColor=[r,g,b,a](glTFのbaseColorFactor=リニア値)で材質色を変えられる。省略時は従来の VOLDIA_Gray のまま
+function encodeMultiGLB(meshes){ // r048(41回目): 材質色を濃いグレーに変更(全GLB出力に共通: 通常計算/土量計算/データ出力ZIP)。下の GLB_BASE_COLOR 参照
   const enc=new TextEncoder();
   let binOffset=0;
   const bufViews=[],accessors=[],gltfMeshes=[],nodes=[],binParts=[];
@@ -435,7 +435,10 @@ function encodeMultiGLB(meshes, opts){ // r048(41回目): opts.baseColor=[r,g,b,
   });
   // r022(追5): マテリアル未指定だとビューア側の既定色（多くは白系）で表示され
   // 見えにくいという指摘への対応。濃い目のグレーのPBRマテリアルを付与する。
-  const materials=[{name:'VOLDIA_Gray',pbrMetallicRoughness:{baseColorFactor:(opts&&opts.baseColor)||[0.32,0.33,0.36,1.0],metallicFactor:0.05,roughnessFactor:0.85}}];
+  // r048: 材質色=濃いグレー。glTFのbaseColorFactorはリニア値で、従来の(0.32,0.33,0.36)は見た目が約#999の明るいグレーのため、
+  //   PowerPointで照明が当たると白っぽく、紙に印刷すると見にくかった(マスター指摘)。見た目で約#464646。濃く/薄くしたい時はこの3つの数値だけ変える(0に近いほど黒)。
+  const GLB_BASE_COLOR=[0.06,0.06,0.065,1.0];
+  const materials=[{name:'VOLDIA_Gray',pbrMetallicRoughness:{baseColorFactor:GLB_BASE_COLOR,metallicFactor:0.05,roughnessFactor:0.85}}];
   const json={asset:{version:'2.0',generator:'VOLDIAM v0.2.0'},scene:0,scenes:[{name:'VOLDIAM_Scene',nodes:nodes.map((_,i)=>i)}],nodes,meshes:gltfMeshes,materials,accessors,bufferViews:bufViews,buffers:[{byteLength:binOffset}]};
   const jb=enc.encode(JSON.stringify(json)),jp=Math.ceil(jb.length/4)*4,bp=Math.ceil(binOffset/4)*4;
   const tl=12+8+jp+8+bp,buf=new ArrayBuffer(tl),dv=new DataView(buf);let off=0;
