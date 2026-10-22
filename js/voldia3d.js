@@ -3441,6 +3441,28 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   navyEdgesThick.renderOrder = 1;
   edgeGroup.add(navyEdgesThick);
   _edgeMaterials = [_edgeMat, _edgeMat2]; // r038: 透過スライダー連動用に参照保持
+  // r117(41回目・マスター指摘): 既存躯体(グレーの箱)にもエッジ線を付ける。従来は掘削側(navyEdges)にしか線が無く、
+  //   3Dの透過を上げると既存躯体だけ輪郭が消えて見えなくなっていた。掘削側と同じ線マテリアル(_edgeMat/_edgeMat2)を共有するので、
+  //   透過スライダーによる線の明るさ・濃さの連動も同じになる。既存躯体メッシュの子にするので、表示専用の20mm持ち上げもそのまま効く。
+  if(existingStructMesh){
+    try {
+      const _esEdgeGeo = computeEdgesGeometrySafeGuarded(existingStructMesh.geometry, 20, 30000);
+      if(_esEdgeGeo && _esEdgeGeo.attributes.position && _esEdgeGeo.attributes.position.count > 0){
+        const _esEdges = new THREE.LineSegments(_esEdgeGeo, _edgeMat);
+        _esEdges.renderOrder = 2;
+        existingStructMesh.add(_esEdges);
+        // 擬似太線(掘削側と同じ作り: 重心基準でごく僅かに拡大した複製)
+        const _esBox = new THREE.Box3().setFromBufferAttribute(_esEdgeGeo.attributes.position);
+        const _esCenter = new THREE.Vector3(); _esBox.getCenter(_esCenter);
+        const _esThickGeo = _esEdgeGeo.clone(); _esThickGeo.translate(-_esCenter.x, -_esCenter.y, -_esCenter.z);
+        const _esEdgesThick = new THREE.LineSegments(_esThickGeo, _edgeMat2);
+        _esEdgesThick.position.copy(_esCenter); _esEdgesThick.scale.set(1.0015, 1.0015, 1.0015); _esEdgesThick.renderOrder = 1;
+        existingStructMesh.add(_esEdgesThick);
+      }
+    } catch(e) {
+      console.warn('[既存躯体エッジ] 生成に失敗したため、線なしで続行します:', e);
+    }
+  }
   updMeshOpacity(document.getElementById('mesh-opacity')?.value||'72'); // 初期表示時点の透過値でエッジ輝度も同期
 
   console.log('[CP-17] group構築・シーン追加直前');
@@ -4226,7 +4248,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r116(base:VoldiaM r069)"; // r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r117(base:VoldiaM r069)"; // r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -4611,6 +4633,69 @@ function _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC)
   }
   return { positions: new Float32Array(positions), uv: new Float32Array(uvs) };
 }
+// r117(41回目): 山留ハッチ(_buildYamadomeOverlayGeomData が作る辺ごとの台形パネル)を、掘削形状が山留面に接している区間だけに絞る。
+// 接している=最終メッシュ(山留のプリズムでカット済み)の三角形のうち、3頂点とも「山留の辺kの傾斜面」の上にあるもの。
+//   傾斜面の位置: 辺から外向きに tan(バッチ角)×(高さ-最深部) だけ離れた面(プリズムと同じ式)。許容は max(4mm, 量子化幅×2.5)。
+// その三角形の、辺に沿った範囲[s0,s1]を集めて(2cm以内の隙間はつなぐ)、その区間だけパネルを作り直す(位置・UVとも線形補間)。
+// 戻り値: 新しい{positions,uv} / 接する所が1つも見つからない・形が想定と違う時はnull(=呼び出し側は従来どおり全周表示)。
+function _clipYamadomeOverlayToContact(ov, ydMm, pos, idxList, realYBot, realYTop, BATTER_DEG, SC, quantStep){
+  const n = ydMm.length;
+  if(!ov || !ov.positions || !ov.uv || ov.positions.length !== n*18 || ov.uv.length !== n*12) return null; // 1辺=2三角形(18+12個)の前提
+  const tanB = Math.tan(BATTER_DEG*Math.PI/180);
+  const hTop = Math.max(0, realYTop - realYBot);
+  const tol = Math.max(0.004, quantStep*2.5);
+  const pts = ydMm.map(p => ({x:p.x*SC, z:p.y*SC}));
+  let area2 = 0;
+  for(let i=0;i<n;i++){ const a=pts[i], b=pts[(i+1)%n]; area2 += a.x*b.z - b.x*a.z; }
+  const sgn = area2 > 0 ? 1 : -1; // 外向き法線の向き(反時計回りなら(dz,-dx))
+  const edges = pts.map((a,i) => {
+    const b = pts[(i+1)%n]; const dx=b.x-a.x, dz=b.z-a.z; const len=Math.hypot(dx,dz)||1e-9;
+    const ux=dx/len, uz=dz/len;
+    return {a, len, ux, uz, nx: sgn*uz, nz: -sgn*ux, iv: []};
+  });
+  const yLo = realYBot - tol, yHi = realYTop + tol;
+  idxList.forEach(idx => {
+    for(let t=0;t+2<idx.length;t+=3){
+      const i0=idx[t]*3, i1=idx[t+1]*3, i2=idx[t+2]*3;
+      const y0=pos[i0+1], y1=pos[i1+1], y2=pos[i2+1];
+      if(y0<yLo||y1<yLo||y2<yLo||y0>yHi||y1>yHi||y2>yHi) continue;
+      for(let k=0;k<n;k++){
+        const e = edges[k]; let ok = true, smin = Infinity, smax = -Infinity;
+        for(let q=0;q<3 && ok;q++){
+          const o = q===0?i0:(q===1?i1:i2);
+          const x=pos[o], y=pos[o+1], z=pos[o+2];
+          const rx=x-e.a.x, rz=z-e.a.z;
+          const dist = rx*e.nx + rz*e.nz;
+          const expd = tanB * Math.min(hTop, Math.max(0, y - realYBot));
+          const s = rx*e.ux + rz*e.uz;
+          if(Math.abs(dist-expd) > tol || s < -0.5 || s > e.len + 0.5){ ok = false; break; }
+          if(s<smin) smin=s; if(s>smax) smax=s;
+        }
+        if(ok){ const s0=Math.max(0,smin), s1=Math.min(e.len,smax); if(s1 - s0 > 0.0005) e.iv.push([s0,s1]); }
+      }
+    }
+  });
+  const outP = [], outU = [];
+  const lerp = (p,q,t) => p.map((v,k) => v + (q[k]-v)*t);
+  for(let i=0;i<n;i++){
+    const e = edges[i]; if(!e.iv.length) continue;
+    e.iv.sort((p,q) => p[0]-q[0]);
+    const merged = [e.iv[0].slice()];
+    for(let j=1;j<e.iv.length;j++){ const last=merged[merged.length-1]; if(e.iv[j][0] <= last[1] + 0.02){ if(e.iv[j][1]>last[1]) last[1]=e.iv[j][1]; } else merged.push(e.iv[j].slice()); }
+    const o=i*18, u=i*12, P=k=>[ov.positions[o+k*3],ov.positions[o+k*3+1],ov.positions[o+k*3+2]], U=k=>[ov.uv[u+k*2],ov.uv[u+k*2+1]];
+    const aBot=P(0), bBot=P(1), bTop=P(2), aTop=P(5);      // 1パネル=[aBot,bBot,bTop],[aBot,bTop,aTop]
+    const uaBot=U(0), ubBot=U(1), ubTop=U(2), uaTop=U(5);
+    merged.forEach(([s0,s1]) => {
+      const t0=s0/e.len, t1=s1/e.len;
+      const A0=lerp(aBot,bBot,t0), B0=lerp(aBot,bBot,t1), B1=lerp(aTop,bTop,t1), A1=lerp(aTop,bTop,t0);
+      const uA0=lerp(uaBot,ubBot,t0), uB0=lerp(uaBot,ubBot,t1), uB1=lerp(uaTop,ubTop,t1), uA1=lerp(uaTop,ubTop,t0);
+      outP.push(...A0,...B0,...B1,  ...A0,...B1,...A1);
+      outU.push(...uA0,...uB0,...uB1,  ...uA0,...uB1,...uA1);
+    });
+  }
+  if(!outP.length) return null;
+  return { positions: new Float32Array(outP), uv: new Float32Array(outU) };
+}
 // ============================================================
 // r105(36回目): 山留ラインと紫オブジェクトの辺が重なる所は「山留面優先、紫の壁は無し」にする(マスター方針)。
 // 症状: 山留の壁(1°のバッチ角が付いた微傾斜)と紫の壁(微テーパー)が、同じ場所に別々の壁として2枚できる。
@@ -4801,6 +4886,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   // やめ、本体側のこの実寸値(realYTop/realYBot/BATTER_DEG)をそのまま
   // postMessageで送って使う。そのため同様に関数トップレベルで保持しておく。
   let _ydRealYTop = null, _ydRealYBot = null, _ydBatterDegForMsg = null;
+  let _ydMmForClip = null; // r117(41回目): 山留ハッチを「掘削が山留面に接する区間」だけに絞る処理(戻り値の直前)で使う山留ポリゴン(mm)
 
   // v0.0016踏襲: 量子化精度をグローバル変数で制御（UIから変更可能）
   const quantFactor = window._vertexQuantMm > 0
@@ -5040,6 +5126,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           // 一切依存しない)。
           _ydOverlayData = _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC);
           _ydRealYTop = realYTop; _ydRealYBot = realYBot; _ydBatterDegForMsg = BATTER_DEG;
+          _ydMmForClip = ydMm;
 
           function _mkRingManifold(topRing, yT, botRing, yB){
             const m = _buildRingLoftMesh(topRing, yT, botRing, yB);
@@ -5353,11 +5440,32 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   }
 
 
+  // r117(41回目・マスター要望): 山留ハッチを、掘削形状が山留面に実際に接している区間だけに絞る(表示専用)。
+  // 従来は山留ラインの全周に、最深部〜GLの全高で一律に貼っていたため、オブジェクトが接していない区間(離れた掘削の間など)にも
+  // ハッチが宙に浮いて出ていた。山留でカットされた最終メッシュのうち、山留面(バッチ角つきの傾斜面)の上に乗っている三角形を探し、
+  // その範囲(山留の辺に沿った区間)にだけハッチを残す。
+  // 安全策: ①形状・体積・GLB・LANDXMLには一切触れない(ハッチ表示用データの差し替えだけ) ②紫壁ハッチの重なり除外は、上でクリップ前のデータで済ませてある
+  //         ③接している所が1つも見つからない/例外が出た時は、従来どおり全周に貼る ④配置モードの山留は別の作りなので無影響
+  let _ydOverlayShown = _ydOverlayData;
+  if(_ydOverlayData && _ydMmForClip && _ydRealYBot !== null && _ydRealYTop !== null){
+    try {
+      const _clipped = _clipYamadomeOverlayToContact(_ydOverlayData, _ydMmForClip, positions, [cyanIdx, redIdx], _ydRealYBot, _ydRealYTop, _ydBatterDegForMsg, SC, 1 / quantFactor);
+      if(_clipped){
+        console.log(`[YAMADOME-CLIP] 山留ハッチを接している区間だけに絞りました: パネル ${_ydOverlayData.positions.length/9}→${_clipped.positions.length/9} 三角形`);
+        _ydOverlayShown = _clipped;
+      } else {
+        console.log('[YAMADOME-CLIP] 山留面に接する区間を特定できなかったため、従来どおり全周に表示します');
+      }
+    } catch(e) {
+      console.warn('[YAMADOME-CLIP] 絞り込みに失敗したため、従来どおり全周に表示します:', e);
+    }
+  }
+
   const _ret = {
     positions: new Float32Array(positions),
     cyanIndices: new Uint32Array(cyanIdx),
     redIndices:  new Uint32Array(redIdx),
-    yamadomeOverlay: _ydOverlayData, // r057: 断面ハッチ用の独立オーバーレイ(位置+UV)。無ければnull
+    yamadomeOverlay: _ydOverlayShown, // r057: 断面ハッチ用の独立オーバーレイ(位置+UV)。無ければnull
     purpleWallOverlay: _purpleWallOverlay, // 6D: 紫オブジェクトの垂直壁ハッチオーバーレイ。無ければnull
     // 追加2(2026-08-24 引継ぎ18回目): 配置モードへ山留の実寸を送るための値。
     // yamadome無しなら全てnull。
