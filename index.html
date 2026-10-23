@@ -538,11 +538,15 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0144</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0145</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
     <div id="list-area">
+      <!-- v0145(41回目・マスター指示): オブジェクト名の上に小さな解説 -->
+      <div id="list-hint" style="font-size:.66em;color:#7f8c99;line-height:1.5;white-space:pre-line;margin:2px 4px 6px;">作図エリアでオブジェクトが重複して
+選択できない場合はオブジェクト名を
+クリックする事で選択できます</div>
       <ul id="sh-list"></ul>
     </div>
     <div id="tot-wrap">
@@ -799,7 +803,7 @@ D&D or クリックでロードしてください</p>
 <!-- r025(AreCal移植): 測点 上下左右+距離入力ダイアログ -->
 <div id="survey-dialog" class="modal">
   <div class="modal-c" style="width:290px;">
-    <h4 style="color:#00eeff;margin:0 0 12px;font-size:.95em;">📍 測点を移動（基点から）</h4>
+    <h4 id="sv-title" style="color:#00eeff;margin:0 0 12px;font-size:.95em;">📍 クリック位置から測点を設置</h4>
     <!-- B4(2026-08-25引継ぎ20回目マスター指示): 上下左右のボタンを「上/左右/下」の
          十字配置・センタリングに変更(3行×グリッド、上下は横幅いっぱいの中央1列)。 -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
@@ -831,8 +835,13 @@ D&D or クリックでロードしてください</p>
     </div>
     <div class="row" style="justify-content:center;gap:8px;">
       <button id="sv-cancel" style="flex:1;background:#333;">キャンセル</button>
-      <button id="sv-ok" style="flex:1;background:rgba(0,150,200,.4);border-color:#00ccff;color:#00eeff;">設置</button>
+      <button id="sv-ok" style="flex:1;background:rgba(0,150,200,.4);border-color:#00ccff;color:#00eeff;" disabled>設置</button>
     </div>
+    <!-- v0145(41回目・マスター指示): 新規設置・移動の両方に同じ解説を表示 -->
+    <div style="margin-top:10px;font-size:.7em;color:#8fa3b5;line-height:1.6;white-space:pre-line;text-align:center;">測点は一度の動作でXかYの１方向にしか
+移動できないので、再度動かす場合は
+設置後の測点を「左クリック」してください。
+また測点は右クリックで削除できます</div>
   </div>
 </div>
 
@@ -1113,6 +1122,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0145(41回目): ①測点ダイアログのタイトル(#sv-title)出し分け・解説文・設置ボタンの初期グレーアウト ②左UIのオブジェクト一覧の上に解説(#list-hint)。ロジックは voldia_main.js r053。 -->
 <!-- v0144(41回目): 3Dスクショボタンで背景色(黒/白/透明)の選択ダイアログ(#ss-overlay)を出すようにした(voldia3d.js r116)。 -->
 <!-- v0143(41回目): ヘルプ吹き出し(#gm-tip)に white-space:pre-line を追加(ヘルプ文中の\nで改行できるように。文言の改行位置はvoldia_main.js r052)。 -->
 <!-- v0142(41回目): 出力ダイアログ(#lx-overlay)とヘルプ吹き出し(#gm-tip)が3D結果画面で見えなかった不具合を修正。

@@ -1,6 +1,18 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r118】(42回目。「やばい.vold」3D破綻=偽の床の根本修正。対象: 深さ方向のloft(buildCappedFrustumMesh。buildManifoldUnionGeomとbuildSimpleExtrudeGeomの両方)のみ。体積計算本体・Land Logic・UI無改造)
+//  根本原因: 深さの層ごとに輪郭(_sanitizeOffsetRing=ClipperLibの自己Union)を取り、隣り合う2リングを『頂点番号の1対1』でloftしていたが、
+//   (1)法面で広げた輪郭の辺が途中で長さゼロに潰れて頂点数が変わる層は、_resampleRingByArcLengthで弧長等分に取り直していた=頂点の対応が崩れ、
+//      薄い層にねじれた水平に近い面(=偽の床)ができた(1/100で y=-0.9〜-0.788 の4段)。
+//   (2)ClipperLibは輪郭の開始頂点を保証しない。ピンチ判定の層だけ開始頂点が1つずれ、頂点の対応が崩れて偽の床になった(1/85で実測)。
+//  修正: (a)_loftLayerTopo=頂点数が変わる深さを二分探索で特定→その深さで層を割り、頂点が少ない側のリングを境界にして、
+//        多い側の層だけ『多対1』の対応(潰れる辺=三角形1枚)で張る(_buildRingLoftMeshMapped)。固定刻みの細分化はしない(地雷25b)。
+//        対応が作れない(頂点が同位置に重ならない=小さな輪の残る/消える、等)時はnullを返し、従来のリサンプルにフォールバック(console: [TOPO-LOFT])。
+//        (b)_alignRingTo=同数の隣接リングは、開始頂点・向きを前のリングに合わせる(ずれが無ければ無変更=通常ケースの出力は従来と同一)。
+//  検証(Node+manifold-3d 3.5.1): やばい.vold 縮尺1/70・1/85・1/100・1/120・1/150で水平面が底のみ・体積が数値積分と0.02%以内。1/194は従来と同一。
+//   ランダム多角形500件: 出力が旧と完全一致347/改善131/悪化は両方破綻のままの微差2件のみ。破綻(偽の床>0.1m²or体積誤差>0.5%)は190→110。
+//  既知の限界: 1/60の層0→1(渦の消滅+頂点の一斉消滅)など、対応が作れない形はフォールバック(従来と同じ挙動)。マスターの実機で最終判定。
 // 【r113】(40回目。見た目のみ・計算ロジック無改造) 3D結果画面の右UI整理に伴い、メッシュ/影/色の3ボタンの表示を
 //  「文字の差し替え(▦ メッシュ ON/OFF 等)+透明度」から「ボタン色(.on クラス)」に変更。ボタン本体はHTML(Voldia_v0134)に常設
 //  (影ボタンはr101以来のJS動的生成をやめた。ensureShadowButtonは既存ボタンがあれば何もしないので、中の複製処理は到達しなくなった=次回の整理候補)。
@@ -326,6 +338,138 @@ function _resampleRingByArcLength(ring, n){
     out.push({ x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t });
   }
   return out;
+}
+
+// ────────────────────────────────────────────────────────────────
+// r118(42回目): 深さ方向で輪郭の頂点数が変わる層(法面で広げた輪郭の辺が途中で長さゼロに潰れる等)を、
+// 弧長リサンプルではなく「頂点の対応(どの頂点がどの頂点に潰れるか)」を保ったまま繋ぐ。
+// 旧: 頂点数が違う2リング→_resampleRingByArcLengthで等分点に取り直す→頂点の対応が崩れ、
+//     薄い層にねじれた水平に近い面(『やばい.vold』の偽の床)ができていた。
+// 新: 頂点数が変わる深さ(zb)を二分探索で特定し、その深さで層を2つに割る。
+//     頂点数が少ない側のリングを境界にして、多い側の層だけ『多対1』の対応(潰れる辺=三角形1枚)で張る。
+//     どの層も頂点の対応は正しい(消える辺が長さゼロに潰れる所で接続)。固定刻みの細分化はしない。
+//     対応が作れない/想定外の時はnullを返し、呼び出し側が従来(リサンプル)にフォールバックする。
+// buildManifoldUnionGeomとbuildSimpleExtrudeGeomの両方から使う(地雷25a: 両方に同等に適用)。
+// ────────────────────────────────────────────────────────────────
+function _ringSignedArea2(r){
+  let a = 0;
+  for(let i=0;i<r.length;i++){ const p=r[i], q=r[(i+1)%r.length]; a += p.x*q.y - q.x*p.y; }
+  return a;
+}
+// 同じ頂点数の2リングについて、ringをrefに最も近い巡回シフトに回す(向きが逆なら反転してから)。
+// 理由(42回目): _sanitizeOffsetRing(ClipperLib)は輪郭の開始頂点・向きを保証しない。隣り合う層で開始頂点がずれると
+//   頂点の対応が崩れ、側面がねじれて偽の床になる(『やばい.vold』1/85で実測: 層9→10で1つずれ=平均1780mmずれ)。
+//   ずれが無い通常ケースはringをそのまま返す(出力は従来と同一)。
+function _alignRingTo(ring, ref){
+  const n = ring.length;
+  if(n !== ref.length || n === 0) return ring;
+  if(_ringSignedArea2(ring) * _ringSignedArea2(ref) < 0) ring = ring.slice().reverse();
+  let best = 0, bc = Infinity;
+  for(let s=0;s<n;s++){
+    let c = 0;
+    for(let i=0;i<n;i++){ const q = ring[(i+s)%n]; c += Math.hypot(q.x-ref[i].x, q.y-ref[i].y); }
+    if(c < bc - 1e-9){ bc = c; best = s; }
+  }
+  if(best === 0) return ring;
+  const out = [];
+  for(let i=0;i<n;i++) out.push(ring[(i+best)%n]);
+  return out;
+}
+// big(頂点が多い)の各頂点 → small(少ない)の最も近い頂点。巡回で単調(0または+1ずつ)かつ全射のときだけ返す。
+// さらに、全ての頂点が「ほぼ同じ位置(tolMm以内)」にある時だけ有効とする。
+//   理由: 辺が長さゼロに潰れる(=頂点が重なる)変化は、前後のリングで頂点が同位置に重なる。
+//   一方、_sanitizeOffsetRingの判定しきい値(面積比1e-4・ピンチ20mm)をまたいで頂点数が変わる場合は、
+//   前後のリングが別の形(小さな輪が残る/消える)で、対応は作れない=nullにして従来のリサンプルへ戻す
+//   (無理に繋ぐとMeshがNot manifoldになる。ランダム形状の回帰テストで実測)。
+function _mapBigToSmall(big, small, tolMm){
+  const n = big.length, m = small.length;
+  if(m < 3 || n <= m) return null;
+  const tol = (tolMm === undefined) ? 0.5 : tolMm;
+  const f = new Array(n);
+  for(let i=0;i<n;i++){
+    let bj = 0, bd = Infinity;
+    for(let j=0;j<m;j++){
+      const d = Math.hypot(big[i].x-small[j].x, big[i].y-small[j].y);
+      if(d < bd){ bd = d; bj = j; }
+    }
+    if(bd > tol) return null;
+    f[i] = bj;
+  }
+  let ones = 0;
+  for(let i=0;i<n;i++){
+    const d = ((f[(i+1)%n] - f[i]) % m + m) % m;
+    if(d === 1) ones++;
+    else if(d !== 0) return null;
+  }
+  if(ones !== m) return null;
+  return f;
+}
+function _buildRingLoftMeshMapped(topRing, yTop, botRing, yBot, bigIsTop, f, SC){
+  const n = topRing.length, m = botRing.length;
+  const verts = [], tris = [];
+  topRing.forEach(p => verts.push(p.x * SC, yTop, p.y * SC));
+  botRing.forEach(p => verts.push(p.x * SC, yBot, p.y * SC));
+  {
+    const flat = []; topRing.forEach(p => flat.push(p.x, p.y));
+    const c = earcut(flat, null, 2);
+    for(let i=0;i<c.length;i+=3) tris.push(c[i], c[i+1], c[i+2]);
+  }
+  {
+    const flat = []; botRing.forEach(p => flat.push(p.x, p.y));
+    const c = earcut(flat, null, 2);
+    for(let i=0;i<c.length;i+=3) tris.push(n+c[i], n+c[i+2], n+c[i+1]);
+  }
+  if(bigIsTop){ // f: topの頂点番号 → botの頂点番号
+    for(let i=0;i<n;i++){
+      const i2=(i+1)%n, j=f[i], j2=f[i2];
+      tris.push(i, n+j, i2);
+      if(j !== j2) tris.push(i2, n+j, n+j2);
+    }
+  } else {      // f: botの頂点番号 → topの頂点番号
+    for(let i=0;i<m;i++){
+      const i2=(i+1)%m, j=f[i], j2=f[i2];
+      if(j !== j2){ tris.push(j, n+i, j2); tris.push(j2, n+i, n+i2); }
+      else tris.push(j, n+i, n+i2);
+    }
+  }
+  return { vertProperties: new Float32Array(verts), triVerts: new Uint32Array(tris), numProp: 3 };
+}
+// ringAt(zMm)=その深さのサニタイズ済み輪郭。plainLoft=同数リング用の従来loft(各関数内の_buildRingLoftMesh)。
+// 戻り値: メッシュ配列 / 失敗時null(→呼び出し側が従来のリサンプルにフォールバック)
+function _loftLayerTopo(ringAt, zA, ringA, zB, ringB, SC, plainLoft, depth){
+  const nA = ringA.length, nB = ringB.length;
+  const Y = z => -z * SC;
+  if(nA === nB) return [plainLoft(ringA, Y(zA), ringB, Y(zB))];
+  if(depth > 6) return null;
+  let lo = zA, hi = zB;
+  for(let it=0; it<60 && Math.abs(hi-lo) > 1e-5; it++){
+    const mid = (lo+hi)/2;
+    if(ringAt(mid).length === nA) lo = mid; else hi = mid;
+  }
+  let ringLo = ringAt(lo), ringHi = ringAt(hi);
+  if(!(ringLo.length === nA && ringHi.length === nB)){
+    // 同じ層の中で頂点数が複数回変わる(または3種類以上)→中点で2分割して、それぞれ再帰
+    const zM = (zA+zB)/2;
+    let ringM = ringAt(zM);
+    // 中点のリングも、隣のリング(頂点数が同じ方)に開始頂点・向きを合わせる(Clipperの出力順のずれ対策)
+    if(ringM.length === nA) ringM = _alignRingTo(ringM, ringA);
+    else if(ringM.length === nB) ringM = _alignRingTo(ringM, ringB);
+    const a = _loftLayerTopo(ringAt, zA, ringA, zM, ringM, SC, plainLoft, depth+1); if(!a) return null;
+    const b = _loftLayerTopo(ringAt, zM, ringM, zB, ringB, SC, plainLoft, depth+1); if(!b) return null;
+    return a.concat(b);
+  }
+  ringLo = _alignRingTo(ringLo, ringA);
+  ringHi = _alignRingTo(ringHi, ringB);
+  const zb = (lo+hi)/2;
+  if(nA < nB){ // 下へ行くと頂点が増える。境界=少ない側(ringLo)
+    const f = _mapBigToSmall(ringHi, ringLo); if(!f) return null;
+    return [ plainLoft(ringA, Y(zA), ringLo, Y(zb)),
+             _buildRingLoftMeshMapped(ringLo, Y(zb), ringB, Y(zB), false, f, SC) ];
+  } else {     // 下へ行くと頂点が減る。境界=少ない側(ringHi)
+    const f = _mapBigToSmall(ringLo, ringHi); if(!f) return null;
+    return [ _buildRingLoftMeshMapped(ringA, Y(zA), ringHi, Y(zb), true, f, SC),
+             plainLoft(ringHi, Y(zb), ringB, Y(zB)) ];
+  }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -4248,7 +4392,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r117(base:VoldiaM r069)"; // r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r118(base:VoldiaM r069)"; // r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -4993,6 +5137,11 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       // 頂点数が違う場合は_resampleRingByArcLengthで強制的に揃えてから渡す。
       let topR = topRing0, botR = botRing0;
       if(topR.length !== botR.length){
+        // r118(42回目): 頂点数が違う時も、頂点の対応を保って繋ぐ(失敗時のみ従来のリサンプル)。
+        const _topZ = -(f.tl||0), _botZ = f.D - (f.tl||0);
+        const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, _topZ, topR, _botZ, botR, SC, _buildRingLoftMesh, 0);
+        if(_ms) return _ms;
+        console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします');
         const M = Math.max(topR.length, botR.length, 8);
         topR = _resampleRingByArcLength(topR, M);
         botR = _resampleRingByArcLength(botR, M);
@@ -5010,16 +5159,24 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       const s = _sanitizeOffsetRing(raw);
       sliceRings.push(s.pts);
     }
+    // r118(42回目): 同じ頂点数で並ぶ隣のリングは、開始頂点・向きを前のリングに合わせる(Clipperの出力順のずれ対策)。
+    for(let k=1;k<sliceRings.length;k++){
+      if(sliceRings[k].length === sliceRings[k-1].length) sliceRings[k] = _alignRingTo(sliceRings[k], sliceRings[k-1]);
+    }
     const meshes = [];
     for(let k=0;k<_SLICE_N;k++){
       let ringA = sliceRings[k], ringB = sliceRings[k+1];
+      const zA = topZmm + (botZmm - topZmm) * k / _SLICE_N;
+      const zB = topZmm + (botZmm - topZmm) * (k+1) / _SLICE_N;
       if(ringA.length !== ringB.length){
+        // r118(42回目): 頂点数が変わる深さで層を割り、頂点の対応を保ってloft(旧: 弧長リサンプルで対応が崩れ偽の床)。
+        const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, zA, ringA, zB, ringB, SC, _buildRingLoftMesh, 0);
+        if(_ms){ _ms.forEach(m => meshes.push(m)); continue; }
+        console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします(層' + k + ')');
         const M = Math.max(ringA.length, ringB.length, 8);
         ringA = _resampleRingByArcLength(ringA, M);
         ringB = _resampleRingByArcLength(ringB, M);
       }
-      const zA = topZmm + (botZmm - topZmm) * k / _SLICE_N;
-      const zB = topZmm + (botZmm - topZmm) * (k+1) / _SLICE_N;
       meshes.push(_buildRingLoftMesh(ringA, -zA*SC, ringB, -zB*SC));
     }
     return meshes;
@@ -5610,6 +5767,11 @@ async function buildSimpleExtrudeGeom(frustums){
       // 頂点数が違う場合は_resampleRingByArcLengthで強制的に揃えてから渡す。
       let topR = topRing0, botR = botRing0;
       if(topR.length !== botR.length){
+        // r118(42回目): 頂点数が違う時も、頂点の対応を保って繋ぐ(失敗時のみ従来のリサンプル)。
+        const _topZ = -(f.tl||0), _botZ = f.D - (f.tl||0);
+        const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, _topZ, topR, _botZ, botR, SC, _buildRingLoftMesh, 0);
+        if(_ms) return _ms;
+        console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします');
         const M = Math.max(topR.length, botR.length, 8);
         topR = _resampleRingByArcLength(topR, M);
         botR = _resampleRingByArcLength(botR, M);
@@ -5627,16 +5789,24 @@ async function buildSimpleExtrudeGeom(frustums){
       const s = _sanitizeOffsetRing(raw);
       sliceRings.push(s.pts);
     }
+    // r118(42回目): 同じ頂点数で並ぶ隣のリングは、開始頂点・向きを前のリングに合わせる(Clipperの出力順のずれ対策)。
+    for(let k=1;k<sliceRings.length;k++){
+      if(sliceRings[k].length === sliceRings[k-1].length) sliceRings[k] = _alignRingTo(sliceRings[k], sliceRings[k-1]);
+    }
     const meshes = [];
     for(let k=0;k<_SLICE_N;k++){
       let ringA = sliceRings[k], ringB = sliceRings[k+1];
+      const zA = topZmm + (botZmm - topZmm) * k / _SLICE_N;
+      const zB = topZmm + (botZmm - topZmm) * (k+1) / _SLICE_N;
       if(ringA.length !== ringB.length){
+        // r118(42回目): 頂点数が変わる深さで層を割り、頂点の対応を保ってloft(旧: 弧長リサンプルで対応が崩れ偽の床)。
+        const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, zA, ringA, zB, ringB, SC, _buildRingLoftMesh, 0);
+        if(_ms){ _ms.forEach(m => meshes.push(m)); continue; }
+        console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします(層' + k + ')');
         const M = Math.max(ringA.length, ringB.length, 8);
         ringA = _resampleRingByArcLength(ringA, M);
         ringB = _resampleRingByArcLength(ringB, M);
       }
-      const zA = topZmm + (botZmm - topZmm) * k / _SLICE_N;
-      const zB = topZmm + (botZmm - topZmm) * (k+1) / _SLICE_N;
       meshes.push(_buildRingLoftMesh(ringA, -zA*SC, ringB, -zB*SC));
     }
     return meshes;

@@ -1,5 +1,5 @@
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r052(41回目): ヘルプ文(_GM_TIPS)6件の改行位置をマスター指定に変更 / r051(41回目): ①オブジェクトスナップの優先度を「交点>端点>中点>線上」に(従来は最短距離優先で、線上の交点が選ばれにくかった) ②3D結果画面にGLB出力/LANDXML出力ボタン・出力ダイアログ・各ボタンのヘルプ文(voldiaConfirmGLBは撤去) / r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r053(41回目): ①測点ダイアログ(タイトル出し分け・設置ボタンのグレーアウト) ②測点/グレーオブジェクトのマウスオーバー表示 ③グレー設定トーストの文言 / r052(41回目): ヘルプ文(_GM_TIPS)6件の改行位置をマスター指定に変更 / r051(41回目): ①オブジェクトスナップの優先度を「交点>端点>中点>線上」に(従来は最短距離優先で、線上の交点が選ばれにくかった) ②3D結果画面にGLB出力/LANDXML出力ボタン・出力ダイアログ・各ボタンのヘルプ文(voldiaConfirmGLBは撤去) / r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -638,8 +638,12 @@ document.addEventListener('DOMContentLoaded',()=>{
     document.getElementById('sv-'+d).addEventListener('click',()=>{
       const map={up:90,down:270,left:180,right:0};svDir=map[d];
       ['up','down','left','right'].forEach(x=>{document.getElementById('sv-'+x).style.background=x===d?'rgba(0,200,255,.3)':'';});
+      updateSurveyOkState(); // r053
     });
   });
+  // r053(41回目・マスター指示): 移動方向が未確定、または移動距離が未入力(0以下含む)の間は「設置」ボタンをグレーアウトして押せなくする。
+  //   方向・距離の両方が入ったら押せる。入力欄の直接入力・テンキー・Cのすべてで更新する。
+  document.getElementById('sv-dist').addEventListener('input',updateSurveyOkState);
   document.getElementById('sv-cancel').addEventListener('click',()=>{
     document.getElementById('survey-dialog').style.display='none';svBase=null;svDir=null;
     if(surveyMode)setSurveyMode(false);
@@ -678,11 +682,13 @@ document.addEventListener('DOMContentLoaded',()=>{
       if(digit==='.' && inp.value.includes('.')) return;
       inp.value = (inp.value||'') + digit;
       inp.focus();
+      updateSurveyOkState(); // r053
     });
   });
   document.getElementById('sv-num-clear').addEventListener('click',()=>{
     document.getElementById('sv-dist').value='';
     document.getElementById('sv-dist').focus();
+    updateSurveyOkState(); // r053
   });
 
   // r060: ノースアロー（方位角ウィジェット）— ドラッグ回転・ダブルクリックで数値入力
@@ -2093,11 +2099,20 @@ function showSnap(snap,cx,cy){
 // 新1(2026-08-28 引継ぎ18回目マスター指示→26回目セッションで紫に移設):
 // 紫(強制垂直)オブジェクトへのマウスオーバー時に「強制垂直オブジェクト」と
 // カーソル付近に表示する
-function showVerticalHoverTip(show,cx,cy){
+// r053(41回目): 紫専用だったカーソル追従ヒントを3種類に拡張。kind='purple'(従来)/'gray'(既存躯体=「既存物扱い」)/'survey'(測点)
+const _HOVER_TIPS={
+  purple:{t:'🟪 強制垂直オブジェクト',bg:'rgba(150,60,220,.95)'},
+  gray:{t:'既存物扱い',bg:'rgba(105,112,124,.95)'},
+  survey:{t:'左クリックで移動\n右クリックで削除',bg:'rgba(0,120,160,.95)'}
+};
+function showVerticalHoverTip(show,cx,cy,kind){
   const el=document.getElementById('vertical-hover-tip');
   if(!el)return;
   if(show&&cx!==undefined){
-    el.textContent='🟪 強制垂直オブジェクト';
+    const cfg=_HOVER_TIPS[kind||'purple']||_HOVER_TIPS.purple;
+    el.textContent=cfg.t;
+    el.style.background=cfg.bg;
+    el.style.whiteSpace='pre'; // 改行(\n)を効かせる
     el.style.display='block';
     el.style.left=(cx+14)+'px';
     el.style.top=(cy-50)+'px'; // snap-indicatorと重ねないよう同位置に統一(排他利用のため衝突なし)
@@ -2399,9 +2414,20 @@ function onMouseMove(e){
   // ツール未使用時、紫(強制垂直)オブジェクト上にカーソルがある場合、その旨を
   // カーソル付近に表示する。drawing中は既存のプレビュー処理と競合しないよう対象外とする。
   if(!drawing){
-    const hoverIdx=hitTestShape(lx,ly);
-    const isVertical = hoverIdx>=0 && shapes[hoverIdx].color==='purple' && shapes[hoverIdx].enabled!==false;
-    showVerticalHoverTip(isVertical,e.clientX,e.clientY);
+    // r053(41回目): 測点の上=「左クリックで移動/右クリックで削除」(測点のクリック移動が効く状態の時だけ) →
+    //   グレー(既存躯体)の上=「既存物扱い」 → 紫の上=「強制垂直オブジェクト」の優先順
+    let _svHover=false;
+    if(!distMode&&!selUnionMode&&!subMode&&!surveyMode&&surveyPts.length>0){
+      _svHover=surveyPts.some(p=>Math.hypot(p.x-lx,p.y-ly)<14/zoom); // クリックで移動ダイアログが開く判定と同じ半径
+    }
+    if(_svHover){
+      showVerticalHoverTip(true,e.clientX,e.clientY,'survey');
+    } else {
+      const hoverIdx=hitTestShape(lx,ly);
+      const _hs=hoverIdx>=0?shapes[hoverIdx]:null;
+      const _kind=(_hs&&_hs.enabled!==false)?(_hs.color==='purple'?'purple':(_hs.color==='gray'?'gray':null)):null;
+      showVerticalHoverTip(!!_kind,e.clientX,e.clientY,_kind||'purple');
+    }
   }
   if(!drawing||!cur)return;
   let mx=lx,my=ly;
@@ -2715,7 +2741,7 @@ function updSidebar(){
       if(sh.color==='purple') toast('🟪 紫色に設定したオブジェクトは、土量計算時に法面角度を無視して"垂直"となります', 3200, 'large');
       // 26回目セッション新規: グレーは「既存躯体」機能(体積・土量計算から除外)の
       // トリガー色として再定義。設定するたびに毎回toastで案内する
-      if(sh.color==='gray') toast('Voldia2Dでグレー色に設定したオブジェクトは、土量計算時に既存躯体として扱われます', 3200, 'graystruct');
+      if(sh.color==='gray') toast('グレー色に設定したオブジェクトは、土量計算時に既存躯体として扱われます', 3200, 'graystruct'); // r053: 先頭の「Voldia2Dで」を削除(マスター指示)
       // r020: 自己交差検出による赤表示はあくまで警告であって、計算に進めない
       // 制約自体は次回計算時に改めて判定される。「間違って土量計算を押して
       // しまい赤くなったが直せない」という詰みを避けるため、手動で色を
@@ -3112,7 +3138,7 @@ function cycleDrawColor(){
   if(currentToolColor==='purple'){
     toast('🟪 紫色に設定したオブジェクトは、土量計算時に法面角度を無視して"垂直"となります', 3200, 'large');
   } else if(currentToolColor==='gray'){
-    toast('Voldia2Dでグレー色に設定したオブジェクトは、土量計算時に既存躯体として扱われます', 3200, 'graystruct');
+    toast('グレー色に設定したオブジェクトは、土量計算時に既存躯体として扱われます', 3200, 'graystruct'); // r053: 先頭の「Voldia2Dで」を削除(マスター指示)
   } else {
     // ボタン自体の色は変えない（ON/OFF状態のみ）
     toast(`🎨 描画色: ${col.label}`);
@@ -3197,12 +3223,26 @@ function setSurveyMode(on){
 
 // r025(AreCal移植): 測点オフセットダイアログを開く。moveIdx指定時は既存測点の移動、
 // 未指定時は新規設置（基点=クリックしたスナップ点）
+// r053: 測点ダイアログの「設置」ボタンの有効/無効。方向が選ばれていて、かつ距離が0より大きい数値の時だけ押せる
+function updateSurveyOkState(){
+  const ok=document.getElementById('sv-ok');
+  if(!ok)return;
+  const dm=parseFloat(document.getElementById('sv-dist').value);
+  const enabled=(svDir!==null&&svDir!==undefined)&&dm>0;
+  ok.disabled=!enabled;
+  ok.style.opacity=enabled?'':'0.38';
+  ok.style.cursor=enabled?'':'not-allowed';
+}
 function openSurveyDialog(basePt, moveIdx){
   svBase={x:basePt.x,y:basePt.y};
   svBase._moveIdx = (moveIdx!=null) ? moveIdx : null;
   svDir=null;
   document.getElementById('sv-dist').value='';
   ['up','down','left','right'].forEach(d=>{document.getElementById('sv-'+d).style.background='';});
+  // r053(41回目・マスター指示): タイトルを新規設置/移動で出し分ける
+  //   新規設置(クリックしたスナップ点が基点)=「クリック位置から測点を設置」 / 既存測点の移動=「測点を移動（現在点から）」
+  document.getElementById('sv-title').textContent = (moveIdx!=null) ? '📍 測点を移動（現在点から）' : '📍 クリック位置から測点を設置';
+  updateSurveyOkState();
   document.getElementById('survey-dialog').style.display='flex';
   setTimeout(()=>document.getElementById('sv-dist').focus(),50);
 }
