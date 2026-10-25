@@ -1,6 +1,28 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r121】(43回目。1/71・1/160〜1/190の法面の横線の根本修正。対象: _buildLayersByBoundariesの吸収処理・_linearPlanarOKのみ)
+//   原因: 上面近くの変化点を吸収する時、変化点の後のリングを上面へ置き直していた→頂点が(深さのずれ×頂点速度)動き線形チェックが誤判定
+//   →薄い層(1/71は上面0.11m)→量子化10mmの丸めで法面が傾き横線。さらに生まれたての短い辺(<0.5mm)の向きが信用できず平面チェックも誤判定していた。
+//   修正: ①吸収は上面/下面の本物のリングを使い変化点の前後は多対1で繋ぐ ②線形チェックは本来の深さ(zAfter/zBefore) ③0.5mm未満の辺は平面チェックを飛ばす
+//   ④吸収距離=_absorbMm()=量子化×30(300mm)。window._eventAbsorbMmで上書き可(検証用)。
+//   ⑤対応が作れない変化点は従来の置き直しになるため、従来の距離(_snap=20mm)までしか吸収しない(300mmまで置き直すと体積が4%ずれた)。
+//   ⑥新: _frustumLayerStable(f) = 法面が安定して作れるかの事前判定(層の計画だけの予行演習)。作れない形(頂点の対応が作れず
+//      従来リサンプル/V1に落ちる形=偽の床・面の爆発・体積ずれが出た形)は、runCalcで既存の自己交差チェックと同じく赤にして中止。
+//      マスター方針(43回目): 変な形状でExcel/PDFが出るくらいなら弾く。ただし出せる形は弾かない(まず安定させ、駄目なものだけ弾く)。
+// 【r120】(42回目。実機GLBで残った「法面の中段の凹凸・横線」の根本修正。対象: buildCappedFrustumMeshの層の組み立てのみ)
+//  原因: 変化点(頂点数が変わる深さ)の隣に薄い層(例:1/100の72mm、1/185の上面から68mm)ができ、頂点量子化(10mm)の丸めが薄い層で相対的に大きく効き、
+//   本来45°の法面が数度傾いて波打つ(Node検証: 量子化1mmだと傾きの乱れが0になる=量子化が原因。床=偽の水平面とは別物)。
+//  修正: _buildLayersByBoundaries=変化点を全部先に求め、「上面〜変化点〜…〜下面」の各区間を1枚のloftにする(変化点の前後で頂点が少ない側を境界のリングにして
+//   多い側は多対1。_buildRingLoftMeshMapped2)。上面/下面から量子化の2倍以内の変化点は、薄い層を作らず吸収。区間が線形/平面から外れる時だけ最もずれたサンプルで割る。
+//   変化点が近接/対応が作れない時はnull→従来方式(_buildLayersAdaptiveV1)にフォールバック。
+//  結果(やばい.vold Node走査): 1/71〜1/169は偽の床なし・体積誤差0.15%以内・傾き乱れなし。1/100は110→60三角形、傾きの最大ずれ0.091→0.007。
+//   1/170〜1/192は上面近傍の薄い層(68mm等)に傾きの小さな乱れが残る(最大数度)。1/70以下は従来どおり(警告で逃げる想定)。
+// 【r119】(42回目。1/193で法面が16本の水平な帯に割れ、PDF/Excelの面分割が異常に細かくなる件の根本修正。対象: buildCappedFrustumMeshの層分けのみ)
+//  原因: 輪郭に『ピンチ(最短ギャップ<20mm)』があるだけで(頂点数は変わらなくても)全体を一律16等分の層に割っていた。1/193は最短ギャップ11.5mmで発動、1/194は発動せず1枚のloft=境目。
+//  修正: _planSliceLayers=頂点数が同じ連続区間は、(1)途中のリングが両端の線形補間と2mm以内 かつ (2)側面が平面(平行な辺同士=ねじれ無し) の限り1枚のloftにまとめる。
+//   頂点数が変わる所・線形/平面から外れる所だけが層の境目(固定刻みではなく変化点で割る)。(2)が無いと辺反転のある形で体積が最大5%減った(ランダム形状の回帰テストで実測)。
+//  結果: やばい.vold 1/193は37三角形(r118: 427、1/194と同じ綺麗な分割)。1/100は110(r118: 436)。体積は数値積分と0.2%以内。
 // 【r118】(42回目。「やばい.vold」3D破綻=偽の床の根本修正。対象: 深さ方向のloft(buildCappedFrustumMesh。buildManifoldUnionGeomとbuildSimpleExtrudeGeomの両方)のみ。体積計算本体・Land Logic・UI無改造)
 //  根本原因: 深さの層ごとに輪郭(_sanitizeOffsetRing=ClipperLibの自己Union)を取り、隣り合う2リングを『頂点番号の1対1』でloftしていたが、
 //   (1)法面で広げた輪郭の辺が途中で長さゼロに潰れて頂点数が変わる層は、_resampleRingByArcLengthで弧長等分に取り直していた=頂点の対応が崩れ、
@@ -470,6 +492,289 @@ function _loftLayerTopo(ringAt, zA, ringA, zB, ringB, SC, plainLoft, depth){
     return [ _buildRingLoftMeshMapped(ringA, Y(zA), ringHi, Y(zb), true, f, SC),
              plainLoft(ringHi, Y(zb), ringB, Y(zB)) ];
   }
+}
+
+// r119(42回目): 深さ方向の層分けを「一律16等分」から「必要な所だけ」に変更するための計画関数。
+//  旧: 輪郭にピンチ(最短ギャップ<20mm)があるだけで、頂点数が変わらない形でも全体を16本の帯に割っていた。
+//      → 法面が16本の水平な帯に割れ、PDF/Excelの面分割が異常に細かくなった(1/193。1/194はピンチ判定に掛からず1枚)。
+//  新: 頂点数が同じ連続区間で、途中のリングが両端の線形補間と2mm以内で一致する限り、1枚のloftにまとめる。
+//      (法面の頂点は深さに対して直線的に動くので、トポロジー変化・非線形が無ければ1枚で厳密)
+//      頂点数が変わる所・線形から外れる所だけが層の境目になる(固定刻みではなく、変化点で割る=地雷25b)。
+const _SLICE_LINEAR_TOL_MM = 2;
+// A(深さza)とB(深さzb)=同じ頂点数の2リングを1枚のloftで繋いでよいか。
+//  (1)側面が平面(平行な辺同士)=ねじれ無し (2)途中のサンプルリングが両端の線形補間と一致。どちらもtol(mm)以内。
+//  (1)が無いと辺反転のある形で体積が最大5%減った(ランダム形状の回帰テストで実測)。
+function _linearPlanarOK(A, za, B, zb, samples){
+  if(A.length !== B.length) return false;
+  const H = Math.abs(zb - za);
+  if(H < 1e-9) return false;
+  for(let i=0;i<A.length;i++){
+    const i2 = (i+1) % A.length;
+    const ux = A[i2].x - A[i].x, uy = A[i2].y - A[i].y;            // P1-P0
+    const vx = B[i].x - A[i].x,  vy = B[i].y - A[i].y;             // P2-P0 (z=H)
+    const wx = B[i2].x - A[i].x, wy = B[i2].y - A[i].y;            // P3-P0 (z=H)
+    const nx = uy*H, ny = -ux*H, nz = ux*vy - uy*vx;               // n = (ux,uy,0) x (vx,vy,H)
+    const nl = Math.hypot(nx, ny, nz);
+    if(nl < 1e-9) continue; // A側の辺が長さゼロ(潰れた辺)は平面の拘束なし
+    // r121(43回目): 生まれたばかりの辺(長さが0.5mm未満)は向きが信用できない(Clipperの整数丸め0.1µmで向きが狂う)。
+    //  その面は三角形(A側が点)に近く、平面の拘束は実質無い=スキップ。(これが無いと、変化点を吸収した直後のリングが毎回非平面と誤判定された)
+    if(Math.hypot(ux, uy) < _SLICE_LINEAR_TOL_MM * 0.25) continue;
+    if(Math.abs(nx*wx + ny*wy + nz*H) / nl > _SLICE_LINEAR_TOL_MM) return false;
+  }
+  for(let q=0;q<samples.length;q++){
+    const R = samples[q].ring;
+    if(R.length !== A.length) return false;
+    const t = (samples[q].z - za) / (zb - za);
+    for(let i=0;i<A.length;i++){
+      const ex = A[i].x + (B[i].x - A[i].x) * t, ey = A[i].y + (B[i].y - A[i].y) * t;
+      if(Math.hypot(R[i].x - ex, R[i].y - ey) > _SLICE_LINEAR_TOL_MM) return false;
+    }
+  }
+  return true;
+}
+function _ringsLinearBetween(rings, a, b, zOf){
+  const samples = [];
+  for(let m=a+1;m<b;m++) samples.push({ring: rings[m], z: zOf(m)});
+  return _linearPlanarOK(rings[a], zOf(a), rings[b], zOf(b), samples);
+}
+function _planSliceLayers(rings, zOf){
+  const N = rings.length - 1, out = [];
+  let k = 0;
+  while(k < N){
+    let j = k + 1;
+    if(rings[j].length === rings[k].length){
+      while(j < N && rings[j+1].length === rings[k].length && _ringsLinearBetween(rings, k, j+1, zOf)) j++;
+    }
+    out.push([k, j]);
+    k = j;
+  }
+  return out;
+}
+
+// r120(42回目): 頂点数が変わる変化点の前後も、サンプル(1/16深さ)で細切れにせず『変化点で2枚』にまとめる。
+//  理由: 変化点の隣に薄い層(例:やばい.vold 1/100の深さ788〜860mmの72mm)ができると、頂点の量子化(10mm)が
+//   薄い層で相対的に大きく効いて法面が波打つ(実機GLBで法面の中段に凹凸。量子化1mmだと消えることをNodeで確認)。
+//   [連続区間の先頭 pa ... 変化点 zb ... 次の連続区間の末尾 nc] を、zbの上下それぞれ1枚のloftにする。
+//   (頂点が少ない側の境界リングを共有。多い側は『多対1』の対応)。線形/平面から外れる等で出来ない時はnull。
+function _loftEventSegment(rings, zOf, ringAt, pa, ka, kb, nc, SC, plainLoft){
+  const A = rings[pa], B = rings[nc], zA = zOf(pa), zB = zOf(nc), nA = A.length, nB = B.length;
+  if(nA === nB) return null;
+  let lo = zOf(ka), hi = zOf(kb);
+  for(let it=0; it<60 && Math.abs(hi-lo) > 1e-5; it++){
+    const mid = (lo+hi)/2;
+    if(ringAt(mid).length === nA) lo = mid; else hi = mid;
+  }
+  let ringLo = ringAt(lo), ringHi = ringAt(hi);
+  if(ringLo.length !== nA || ringHi.length !== nB) return null;
+  ringLo = _alignRingTo(ringLo, rings[ka]);
+  ringHi = _alignRingTo(ringHi, rings[kb]);
+  const zb = (lo+hi)/2, Y = z => -z * SC;
+  const sA = [], sB = [];
+  for(let m=pa+1;m<=ka;m++) sA.push({ring: rings[m], z: zOf(m)});
+  for(let m=kb;m<nc;m++) sB.push({ring: rings[m], z: zOf(m)});
+  if(nA < nB){
+    const f = _mapBigToSmall(ringHi, ringLo); if(!f) return null;
+    const E = ringHi.map((_, i) => ringLo[f[i]]);
+    if(!_linearPlanarOK(A, zA, ringLo, zb, sA) || !_linearPlanarOK(E, zb, B, zB, sB)) return null;
+    return [ plainLoft(A, Y(zA), ringLo, Y(zb)),
+             _buildRingLoftMeshMapped(ringLo, Y(zb), B, Y(zB), false, f, SC) ];
+  } else {
+    const f = _mapBigToSmall(ringLo, ringHi); if(!f) return null;
+    const E = ringLo.map((_, i) => ringHi[f[i]]);
+    if(!_linearPlanarOK(A, zA, E, zb, sA) || !_linearPlanarOK(ringHi, zb, B, zB, sB)) return null;
+    return [ _buildRingLoftMeshMapped(A, Y(zA), ringHi, Y(zb), true, f, SC),
+             plainLoft(ringHi, Y(zb), B, Y(zB)) ];
+  }
+}
+// 層(スライス)分岐の組み立て本体。buildManifoldUnionGeomとbuildSimpleExtrudeGeomの両方から呼ぶ(地雷25a)。
+//  rings=各サンプル深さのサニタイズ済み輪郭(同頂点数で隣り合うものは開始頂点・向き整列済み)、zOf=サンプル番号→深さ(mm)、
+//  ringAt=深さ→輪郭、plainLoft=各関数内の_buildRingLoftMesh。
+function _buildLayersAdaptiveV1(rings, zOf, SC, ringAt, plainLoft){
+  const L = _planSliceLayers(rings, zOf), meshes = [];
+  const isT = lay => rings[lay[0]].length !== rings[lay[1]].length;
+  function pushSimple(ka, kb){
+    let ringA = rings[ka], ringB = rings[kb];
+    const zA = zOf(ka), zB = zOf(kb);
+    if(ringA.length !== ringB.length){
+      // r118(42回目): 頂点数が変わる深さで層を割り、頂点の対応を保ってloft(旧: 弧長リサンプルで対応が崩れ偽の床)。
+      const ms = _loftLayerTopo(ringAt, zA, ringA, zB, ringB, SC, plainLoft, 0);
+      if(ms){ ms.forEach(m => meshes.push(m)); return; }
+      console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします(層' + ka + ')');
+      const M = Math.max(ringA.length, ringB.length, 8);
+      ringA = _resampleRingByArcLength(ringA, M);
+      ringB = _resampleRingByArcLength(ringB, M);
+    }
+    meshes.push(plainLoft(ringA, -zA*SC, ringB, -zB*SC));
+  }
+  for(let i=0;i<L.length;){
+    const lay = L[i];
+    let used = 0, ms = null;
+    if(!isT(lay) && i+1 < L.length && isT(L[i+1])){            // [連続区間][変化点](+[連続区間])
+      const nxt = (i+2 < L.length && !isT(L[i+2])) ? L[i+2] : null;
+      ms = _loftEventSegment(rings, zOf, ringAt, lay[0], L[i+1][0], L[i+1][1], nxt ? nxt[1] : L[i+1][1], SC, plainLoft);
+      used = nxt ? 3 : 2;
+    } else if(isT(lay) && i+1 < L.length && !isT(L[i+1])){     // [変化点][連続区間]
+      ms = _loftEventSegment(rings, zOf, ringAt, lay[0], lay[0], lay[1], L[i+1][1], SC, plainLoft);
+      used = 2;
+    }
+    if(ms){ ms.forEach(m => meshes.push(m)); i += used; }
+    else { pushSimple(lay[0], lay[1]); i++; }
+  }
+  return meshes;
+}
+
+// r120(42回目・本命): 変化点(頂点数が変わる深さ)を全部先に求め、「変化点と変化点の間」を1枚のloftにする。
+//  V1(上のサンプル単位の組み立て)は、変化点が2つ続く形(1/71)で変化点の間に薄い層ができ、量子化(10mm)で法面が波打った。
+//  ・境界=[上面][変化点…][下面]。変化点の前後で頂点が少ない側のリングを境界のメッシュ用リングにして、多い側は多対1で繋ぐ。
+//  ・変化点が上面/下面から_EVENT_SNAP_MM以内なら、その薄い層は作らず上面/下面に吸収する(ずれ<量子化以下)。
+//  ・区間が線形/平面から外れる時だけ、最もずれたサンプルで割る(固定刻みではない)。
+//  ・対応が作れない/想定外ならnull=呼び出し側がV1にフォールバック。
+// 変化点が上面/下面からこの距離以内なら、その薄い層は作らず上面/下面に吸収する(頂点量子化の2倍=量子化より細かい差)。
+function _eventSnapMm(){ return Math.max(5, 2 * (window._vertexQuantMm || 10)); }
+// r121(43回目): 上面/下面から変化点までの距離がこれ未満なら、薄い層を作らず上面/下面の本物のリングへ多対1で繋ぐ(吸収)。
+//  既定=量子化の30倍(10mmなら300mm)。薄い層の法面の傾きノイズ≒atan(量子化/厚さ)が約2°以内に収まる厚さ。
+function _absorbMm(){
+  if(typeof window._eventAbsorbMm === 'number') return window._eventAbsorbMm;
+  // 頂点量子化0(Land Logic/LandXML用の構築)は量子化ノイズが無いので、薄い層を吸収する必要が無い=従来どおり_snap(20mm)のまま
+  //  (LandXML用の形を、量子化が効く3D表示用の都合で変えない)
+  const q = window._vertexQuantMm;
+  if(!(q > 0)) return _eventSnapMm();
+  return Math.max(20, 30 * q);
+}
+function _buildRingLoftMeshMapped2(topRing, yTop, ftop, botRing, yBot, fbot, n, SC){
+  const nT = topRing.length;
+  const verts = [], tris = [];
+  topRing.forEach(p => verts.push(p.x * SC, yTop, p.y * SC));
+  botRing.forEach(p => verts.push(p.x * SC, yBot, p.y * SC));
+  {
+    const flat = []; topRing.forEach(p => flat.push(p.x, p.y));
+    const c = earcut(flat, null, 2);
+    for(let i=0;i<c.length;i+=3) tris.push(c[i], c[i+1], c[i+2]);
+  }
+  {
+    const flat = []; botRing.forEach(p => flat.push(p.x, p.y));
+    const c = earcut(flat, null, 2);
+    for(let i=0;i<c.length;i+=3) tris.push(nT+c[i], nT+c[i+2], nT+c[i+1]);
+  }
+  for(let i=0;i<n;i++){
+    const i2 = (i+1) % n;
+    const t0 = ftop ? ftop[i] : i, t1 = ftop ? ftop[i2] : i2;
+    const b0 = fbot ? fbot[i] : i, b1 = fbot ? fbot[i2] : i2;
+    if(t0 !== t1 && b0 !== b1){ tris.push(t0, nT+b0, t1); tris.push(t1, nT+b0, nT+b1); }
+    else if(t0 === t1 && b0 !== b1){ tris.push(t0, nT+b0, nT+b1); }
+    else if(t0 !== t1 && b0 === b1){ tris.push(t0, nT+b0, t1); }
+  }
+  return { vertProperties: new Float32Array(verts), triVerts: new Uint32Array(tris), numProp: 3 };
+}
+function _buildLayersByBoundaries(rings, zOf, SC, ringAt, plainLoft){
+  const N = rings.length - 1, Y = z => -z * SC;
+  // 1) 境界の収集
+  let bnd = [{ z: zOf(0), zAfter: zOf(0), before: null, after: rings[0] }];
+  for(let k=0;k<N;k++){
+    if(rings[k].length === rings[k+1].length) continue;
+    let lo = zOf(k), hi = zOf(k+1);
+    for(let it=0; it<60 && Math.abs(hi-lo) > 1e-5; it++){
+      const mid = (lo+hi)/2;
+      if(ringAt(mid).length === rings[k].length) lo = mid; else hi = mid;
+    }
+    let rLo = ringAt(lo), rHi = ringAt(hi);
+    if(rLo.length !== rings[k].length || rHi.length !== rings[k+1].length) return null; // 同じ層で複数回変化→V1へ
+    rLo = _alignRingTo(rLo, rings[k]);
+    rHi = _alignRingTo(rHi, rings[k+1]);
+    bnd.push({ z: (lo+hi)/2, zBefore: lo, zAfter: hi, before: rLo, after: rHi });
+  }
+  bnd.push({ z: zOf(N), zBefore: zOf(N), before: rings[N], after: null });
+  // 2) 上面/下面に近すぎる変化点は吸収(薄い層を作らない)
+  //  r121(43回目): 吸収は『変化点の後(前)のリングを上面(下面)の位置へ置き直す』方式だった。置き直しで頂点が
+  //   (深さのずれ×頂点速度)だけ動き、線形チェックが『非線形』と誤判定→薄い層(1/71の上面0.11m)→量子化10mmで横線、が根本原因。
+  //   新方式: 上面(下面)のメッシュ用リングは『上面(下面)の本物のリング(rings[0]/rings[N])』を使い、変化点の前後は
+  //   多対1の対応(_mapBigToSmall)で繋ぐ。薄い層を作らず、法面の2面(消える辺の両隣)は平面のまま正確。
+  //   ずれるのは『変化点で生まれる(消える)小さな辺の面』だけ(吸収距離以内の楔形)。
+  //   線形チェックは本来の深さ(zAfter/zBefore)のリングで行う。対応が作れない時は従来の置き直しに戻す。
+  const _snap = _eventSnapMm();
+  const _abs = _absorbMm();
+  function evMap(ev){
+    if(!ev.before || !ev.after) return null;
+    if(ev.before.length < ev.after.length){ const f = _mapBigToSmall(ev.after, ev.before); return f ? { fAfter: f } : null; }
+    if(ev.before.length > ev.after.length){ const f = _mapBigToSmall(ev.before, ev.after); return f ? { fBefore: f } : null; }
+    return null;
+  }
+  // 対応が作れない変化点は、従来の『置き直し』(ずれ=距離×頂点速度)になるので、従来の距離(_snap)までしか吸収しない
+  //  (300mmまで置き直すと形が大きくずれる。ランダム形状で体積誤差4.4%を実測=r121検証)。
+  let _mpTop = null, _mpBot = null;
+  if(bnd.length > 2 && bnd[1].z - bnd[0].z < _abs){ _mpTop = evMap(bnd[1]); if(!_mpTop && bnd[1].z - bnd[0].z >= _snap) _mpTop = 'no'; }
+  if(bnd.length > 2 && bnd[bnd.length-1].z - bnd[bnd.length-2].z < _abs){ _mpBot = evMap(bnd[bnd.length-2]); if(!_mpBot && bnd[bnd.length-1].z - bnd[bnd.length-2].z >= _snap) _mpBot = 'no'; }
+  if(_mpTop !== 'no' && bnd.length > 2 && bnd[1].z - bnd[0].z < _abs){
+    const ev = bnd[1], mp = _mpTop;
+    bnd[0].after = ev.after; bnd[0].zAfter = ev.zAfter;
+    if(mp){ bnd[0].M = rings[0]; if(mp.fAfter) bnd[0].fAfter = mp.fAfter; else bnd[0].fBotOver = mp.fBefore; }
+    bnd.splice(1,1);
+  }
+  if(_mpBot !== 'no' && bnd.length > 2 && bnd[bnd.length-1].z - bnd[bnd.length-2].z < _abs){
+    const L = bnd[bnd.length-1], ev = bnd[bnd.length-2], mp = _mpBot;
+    L.before = ev.before; L.zBefore = ev.zBefore;
+    if(mp){ L.M = rings[N]; if(mp.fBefore) L.fBefore = mp.fBefore; else L.fTopOver = mp.fAfter; }
+    bnd.splice(bnd.length-2,1);
+  }
+  for(let i=1;i<bnd.length-1;i++) if(bnd[i].z - bnd[i-1].z < _snap) return null; // 変化点が近接→V1へ
+  // 3) 各境界のメッシュ用リングと対応
+  for(let i=0;i<bnd.length;i++){
+    const b = bnd[i];
+    if(b.M) continue; // 吸収で上面/下面の本物のリングが決まっている
+    if(!b.before){ b.M = b.after; continue; }
+    if(!b.after){ b.M = b.before; continue; }
+    if(b.before.length === b.after.length){ b.M = b.after; continue; }
+    if(b.before.length < b.after.length){ b.M = b.before; b.fAfter = _mapBigToSmall(b.after, b.before); if(!b.fAfter) return null; }
+    else { b.M = b.after; b.fBefore = _mapBigToSmall(b.before, b.after); if(!b.fBefore) return null; }
+  }
+  // 4) 区間が線形/平面から外れる時は、最もずれたサンプルで割る
+  function samplesIn(zt, zb, n){
+    const out = [];
+    for(let m=1;m<N;m++){ const z = zOf(m); if(z > zt + 1e-6 && z < zb - 1e-6 && rings[m].length === n) out.push({m, ring: rings[m], z}); }
+    return out;
+  }
+  for(let guard=0; guard<64; guard++){
+    let split = -1, splitM = -1;
+    for(let i=0;i<bnd.length-1;i++){
+      const A = bnd[i].after, B = bnd[i+1].before;
+      if(A.length !== B.length) return null;
+      const zA_ = (bnd[i].zAfter !== undefined) ? bnd[i].zAfter : bnd[i].z;
+      const zB_ = (bnd[i+1].zBefore !== undefined) ? bnd[i+1].zBefore : bnd[i+1].z;
+      const smp = samplesIn(zA_, zB_, A.length);
+      if(!smp.length) continue;
+      if(_linearPlanarOK(A, zA_, B, zB_, smp)) continue;
+      // 最もずれたサンプル(ずれが無ければ中央のサンプル)
+      let bestM = smp[Math.floor(smp.length/2)].m, bestD = -1;
+      smp.forEach(q => {
+        const t = (q.z - zA_) / (zB_ - zA_); let d = 0;
+        for(let v=0;v<A.length;v++){ d = Math.max(d, Math.hypot(q.ring[v].x - (A[v].x + (B[v].x - A[v].x)*t), q.ring[v].y - (A[v].y + (B[v].y - A[v].y)*t))); }
+        if(d > bestD + 1e-9){ bestD = d; bestM = q.m; }
+      });
+      split = i; splitM = bestM; break;
+    }
+    if(split < 0) break;
+    bnd.splice(split+1, 0, { z: zOf(splitM), zBefore: zOf(splitM), zAfter: zOf(splitM), before: rings[splitM], after: rings[splitM], M: rings[splitM] });
+  }
+  // 5) メッシュ生成
+  const meshes = [];
+  for(let i=0;i<bnd.length-1;i++){
+    const T = bnd[i], Bt = bnd[i+1];
+    const n = Math.max(T.after.length, T.M.length, Bt.M.length);
+    let ftop = T.fAfter || null, fbot = Bt.fBefore || null;
+    // 対応表は合成する(例: 下面が頂点多 → 区間の頂点数のリング → 上側の境界の少ない側リング)
+    if(Bt.fTopOver) ftop = T.fAfter ? Bt.fTopOver.map(j => T.fAfter[j]) : Bt.fTopOver;   // 下面を本物のリングにした(下面側が頂点多)
+    if(T.fBotOver) fbot = Bt.fBefore ? T.fBotOver.map(j => Bt.fBefore[j]) : T.fBotOver;   // 上面を本物のリングにした(上面側が頂点多)
+    if(!ftop && !fbot && T.M.length === Bt.M.length) meshes.push(plainLoft(T.M, Y(T.z), Bt.M, Y(Bt.z)));
+    else meshes.push(_buildRingLoftMeshMapped2(T.M, Y(T.z), ftop, Bt.M, Y(Bt.z), fbot, n, SC));
+  }
+  return meshes;
+}
+function _buildLayersAdaptive(rings, zOf, SC, ringAt, plainLoft){
+  let r = null;
+  try{ r = _buildLayersByBoundaries(rings, zOf, SC, ringAt, plainLoft); }catch(e){ console.warn('[LAYERS] 境界方式で例外、従来方式へ: ' + e); r = null; }
+  if(r) return r;
+  console.warn('[LAYERS-V1] 境界方式で作れず従来方式(V1)へ');
+  return _buildLayersAdaptiveV1(rings, zOf, SC, ringAt, plainLoft);
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -2053,6 +2358,48 @@ function _shapeSelfIntersects(ptsMm, holesMm, o, D, noSlope){
   return false;
 }
 
+// r121(43回目): 法面(深さ方向のloft)が『安定して作れるか』の事前判定(作る前の予行演習。メッシュは作らず、層の計画だけ試す)。
+//  作れない(=頂点の対応が作れず従来のリサンプルに落ちる/境界方式で組めずV1に落ちる)形は、偽の床・面の爆発・体積ずれが出る
+//  (ランダム形状2000件超の検証: フォールバックが出た形は全て破綻、出なかった形に破綻はほぼ無し)。
+//  マスター方針(43回目): 変な形状でExcel/PDFが出るくらいなら弾く。ただし出せる形は弾かない(まず安定させ、それでも駄目なものだけ)。
+//  contourOfはbuildManifoldUnionGeom/buildSimpleExtrudeGeom内の同名ローカル関数と同一(地雷25a。変えたら3か所揃える)。
+function _frustumLayerStable(f0){
+  try{
+    // 本番(buildManifoldUnionGeom)は入力座標を頂点量子化の格子へ事前に丸めてから作る。判定も同じ丸め後の形で行う(r044-fix②と同じ)。
+    const _inQF = 1000 / Math.max(window._vertexQuantMm || 0, 1);
+    const f = Object.assign({}, f0, { ptsMm: f0.ptsMm.map(p => ({ x: Math.round(p.x * _inQF) / _inQF, y: Math.round(p.y * _inQF) / _inQF })) });
+    const SC = 0.001, tl = f.tl || 0;
+    const contour = zMm => {
+      const top = -tl, fromTop = zMm - top, ratio = 1.0 - fromTop / f.D;
+      const taper = f.noSlope ? (typeof f.taperMm === 'number' ? f.taperMm : DOBOKU_VERTICAL_TAPER_FIXED_MM) : f.D * getSlopeRatio();
+      const _negTaper = f.noSlope && typeof f.taperMm === 'number' && f.taperMm < 0;
+      const dist = _negTaper ? (f.OD + ratio * taper) : Math.max(0, f.OD + ratio * taper);
+      const q = window._vertexQuantMm;
+      const minOffsetMm = (f.noSlope && q > 0 && ratio > 0.999) ? (q / 2 + 1) : 0;
+      return f.noSlope ? offsetPolygon(f.ptsMm, dist, false, 1.5, minOffsetMm) : offsetPolygon(f.ptsMm, dist);
+    };
+    const plain = () => ({ vertProperties: new Float32Array(0), triVerts: new Uint32Array(0), numProp: 3 });
+    const topZ = -tl, botZ = f.D - tl;
+    const topRing0 = contour(topZ), botRing0 = contour(botZ);
+    const topS = _sanitizeOffsetRing(topRing0), botS = _sanitizeOffsetRing(botRing0);
+    const ringAt = z => _sanitizeOffsetRing(contour(z)).pts;
+    if(!topS.changed && !botS.changed){
+      if(topRing0.length === botRing0.length) return true;
+      return !!_loftLayerTopo(ringAt, topZ, topRing0, botZ, botRing0, SC, plain, 0);
+    }
+    const sliceRings = [];
+    for(let k=0;k<=_SLICE_N;k++) sliceRings.push(ringAt(topZ + (botZ - topZ) * k / _SLICE_N));
+    for(let k=1;k<sliceRings.length;k++){
+      if(sliceRings[k].length === sliceRings[k-1].length) sliceRings[k] = _alignRingTo(sliceRings[k], sliceRings[k-1]);
+    }
+    let r = null;
+    try{ r = _buildLayersByBoundaries(sliceRings, kk => topZ + (botZ - topZ) * kk / _SLICE_N, SC, ringAt, plain); }catch(e){ r = null; }
+    return !!r;
+  }catch(e){
+    return true; // 判定不能は通す(誤って弾くより、従来どおり計算する)
+  }
+}
+
 function shapeToFrustum(sh){
   const outer = getOuter(sh);
   if(!outer || outer.length < 3) return null;
@@ -2936,6 +3283,26 @@ async function runCalc(mode){
       );
       // r016: ダイアログを閉じた後は計算パネル全体を閉じて作図モードへ戻す
       // （btn状態のリセットは、パネルが次に開かれた時のため念のため行う）
+      btn.disabled=false; btn.textContent=mode==='doboku'?'⚡ 土量計算':'⚡ 通常計算';
+      closeCalcModal();
+      return;
+    }
+  }
+  // r121(43回目): 法面が安定して作れない形状の事前判定(上の自己交差チェックと同じ扱い=赤にして中止)。
+  {
+    const unstableFs = fs.filter(f => !_frustumLayerStable(f));
+    if(unstableFs.length){
+      const badIdx2 = new Set(unstableFs.map(f=>f.srcIdx));
+      unstableFs.forEach(f => { if(shapes[f.srcIdx]) shapes[f.srcIdx]._voldiaGeoError = true; });
+      fs = fs.filter(f => !badIdx2.has(f.srcIdx));
+      updSidebar(); redraw();
+      const names2 = unstableFs.map(f => (shapes[f.srcIdx]&&shapes[f.srcIdx].name) || '(無名)');
+      console.warn('[UNSTABLE-SHAPE] 法面が安定して作れない形状を弾きました: ' + names2.join(','));
+      await customAlert(
+        `法面が安定して作れない形状がある場合、この計算モードでは計算出来ません\n\n`
+        + `対象：${names2.slice(0,5).join('、')}${names2.length>5?` 他${names2.length-5}件`:''}\n\n`
+        + `計算出来ない図形は赤色にしたので、分割して描きなおしてください`
+      );
       btn.disabled=false; btn.textContent=mode==='doboku'?'⚡ 土量計算':'⚡ 通常計算';
       closeCalcModal();
       return;
@@ -4392,7 +4759,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r118(base:VoldiaM r069)"; // r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r121b(base:VoldiaM r069)"; // r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5149,7 +5516,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       return [_buildRingLoftMesh(topR, tlY(f), botR, botY(f))];
     }
 
-    console.warn('[SLICE-LOFT] 深さ方向のトポロジ変化を検出、' + _SLICE_N + '分割でロフトします');
+    console.warn('[SLICE-LOFT] 輪郭にピンチ/トポロジ変化を検出、変化点だけで層を分けてロフトします(' + _SLICE_N + '点で調査)');
     const topZmm = -(f.tl||0);
     const botZmm = f.D - (f.tl||0);
     const sliceRings = [];
@@ -5163,23 +5530,9 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     for(let k=1;k<sliceRings.length;k++){
       if(sliceRings[k].length === sliceRings[k-1].length) sliceRings[k] = _alignRingTo(sliceRings[k], sliceRings[k-1]);
     }
-    const meshes = [];
-    for(let k=0;k<_SLICE_N;k++){
-      let ringA = sliceRings[k], ringB = sliceRings[k+1];
-      const zA = topZmm + (botZmm - topZmm) * k / _SLICE_N;
-      const zB = topZmm + (botZmm - topZmm) * (k+1) / _SLICE_N;
-      if(ringA.length !== ringB.length){
-        // r118(42回目): 頂点数が変わる深さで層を割り、頂点の対応を保ってloft(旧: 弧長リサンプルで対応が崩れ偽の床)。
-        const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, zA, ringA, zB, ringB, SC, _buildRingLoftMesh, 0);
-        if(_ms){ _ms.forEach(m => meshes.push(m)); continue; }
-        console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします(層' + k + ')');
-        const M = Math.max(ringA.length, ringB.length, 8);
-        ringA = _resampleRingByArcLength(ringA, M);
-        ringB = _resampleRingByArcLength(ringB, M);
-      }
-      meshes.push(_buildRingLoftMesh(ringA, -zA*SC, ringB, -zB*SC));
-    }
-    return meshes;
+    // r119/r120(42回目): 一律16等分ではなく、変化点(頂点数が変わる/線形・平面から外れる)だけで層を分ける。
+    return _buildLayersAdaptive(sliceRings, kk => topZmm + (botZmm - topZmm) * kk / _SLICE_N, SC,
+      z => _sanitizeOffsetRing(contourOf(f, z)).pts, _buildRingLoftMesh);
   }
 
   function _meshSignedVolume(vertProperties, triVerts){
@@ -5779,7 +6132,7 @@ async function buildSimpleExtrudeGeom(frustums){
       return [_buildRingLoftMesh(topR, tlY(f), botR, botY(f))];
     }
 
-    console.warn('[SLICE-LOFT] 深さ方向のトポロジ変化を検出、' + _SLICE_N + '分割でロフトします');
+    console.warn('[SLICE-LOFT] 輪郭にピンチ/トポロジ変化を検出、変化点だけで層を分けてロフトします(' + _SLICE_N + '点で調査)');
     const topZmm = -(f.tl||0);
     const botZmm = f.D - (f.tl||0);
     const sliceRings = [];
@@ -5793,23 +6146,9 @@ async function buildSimpleExtrudeGeom(frustums){
     for(let k=1;k<sliceRings.length;k++){
       if(sliceRings[k].length === sliceRings[k-1].length) sliceRings[k] = _alignRingTo(sliceRings[k], sliceRings[k-1]);
     }
-    const meshes = [];
-    for(let k=0;k<_SLICE_N;k++){
-      let ringA = sliceRings[k], ringB = sliceRings[k+1];
-      const zA = topZmm + (botZmm - topZmm) * k / _SLICE_N;
-      const zB = topZmm + (botZmm - topZmm) * (k+1) / _SLICE_N;
-      if(ringA.length !== ringB.length){
-        // r118(42回目): 頂点数が変わる深さで層を割り、頂点の対応を保ってloft(旧: 弧長リサンプルで対応が崩れ偽の床)。
-        const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, zA, ringA, zB, ringB, SC, _buildRingLoftMesh, 0);
-        if(_ms){ _ms.forEach(m => meshes.push(m)); continue; }
-        console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします(層' + k + ')');
-        const M = Math.max(ringA.length, ringB.length, 8);
-        ringA = _resampleRingByArcLength(ringA, M);
-        ringB = _resampleRingByArcLength(ringB, M);
-      }
-      meshes.push(_buildRingLoftMesh(ringA, -zA*SC, ringB, -zB*SC));
-    }
-    return meshes;
+    // r119/r120(42回目): 一律16等分ではなく、変化点(頂点数が変わる/線形・平面から外れる)だけで層を分ける。
+    return _buildLayersAdaptive(sliceRings, kk => topZmm + (botZmm - topZmm) * kk / _SLICE_N, SC,
+      z => _sanitizeOffsetRing(contourOf(f, z)).pts, _buildRingLoftMesh);
   }
 
   function _meshSignedVolume(vertProperties, triVerts){
