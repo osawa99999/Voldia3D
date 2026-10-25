@@ -1,5 +1,6 @@
 // ============================================================
-// 現行バージョン: r048 (41回目: GLBの材質色を濃いグレーに変更(全GLB出力共通。encodeMultiGLB内のGLB_BASE_COLOR)。r047 (41回目: ①ファイル名の日付を yymmdd_hhmm に統一(CSV・GLB・データ出力ZIP。名前を先頭・日付を後ろに) ②配置モードのiframe参照を voldia_placement_v0080.html に変更)。 r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
+// 現行バージョン: r049 (42回目: 縮退三角形(スリバー)判定に『実寸の高さ<60mm』を追加。長い壁を割った本物の法面の帯が「面積/最長辺²<0.01」で誤って除外され、壁ごと数量から消える不具合の修正。
+//   該当箇所=土量計算/通常計算の面クラスタ化(isSliver判定)の1か所のみ。 r048 (41回目: GLBの材質色を濃いグレーに変更(全GLB出力共通。encodeMultiGLB内のGLB_BASE_COLOR)。r047 (41回目: ①ファイル名の日付を yymmdd_hhmm に統一(CSV・GLB・データ出力ZIP。名前を先頭・日付を後ろに) ②配置モードのiframe参照を voldia_placement_v0080.html に変更)。 r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
 
@@ -1156,7 +1157,15 @@ function _evRunAnalysis(mode, glbArrayBuffer){
             // (type書き換え→配列除外)でやっていたのが構造的な原因。この2つの役割を
             // isSliverフラグで分離し、スリバー面はtypeをSLOPE系のまま維持して隣接グラフの
             // 「橋」としては機能させつつ、面積・高さ集計とサブフェイス表示からは除外する。
-            if(minEdgeMm < SLIVER_MIN_EDGE_MM || areaRatio < SLIVER_AREA_RATIO) f.isSliver=true;
+            // r049(42回目): 「面積/最長辺^2 < 0.01」だけで縮退と判定すると、長い壁(例:12.6m)を細かい帯に割った
+            // 本物の法面の帯(高さ150〜166mm)まで縮退扱いになり、壁ごと数量から消えていた(1/193で右側の法面が欠け、
+            // 212.789→196.593m³に減った。AutoCADは212.7874)。比は「長いほど小さくなる」ため長さに依存する指標で、
+            // 縮退の本質(=実寸が極端に薄い)を見ていない。ハック由来の縮退三角形は高さ10〜41mm、本物の法面は最小78mm
+            // (実機GLB 1/74・1/193の数値解析)なので、比の条件に『高さがSLIVER_MAX_ALTITUDE_MM未満』を加える。
+            // 最短辺<100mm(角の楔)の条件は従来どおり。高さ=2×面積/最長辺。
+            const altitudeMm = maxEdge>1e-9 ? (2*triArea/maxEdge)*1000 : 0;
+            const SLIVER_MAX_ALTITUDE_MM = 60;
+            if(minEdgeMm < SLIVER_MIN_EDGE_MM || (areaRatio < SLIVER_AREA_RATIO && altitudeMm < SLIVER_MAX_ALTITUDE_MM)) f.isSliver=true;
           }
         });
 
