@@ -1,6 +1,13 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r122b】(43回目。Voldia_261027_1412.vold『法面交差部から上が面だらけ(分割数の爆発)』)
+//   原因: 上面/下面の頂点数が違い、途中で頂点数が複数回変わる形(変化点2つ=15→16→17頂点)は、_loftLayerTopoが『中点で2分割して再帰』する。
+//         変化点でも何でもない深さ(中点: 225/450/900mm…)に層境界ができ、同じ平面の面が細切れになる(1/100: 層6枚・209三角形→PDFの面が爆発)。
+//   修正: 層が3枚以上になる時は、サンプル16点から変化点だけを拾う境界方式(_boundariesPlan→_buildLayersByBoundaries)で層を割り直す
+//         (層は変化点と吸収後の端だけで割れる)。境界方式の端吸収にも、_loftLayerTopoと同じ『ずれ量(輪郭線距離)が量子化の1.5倍以内』の判定を追加。
+//   結果: 該当形状 1/100: 209→109三角形(外形ずれ最大8mm)。1/118以上は49〜64三角形。
+//   残: 変化点が近い(114mm等)形は、吸収するとずれが大きい(48mm)ので薄い層が残り、量子化10mmで法面が2〜3°傾く(1/94〜1/112)。
 // 【r122】(43回目。やばい3.vold『耳』=法面の隣り合う面の間に出る針状の余計な面の根本修正。1/71〜1/192で発生、1/193は正常だった)
 //   原因: 局所二等分線方式のオフセット(offsetPolygon)は、辺が消える深さを過ぎると、その辺が元と逆向きに反転したまま残る
 //         (図形に一直線上の頂点(180°)がある時や星形で発生)。自己交差の面積が出ないとClipperは直さず、反転した辺が針/折り返しとして
@@ -498,6 +505,17 @@ function _buildRingLoftMeshMapped(topRing, yTop, botRing, yBot, bigIsTop, f, SC)
   }
   return { vertProperties: new Float32Array(verts), triVerts: new Uint32Array(tris), numProp: 3 };
 }
+// r122b: 輪郭(多角形)どうしの距離(ハウスドルフ距離)。頂点が壁の面に沿って滑るだけなら0(=面は正確)。
+function _ringOutlineDev(E, R){
+  const d2s = (p, a, b) => { const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx+dy*dy; const u = L2 > 0 ? Math.max(0, Math.min(1, ((p.x-a.x)*dx + (p.y-a.y)*dy) / L2)) : 0; return Math.hypot(p.x-(a.x+u*dx), p.y-(a.y+u*dy)); };
+  const toRing = (p, ring) => { let m = Infinity; for(let k=0;k<ring.length;k++) m = Math.min(m, d2s(p, ring[k], ring[(k+1)%ring.length])); return m; };
+  let dev = 0;
+  for(const p of E) dev = Math.max(dev, toRing(p, R));
+  for(const p of R) dev = Math.max(dev, toRing(p, E));
+  return dev;
+}
+// 吸収(薄い層を作らず端のリングへ多対1で繋ぐ)で許す形のずれ。量子化の1.5倍(量子化0なら2mm)。
+function _absorbDevTol(){ const q = window._vertexQuantMm; return (q > 0) ? Math.max(2, 1.5 * q) : 2; }
 // ringAt(zMm)=その深さのサニタイズ済み輪郭。plainLoft=同数リング用の従来loft(各関数内の_buildRingLoftMesh)。
 // 戻り値: メッシュ配列 / 失敗時null(→呼び出し側が従来のリサンプルにフォールバック)
 function _loftLayerTopo(ringAt, zA, ringA, zB, ringB, SC, plainLoft, depth){
@@ -539,13 +557,8 @@ function _loftLayerTopo(ringAt, zA, ringA, zB, ringB, SC, plainLoft, depth){
       const E = [], R = (nA < nB) ? ringHi : ringLo;
       if(nA < nB){ for(let i=0;i<nB;i++){ const a0 = ringA[fq[i]], b0 = ringB[i]; E.push({ x: a0.x + (b0.x - a0.x)*t, y: a0.y + (b0.y - a0.y)*t }); } }
       else { for(let i=0;i<nA;i++){ const a0 = ringA[i], b0 = ringB[fq[i]]; E.push({ x: a0.x + (b0.x - a0.x)*t, y: a0.y + (b0.y - a0.y)*t }); } }
-      const d2s = (p, a, b) => { const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx+dy*dy; const u = L2 > 0 ? Math.max(0, Math.min(1, ((p.x-a.x)*dx + (p.y-a.y)*dy) / L2)) : 0; return Math.hypot(p.x-(a.x+u*dx), p.y-(a.y+u*dy)); };
-      const toRing = (p, ring) => { let m = Infinity; for(let k=0;k<ring.length;k++) m = Math.min(m, d2s(p, ring[k], ring[(k+1)%ring.length])); return m; };
-      let dev = 0;
-      for(const p of E) dev = Math.max(dev, toRing(p, R));
-      for(const p of R) dev = Math.max(dev, toRing(p, E));
-      const q = window._vertexQuantMm;
-      nearEnd = dev <= ((q > 0) ? Math.max(2, 1.5 * q) : 2);
+      const dev = _ringOutlineDev(E, R);
+      nearEnd = dev <= _absorbDevTol();
     }
   }
   if(nA < nB){ // 下へ行くと頂点が増える。境界=少ない側(ringLo)
@@ -769,8 +782,30 @@ function _buildLayersByBoundaries(rings, zOf, SC, ringAt, plainLoft){
   // 対応が作れない変化点は、従来の『置き直し』(ずれ=距離×頂点速度)になるので、従来の距離(_snap)までしか吸収しない
   //  (300mmまで置き直すと形が大きくずれる。ランダム形状で体積誤差4.4%を実測=r121検証)。
   let _mpTop = null, _mpBot = null;
-  if(bnd.length > 2 && bnd[1].z - bnd[0].z < _abs){ _mpTop = evMap(bnd[1]); if(!_mpTop && bnd[1].z - bnd[0].z >= _snap) _mpTop = 'no'; }
-  if(bnd.length > 2 && bnd[bnd.length-1].z - bnd[bnd.length-2].z < _abs){ _mpBot = evMap(bnd[bnd.length-2]); if(!_mpBot && bnd[bnd.length-1].z - bnd[bnd.length-2].z >= _snap) _mpBot = 'no'; }
+  // 吸収で形がずれる量(変化点の深さでの、本来のリング と 端リングを多対1で広げて反対側の境界のリングへ線形補間したリング の
+  //  輪郭線どうしの距離)が許容(_absorbDevTol)を超える時は吸収しない(やばい形状で最大48mmずれた実測)。
+  function absorbDev(end, zEnd, far, zFar, ev, mp, endIsTop){
+    const evFam = endIsTop ? ev.after : ev.before;               // 変化点で端と反対側にあるリング族
+    const endSmall = endIsTop ? (ev.before.length < ev.after.length) : (ev.after.length < ev.before.length);
+    const f = endIsTop ? (endSmall ? mp.fAfter : mp.fBefore) : (endSmall ? mp.fBefore : mp.fAfter);
+    if(!f) return Infinity;
+    const zEv = ev.z, t = (zEv - zFar) / (zEnd - zFar);           // far(zFar) → end(zEnd) の線形補間を zEv で評価
+    const E = [], R = endSmall ? evFam : (endIsTop ? ev.before : ev.after);
+    if(endSmall){ for(let i=0;i<far.length;i++){ const e = end[f[i]], a = far[i]; E.push({ x: a.x + (e.x - a.x)*t, y: a.y + (e.y - a.y)*t }); } }
+    else        { for(let i=0;i<end.length;i++){ const e = end[i], a = far[f[i]]; E.push({ x: a.x + (e.x - a.x)*t, y: a.y + (e.y - a.y)*t }); } }
+    return _ringOutlineDev(E, R);
+  }
+  if(bnd.length > 2 && bnd[1].z - bnd[0].z < _abs){
+    _mpTop = evMap(bnd[1]);
+    if(!_mpTop && bnd[1].z - bnd[0].z >= _snap) _mpTop = 'no';
+    else if(_mpTop && absorbDev(rings[0], bnd[0].z, bnd[2].before, bnd[2].zBefore !== undefined ? bnd[2].zBefore : bnd[2].z, bnd[1], _mpTop, true) > _absorbDevTol() && bnd[1].z - bnd[0].z >= _snap) _mpTop = 'no';
+  }
+  if(bnd.length > 2 && bnd[bnd.length-1].z - bnd[bnd.length-2].z < _abs){
+    const T = bnd[bnd.length-3];
+    _mpBot = evMap(bnd[bnd.length-2]);
+    if(!_mpBot && bnd[bnd.length-1].z - bnd[bnd.length-2].z >= _snap) _mpBot = 'no';
+    else if(_mpBot && absorbDev(rings[N], bnd[bnd.length-1].z, T.after, T.zAfter !== undefined ? T.zAfter : T.z, bnd[bnd.length-2], _mpBot, false) > _absorbDevTol() && bnd[bnd.length-1].z - bnd[bnd.length-2].z >= _snap) _mpBot = 'no';
+  }
   if(_mpTop !== 'no' && bnd.length > 2 && bnd[1].z - bnd[0].z < _abs){
     const ev = bnd[1], mp = _mpTop;
     bnd[0].after = ev.after; bnd[0].zAfter = ev.zAfter;
@@ -822,6 +857,8 @@ function _buildLayersByBoundaries(rings, zOf, SC, ringAt, plainLoft){
     if(split < 0) break;
     bnd.splice(split+1, 0, { z: zOf(splitM), zBefore: zOf(splitM), zAfter: zOf(splitM), before: rings[splitM], after: rings[splitM], M: rings[splitM] });
   }
+  // r122b: 層の最小の厚さ(mm)を記録(事前判定_frustumLayerStableが、薄い層=量子化で法面が傾く層、を弾くかの判断に使う)
+  { let mn = Infinity; for(let i=0;i+1<bnd.length;i++) mn = Math.min(mn, bnd[i+1].z - bnd[i].z); window._lastMinLayerMm = mn; }
   // 5) メッシュ生成
   const meshes = [];
   for(let i=0;i<bnd.length-1;i++){
@@ -2425,6 +2462,19 @@ function _shapeSelfIntersects(ptsMm, holesMm, o, D, noSlope){
   return false;
 }
 
+// r122b(43回目): 変化点が複数ある時の層分け。_loftLayerTopoは複数回変わる時『中点で2分割』して再帰するため、
+//  変化点でも何でもない深さ(中点)に層境界ができ、同じ平面の面が細切れになる(やばい形状: 変化点2つで層6枚→PDFの面が爆発)。
+//  サンプル16点から変化点だけを拾う境界方式(_buildLayersByBoundaries)なら、層は変化点(と吸収後の端)だけで割れる。
+//  作れない時はnull(呼び出し側が従来の_loftLayerTopoの結果へ戻す)。
+function _boundariesPlan(contour, topZ, botZ, SC, plainLoft){
+  try{
+    const rings = [];
+    for(let k=0;k<=_SLICE_N;k++) rings.push(_sanitizeOffsetRing(contour(topZ + (botZ - topZ) * k / _SLICE_N)).pts);
+    for(let k=1;k<rings.length;k++){ if(rings[k].length === rings[k-1].length) rings[k] = _alignRingTo(rings[k], rings[k-1]); }
+    return _buildLayersByBoundaries(rings, kk => topZ + (botZ - topZ) * kk / _SLICE_N, SC, z => _sanitizeOffsetRing(contour(z)).pts, plainLoft) || null;
+  }catch(e){ return null; }
+}
+
 // r121(43回目): 法面(深さ方向のloft)が『安定して作れるか』の事前判定(作る前の予行演習。メッシュは作らず、層の計画だけ試す)。
 //  作れない(=頂点の対応が作れず従来のリサンプルに落ちる/境界方式で組めずV1に落ちる)形は、偽の床・面の爆発・体積ずれが出る
 //  (ランダム形状2000件超の検証: フォールバックが出た形は全て破綻、出なかった形に破綻はほぼ無し)。
@@ -2452,7 +2502,8 @@ function _frustumLayerStable(f0){
     const ringAt = z => _sanitizeOffsetRing(contour(z)).pts;
     if(!topS.changed && !botS.changed){
       if(topRing0.length === botRing0.length) return true;
-      return !!_loftLayerTopo(ringAt, topZ, topRing0, botZ, botRing0, SC, plain, 0);
+      if(_loftLayerTopo(ringAt, topZ, topRing0, botZ, botRing0, SC, plain, 0)) return true;
+      return !!_boundariesPlan(contour, topZ, botZ, SC, plain);   // 従来の層分けが作れなくても、境界方式で作れるなら安定
     }
     const sliceRings = [];
     for(let k=0;k<=_SLICE_N;k++) sliceRings.push(ringAt(topZ + (botZ - topZ) * k / _SLICE_N));
@@ -4826,7 +4877,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r122(base:VoldiaM r069)"; // r122(43回目): 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r122b(base:VoldiaM r069)"; // r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5574,7 +5625,8 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
         // r118(42回目): 頂点数が違う時も、頂点の対応を保って繋ぐ(失敗時のみ従来のリサンプル)。
         const _topZ = -(f.tl||0), _botZ = f.D - (f.tl||0);
         const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, _topZ, topR, _botZ, botR, SC, _buildRingLoftMesh, 0);
-        if(_ms) return _ms;
+        if(_ms && _ms.length <= 2) return _ms;
+        if(_ms){ const _bm = _boundariesPlan(z => contourOf(f, z), _topZ, _botZ, SC, _buildRingLoftMesh); if(_bm && _bm.length < _ms.length) return _bm; return _ms; }
         console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします');
         const M = Math.max(topR.length, botR.length, 8);
         topR = _resampleRingByArcLength(topR, M);
@@ -6190,7 +6242,8 @@ async function buildSimpleExtrudeGeom(frustums){
         // r118(42回目): 頂点数が違う時も、頂点の対応を保って繋ぐ(失敗時のみ従来のリサンプル)。
         const _topZ = -(f.tl||0), _botZ = f.D - (f.tl||0);
         const _ms = _loftLayerTopo(z => _sanitizeOffsetRing(contourOf(f, z)).pts, _topZ, topR, _botZ, botR, SC, _buildRingLoftMesh, 0);
-        if(_ms) return _ms;
+        if(_ms && _ms.length <= 2) return _ms;
+        if(_ms){ const _bm = _boundariesPlan(z => contourOf(f, z), _topZ, _botZ, SC, _buildRingLoftMesh); if(_bm && _bm.length < _ms.length) return _bm; return _ms; }
         console.warn('[TOPO-LOFT] 頂点の対応が作れず従来のリサンプルにフォールバックします');
         const M = Math.max(topR.length, botR.length, 8);
         topR = _resampleRingByArcLength(topR, M);
