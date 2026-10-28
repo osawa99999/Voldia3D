@@ -1,6 +1,14 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r123】(43回目。マスター案B: 『1度3Dを作り、同一平面なのに必要以上に多い面を整理して作り直す』=現行ロジックへの追加ロジック)
+//   背景: 変化点が近い形(Voldia_261027_1412.vold: 168mmと282mm)は薄い層が残り、最後の頂点量子化10mmの丸めで法面が2〜3°傾く(PDFの面が増え3Dに横線)。
+//         吸収(多対1)で薄い層を消すと形がずれる(48mm)ので、形を変えずに面だけ整理する別手段が必要だった。
+//   実装: _simplifyFrustumManifold。傾斜つきの法面frustum(blue)だけ、層メッシュを量子化格子へ丸め(Mesh.merge)→union→元ID統合
+//         (層ごとのoriginalIDが残るとSimplifyが層をまたいで畳まない)→Manifold.simplify(量子化の1.5倍)。
+//         採用条件: 三角形が減る/status正常/体積0.1%以内。満たさなければ何もしない。紫・グレー(微テーパー15mm)と量子化0(LandXML用)は対象外。
+//   結果: 該当形状1/80〜1/106が109→51三角形・傾き乱れ0。やばい/やばい２/やばい3は全縮尺34〜38三角形(旧59〜60)・体積±0.06%・外形ずれ≤12mm。
+//         独立基準のランダム717件で悪化0(三角形数合計13391→13093)、LandXML用1920件は旧と完全一致。
 // 【r122b】(43回目。Voldia_261027_1412.vold『法面交差部から上が面だらけ(分割数の爆発)』)
 //   原因: 上面/下面の頂点数が違い、途中で頂点数が複数回変わる形(変化点2つ=15→16→17頂点)は、_loftLayerTopoが『中点で2分割して再帰』する。
 //         変化点でも何でもない深さ(中点: 225/450/900mm…)に層境界ができ、同じ平面の面が細切れになる(1/100: 層6枚・209三角形→PDFの面が爆発)。
@@ -2475,6 +2483,47 @@ function _boundariesPlan(contour, topZ, botZ, SC, plainLoft){
   }catch(e){ return null; }
 }
 
+// r123(43回目): 法面の『同一平面なのに必要以上に多い面』の整理(マスター案B=3Dを作ってから面をクリーニングする追加ロジック)。
+//  薄い層が残ると、最後の頂点量子化(10mm丸め)で、同じ勾配の面が細い帯に分かれ、帯ごとに法面が2〜3°傾く(PDFの面が増え3Dに横線が出る)。
+//  層のメッシュは量子化前は厳密に同一平面なので、量子化前にSimplifyしても畳める面が無い。そこで『このfrustumの層を同じ格子(量子化)へ
+//  先に丸めてから、ManifoldのSimplify(許容=量子化の1.5倍)で同一平面と見なせる三角形をまとめる』。丸め済みの座標は、後段の
+//  regV(同じ格子への丸め)で変わらない=他のfrustumとのunion以降の流れは従来どおり。
+//  対象: 傾斜つきの法面のfrustum(blue)だけ。紫(垂直面の微テーパー15mm)・グレーは、許容と同程度の傾きを潰して垂直面に戻す恐れがあるので対象外。
+//  量子化0(Land Logic/LandXML)は量子化ノイズが無いので対象外(LandXML用の形は従来どおり)。
+//  採用条件(安全装置): 三角形が減る/status正常/体積が0.1%以内。満たさなければ何もしない(=従来と完全に同じ出力)。
+function _simplifyFrustumManifold(Manifold, Mesh, meshDatas, mans, f){
+  try{
+    const q = window._vertexQuantMm;
+    if(!(q > 0) || f.noSlope || window._noFrustumSimplify) return mans;
+    const qf = 1000 / q;
+    const qMans = meshDatas.map(md => {
+      const vp = new Float32Array(md.vertProperties.length);
+      for(let i=0;i<vp.length;i++) vp[i] = Math.round(md.vertProperties[i] * qf) / qf;
+      const ms = new Mesh({ numProp: md.numProp || 3, vertProperties: vp, triVerts: md.triVerts.slice() });
+      if(ms.merge) ms.merge();   // 丸めで同一座標になった頂点を同一頂点に統合(縮退した辺を畳めるようにする。regVの統合と同じ効果)
+      return new Manifold(ms);
+    });
+    const uo = mans.length > 1 ? Manifold.union(mans) : mans[0];       // 従来の(丸め前の)このfrustum
+    const nOrig = uo.numTri();
+    const uq0 = qMans.length > 1 ? Manifold.union(qMans) : qMans[0];   // 格子へ丸めたもの
+    // 層ごとの元ID(originalID)が残ったままだとSimplifyは層の境界をまたいで面をまとめない → 1つのメッシュとして作り直す(ID統合)
+    const gm = uq0.getMesh(), np = gm.numProp || 3, nv = gm.vertProperties.length / np;
+    const vp3 = new Float32Array(nv * 3);
+    for(let i=0;i<nv;i++){ vp3[i*3] = gm.vertProperties[i*np]; vp3[i*3+1] = gm.vertProperties[i*np+1]; vp3[i*3+2] = gm.vertProperties[i*np+2]; }
+    const uq = new Manifold(new Mesh({ numProp: 3, vertProperties: vp3, triVerts: gm.triVerts.slice() }));
+    const vq = uq.volume();
+    const s2 = uq.simplify(1.5 * q / 1000);                            // メートル単位(SC=0.001)
+    const ok = s2 && (!s2.status || s2.status() === 'NoError') && s2.numTri() > 0 && s2.numTri() < nOrig
+      && Math.abs(s2.volume() - uo.volume()) <= Math.max(1e-6, Math.abs(uo.volume()) * 0.001);
+    if(ok){
+      console.log(`[SIMPLIFY] 法面の面を整理: ${nOrig}→${s2.numTri()}三角形 (格子${q}mm・許容${q*1.5}mm)`);
+      return [s2];
+    }
+    console.warn(`[SIMPLIFY] 見送り: 元${nOrig}→丸め後${uq.numTri()}→整理後${s2 ? s2.numTri() : '-'}三角形 体積 元${uo.volume().toFixed(4)} 丸め後${vq.toFixed(4)} 整理後${s2 ? s2.volume().toFixed(4) : '-'} status=${s2 && s2.status ? s2.status() : '-'}`);
+    return mans;
+  }catch(e){ console.warn('[SIMPLIFY] 失敗(元のまま続行): ' + e); return mans; }
+}
+
 // r121(43回目): 法面(深さ方向のloft)が『安定して作れるか』の事前判定(作る前の予行演習。メッシュは作らず、層の計画だけ試す)。
 //  作れない(=頂点の対応が作れず従来のリサンプルに落ちる/境界方式で組めずV1に落ちる)形は、偽の床・面の爆発・体積ずれが出る
 //  (ランダム形状2000件超の検証: フォールバックが出た形は全て破綻、出なかった形に破綻はほぼ無し)。
@@ -4877,7 +4926,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r122b(base:VoldiaM r069)"; // r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r123(base:VoldiaM r069)"; // r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5684,6 +5733,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
   try {
     frustums.forEach((f, i) => {
       const meshDatas = buildCappedFrustumMesh(f); // r068: 配列(通常は要素数1)
+      const _frMans = [];   // r123: このfrustumの層ごとのManifold(後で整理してmanifoldObjsへ)
       meshDatas.forEach((meshData, j) => {
         let vol = _meshSignedVolume(meshData.vertProperties, meshData.triVerts);
         if(vol < 0){
@@ -5711,8 +5761,9 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           console.warn('[MANIFOLD] ' + label + 'の単体メッシュがwatertightでない可能性: status=' + man.status());
         }
         if(f.color==='purple') purpleOriginalIDs.add(reservedID);
-        manifoldObjs.push(man);
+        _frMans.push(man);
       });
+      _simplifyFrustumManifold(Manifold, Mesh, meshDatas, _frMans, f).forEach(m => manifoldObjs.push(m));
     });
 
     console.log(`[MANIFOLD] union実行: ${manifoldObjs.length}個のfrustum`);
@@ -6292,6 +6343,7 @@ async function buildSimpleExtrudeGeom(frustums){
   try {
     frustums.forEach((f, i) => {
       const meshDatas = buildCappedFrustumMesh(f); // r068: 配列(通常は要素数1)
+      const _frMans = [];   // r123: このfrustumの層ごとのManifold(後で整理してmanifoldObjsへ)
       meshDatas.forEach((meshData, j) => {
         let vol = _meshSignedVolume(meshData.vertProperties, meshData.triVerts);
         if(vol < 0){
@@ -6304,8 +6356,9 @@ async function buildSimpleExtrudeGeom(frustums){
           const label = meshDatas.length>1 ? ('frustum'+i+'-slice'+j) : ('frustum'+i);
           console.warn('[MANIFOLD] ' + label + '(通常計算)の単体メッシュがwatertightでない可能性: status=' + man.status());
         }
-        manifoldObjs.push(man);
+        _frMans.push(man);
       });
+      _simplifyFrustumManifold(Manifold, Mesh, meshDatas, _frMans, f).forEach(m => manifoldObjs.push(m));
     });
 
     console.log(`[MANIFOLD] union実行(通常計算): ${manifoldObjs.length}個のfrustum`);
