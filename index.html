@@ -10,15 +10,9 @@
 
      ⚠️⚠️ 新しいチャットで修正を開始する前や、新しいギミック(機能)を組み込む前には、
      必ず最新の引継ぎファイル(引継ぎ書 + 過去ログファイル)を確認すること！ ⚠️⚠️ -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.12.313/pdf.min.js"></script>
 <script src="lib/clipper.js"></script>
 <script src="data/voldia_assets.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- r070: エビル(Evidence Builder)統合用ライブラリ（配置モードと同じr128系GLTFLoaderで統一） -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <!-- ⚠️⚠️ r023(30回目セッション、マスター指示・著作権クリアランス対応):
      上記CDN読込ライブラリ、および lib/earcut.js・lib/clipper.js(同梱ファイル)の著作権表記・
      ライセンス種別一覧は、免責ダイアログ下部の「使用ライブラリのライセンス表記(Credits)」
@@ -145,8 +139,13 @@ input.doboku-inp[type=text]{background:#1a1a2e;color:#e0e0e0;padding:3px 6px;
 
 /* キャンバスエリア */
 #cv-wrap{flex:1;position:relative;background:var(--cv);overflow:visible;}
+/* r126: 起動時の読み込み画面 */
+#boot-loading{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2000000;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;color:#ddd;font-size:1.3em;letter-spacing:.12em;transition:opacity .35s;}
+#boot-loading.hide{opacity:0;pointer-events:none;}
+#boot-loading .bl-spin{width:46px;height:46px;border:5px solid #333;border-top-color:#ffcc33;border-radius:50%;animation:blspin 1s linear infinite;}
+@keyframes blspin{to{transform:rotate(360deg);}}
 #drop-overlay{
-  position:fixed;inset:0;z-index:5000;display:none;
+  position:fixed;inset:0;z-index:100000; /* r126: 3Dイメージ(z-index:20000)の上にも「読み込めません」の案内を出すため */display:none;
   background:rgba(33,150,243,.18);
   border:4px dashed var(--blue);pointer-events:none;
 }
@@ -508,6 +507,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 </style>
 </head>
 <body>
+<div id="boot-loading" role="status" aria-live="polite"><div class="bl-spin"></div><div class="bl-text">読み込み中……</div></div>
 <noscript>
   <div style="position:fixed;inset:0;z-index:999999;background:#1a1a2e;color:#ff6b6b;
               display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -538,7 +538,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0145</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0146</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1407,6 +1407,15 @@ In addition, if you combine or link compiled forms of this Software with softwar
 <div id="toast"></div>
 <div id="toast-top"></div>
 
+<!-- r126(44回目・起動時の読み込み画面): 下のCDNライブラリ6本は以前 <head> にあり、読み込みが終わるまで画面が真っ白だった。
+     <body> の末尾(ここ)へ移し、先に #boot-loading(読み込み中……)が描画されるようにした。順序(pdf.js→three→GLTFLoader→xlsx→jspdf→jszip)は従来どおり。
+     body内のインラインscriptはこれらを使わない(OSAKI_LOGO_B64のみ・data/voldia_assets.jsはheadのまま)ことを確認済み。 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.12.313/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="lib/earcut.js"></script>
 <script src="js/voldia_main.js"></script>
 
@@ -1480,5 +1489,13 @@ In addition, if you combine or link compiled forms of this Software with softwar
   </div>
 </div>
 
+<script>
+// r126: 起動時の読み込み画面を、全スクリプト・画像の読み込み完了(load)で消す。万一loadが来なくても60秒で消す。
+(function(){
+  function hide(){var e=document.getElementById('boot-loading');if(!e)return;e.classList.add('hide');setTimeout(function(){if(e.parentNode)e.parentNode.removeChild(e);},500);}
+  if(document.readyState==='complete')hide();else window.addEventListener('load',hide);
+  setTimeout(hide,60000);
+})();
+</script>
 </body>
 </html>

@@ -1,6 +1,10 @@
 // ============================================================
-// voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
+// voldia3d.js — 3D変換・体積計算ロジック本体 (r104で旧単一ファイルから分離。以降の改修履歴は下の【rNNN】コメントと VOLDIA3D_VER を参照)
 // ============================================================
+// 【r126】(44回目) ①紫の壁ハッチからグレー(既存躯体)と接する部分を除外(_buildGrayPrisms/_clipTriOutsideGrayPrisms。3Dイメージと配置モードの両方。
+//   Voldia_261029_1550.vold)。グレーを渡さない呼び出しは従来と完全に同じ。
+//   ②掃除(挙動不変): 未使用ローカル(origColors/epsilon/v0i,v1i,v2i)、『撤去予定』のまま残っていた[DIAG-B]診断ブロック(計算のたびに既存躯体の重なりメッシュを
+//   もう一度作ってログに出すだけだった。_diagMeshVolume自体は voldia_export.js の[DIAG-B-GLB]が使うので残す)、古い関数名calcAll()→runCalc()のコメント修正。
 // 【r125】(44回目。Voldia_261029_1310.vold『隣り合う2オブジェクトの法面に角(とんがり)が出る』)
 //   原因・対処は _mergeTouchingSameDepthFrustums のコメント参照。3D表示(buildManifoldUnionGeom)と体積(buildUnionFrustumGeometry→_calcVolumeFallback)の両方に適用。
 //   同条件(深さ・天端・余掘り・法面)で接する/重なる非紫・非グレー・穴なしのオブジェクトだけ、オフセット前に1輪郭へ合体。合体しない時は従来と完全に同じ。
@@ -1404,16 +1408,6 @@ async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
     overlapVol = _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offsetXmm, offsetYmm);
     totalVol = Math.max(0, totalVol - overlapVol);
 
-    // 【診断用・段階1検証・r018】(B)専用メッシュの体積を発散定理で算出し、
-    // 基準値(_calcExistingStructureOverlapVolumeの10mmスライス数値)と突き合わせる。
-    // マスター実機確認後、撤去して次段階(GLB化・エビル連携)へ進む。
-    try{
-      const diagGeom = buildExistingStructureOverlapMesh(excavFrustums, structFrustums, offsetXmm, offsetYmm);
-      const diagVolM3 = diagGeom ? _diagMeshVolume(diagGeom) : 0;
-      console.log('[DIAG-B] 基準値(10mmスライス)=' + overlapVol.toFixed(4) + 'm³ / メッシュ体積(発散定理)=' + diagVolM3.toFixed(4) + 'm³ / 差=' + (diagVolM3-overlapVol).toFixed(4) + 'm³ / 頂点数=' + (diagGeom?diagGeom.attributes.position.count:0));
-    }catch(e){
-      console.warn('[DIAG-B] buildExistingStructureOverlapMeshでエラー:', e);
-    }
   }
 
   // 外皮シェルメッシュ生成
@@ -2952,7 +2946,7 @@ function toggleRectTable(){
 // パース後は表示側で常に符号(+/-)を補って見せる(0は"+0"表示)。
 // ★2026-08-25引継ぎ17回目でマスター仕様確定・実装済み: 土量計算モード
 // (mode==='doboku')時のみ、fsの各frustumのD(深さ)に本値をそのまま加算する
-// (calcAll()内、天端0正規化の直後)。通常計算・配置モードへの反映は別途相談(次の段階)。
+// (runCalc()内、天端0正規化の直後)。通常計算・配置モードへの反映は別途相談(次の段階)。
 window._glOffsetMm = 0;
 function onGlOffsetChange(){
   const el = document.getElementById('gl-offset-mm');
@@ -3088,7 +3082,6 @@ function toggleMeshSolid(){
     // emissive:0x221100, shininess:40, vertexColors未指定)を再構築していたため、
     // 一度ソリッドへ切り替えて戻すと高さグラデが失われ単色に変わっていた
     // (根本原因)。isRed=falseの側だけ、生成時と同じvertexColors設定に修正。
-    const origColors=[0xffcc77,0xffffff,0xffffff];
     const newMats = _meshObjs.map((mesh,i)=>{
       const isRed = !!mesh.userData.hatchMap;
       const opForThis = isRed ? Math.max(0, curOp-0.1) : curOp;
@@ -3892,7 +3885,6 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   if(!frustums || !frustums.length) return;
 
   const S_CONV = 0.001;
-  const epsilon = 1e-4;
 
   // 1.【元オブジェクト消去】古い躯体形状(四角)を非表示化
   _initThreeBase([], frustums);
@@ -3911,7 +3903,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   console.log('[CP-5] buildManifoldUnionGeom 呼び出し直前');
   let result = excavFrustumsForMesh.length
     ? (isDoboku
-        ? await buildManifoldUnionGeom(excavFrustumsForMesh, isDoboku, yamadomeOffsetX, yamadomeOffsetY)
+        ? await buildManifoldUnionGeom(excavFrustumsForMesh, isDoboku, yamadomeOffsetX, yamadomeOffsetY, {grayFrustums: structFrustumsForMesh}) // r126: 紫の壁ハッチからグレー(既存躯体)接触部分を除くため渡す
         : await buildSimpleExtrudeGeom(excavFrustumsForMesh))
     : null;
   console.log('[CP-6] buildManifoldUnionGeom/buildSimpleExtrudeGeom 呼び出し直後 result=', !!result);
@@ -4294,7 +4286,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
 
   // B5(2026-08-25引継ぎ20回目マスター指示): 通常計算(isDoboku===false)の3Dプレビュー
   // 限定で、面をダブルクリックすると面積を表示する機能。
-  // ・通常計算はcalcAll()で全frustumのnoSlopeを強制trueにしており法面が一切
+  // ・通常計算はrunCalc()で全frustumのnoSlopeを強制trueにしており法面が一切
   //   発生しない(=全て垂直な側面 or 水平な天端/床面の2種類の法線のみ)という
   //   マスター確認済みの前提があるため、法線の「なだらかな変化」を考慮した
   //   角度許容は不要で、ほぼ完全一致(浮動小数点誤差吸収の極小epsilonのみ)で
@@ -5058,7 +5050,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r125(base:VoldiaM r069)"; // r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r126(base:VoldiaM r069)"; // r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5635,6 +5627,80 @@ function _dropPurpleWallsOnYamadome(positions, uv, ydPositions, tol){
   }
   return {positions:new Float32Array(keepPos), uv:uv?new Float32Array(keepUv):uv, dropped};
 }
+// ============================================================
+// r126(44回目): 紫(山留壁)の壁ハッチのうち、グレー(既存躯体)と接する/内側にある部分を切り落とす。
+//   症状(Voldia_261029_1550.vold): 紫の掘削とグレーの既存躯体を並べると、紫の壁のうちグレーと接する面にも山留ハッチ(縞)が出る。
+//         既存躯体は掘削時に躯体ごと出る(土の壁ではない)ので、その面に山留は不要。
+//   原因: 3D表示の合体は buildManifoldUnionGeom(excavFrustumsForMesh)=グレーを除いて作るので、紫の壁ハッチの採取(Manifold ID追跡)は
+//         グレーの存在を知らず、紫由来の垂直面を全部ハッチ対象にしていた。
+//   対処: 呼び出し側から grayFrustums(平面形+高さ)を受け取り、紫の壁三角形から『グレーの角柱(許容tol拡張)の内側の部分』を幾何的に切り落とす。
+//         壁の一部だけがグレーと重なる/グレーの方が浅い、といった場合は、重ならない部分(別の高さ・別の位置)だけが残る。
+//   ・グレーは土量計算で noSlope:true, OD:0(垂直・平面形そのまま)として扱われているので、平面形=ptsMm、高さ=[tl-D, tl]でよい。
+//   ・グレーを渡さない呼び出し(Land Logic・個別体積など)は何も変わらない(従来と同じ値)。
+function _buildGrayPrisms(grayFrustums, SC, tol){
+  const prisms = [];
+  (grayFrustums || []).forEach(g => {
+    try{
+      if(!g || !g.ptsMm || g.ptsMm.length < 3) return;
+      const pts = g.ptsMm.map(p => [p.x*SC, p.y*SC]);
+      let a2 = 0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length; a2 += pts[i][0]*pts[j][1] - pts[j][0]*pts[i][1]; }
+      if(a2 < 0) pts.reverse(); // (x,z)で反時計回りに揃える
+      const flat = []; pts.forEach(p => flat.push(p[0], p[1]));
+      const tris = earcut(flat, null, 2);
+      const yTop = (g.tl||0)*SC + tol, yBot = ((g.tl||0) - g.D)*SC - tol;
+      for(let t=0;t+2<tris.length;t+=3){
+        let A = pts[tris[t]], B = pts[tris[t+1]], C = pts[tris[t+2]];
+        const cr = (B[0]-A[0])*(C[1]-A[1]) - (B[1]-A[1])*(C[0]-A[0]);
+        if(Math.abs(cr) < 1e-12) continue;
+        if(cr < 0){ const tmp = B; B = C; C = tmp; }
+        const tri = [A, B, C], H = [];
+        for(let k=0;k<3;k++){
+          const p0 = tri[k], p1 = tri[(k+1)%3];
+          const ex = p1[0]-p0[0], ez = p1[1]-p0[1], len = Math.hypot(ex, ez);
+          // 反時計回りの三角形の辺kの外向き法線は (ez,-ex)/len。tol分だけ外へ広げた半空間 fn<=0 が『内側』
+          H.push(p => (ez*(p[0]-p0[0]) - ex*(p[2]-p0[1]))/len - tol);
+        }
+        H.push(p => p[1] - yTop);   // 上端より上は外
+        H.push(p => yBot - p[1]);   // 下端より下は外
+        prisms.push(H);
+      }
+    }catch(e){ console.warn('[PURPLE-WALL] グレー躯体の角柱化に失敗(この躯体は無視):', e); }
+  });
+  return prisms;
+}
+// 凸多角形(3D点列)を fn の正側(keepPositive)/非正側で切る(Sutherland-Hodgman)
+function _clipPolyByFn(poly, fn, keepPositive){
+  const out = [], n = poly.length;
+  for(let i=0;i<n;i++){
+    const a = poly[i], b = poly[(i+1)%n], da = fn(a), db = fn(b);
+    const ina = keepPositive ? da > 0 : da <= 0, inb = keepPositive ? db > 0 : db <= 0;
+    if(ina) out.push(a);
+    if(ina !== inb){ const t = da/(da-db); out.push([a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]); }
+  }
+  return out;
+}
+// 多角形の集合から、凸な角柱(半空間H全部の内側)を引いた残り(=角柱の外側にある部分)を返す
+function _subtractPrism(polys, H){
+  const out = [];
+  polys.forEach(poly => {
+    let rest = poly;
+    for(const fn of H){
+      const outside = _clipPolyByFn(rest, fn, true);
+      if(outside.length >= 3) out.push(outside);
+      rest = _clipPolyByFn(rest, fn, false);
+      if(rest.length < 3) break;
+    }
+  });
+  return out;
+}
+// 壁の三角形[[x,y,z]x3]からグレーの角柱の内側を切り落とし、残りを三角形の配列で返す(全部消えたら[])
+function _clipTriOutsideGrayPrisms(tri, prisms){
+  let polys = [tri];
+  for(const H of prisms){ polys = _subtractPrism(polys, H); if(!polys.length) return []; }
+  const out = [];
+  polys.forEach(pg => { for(let i=1;i+1<pg.length;i++) out.push([pg[0], pg[i], pg[i+1]]); });
+  return out;
+}
 async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
   if(!frustums || !frustums.length) return null;
   // r098(34回目セッション、Land Logic用): 通常はGL(y=0)の蓋を除去する(土量計算の
@@ -6016,6 +6082,8 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
       }
     }
     // (purpleTriPos/purpleTriUvは関数スコープ側で宣言済み。ここではpushのみ行う)
+    // r126: 紫の壁ハッチから切り落とすグレー(既存躯体)の角柱。許容は頂点量子化(10mm)×2.5=25mm
+    const _grayPrisms = _buildGrayPrisms(opts && opts.grayFrustums, SC, 0.025);
     let removedDegenerate = 0; // r095(item12): 量子化で潰れた縮退三角形の除外カウント
     for(let i=0;i<tv.length;i+=3){
       const i0=tv[i], i1=tv[i+1], i2=tv[i+2];
@@ -6068,21 +6136,32 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           // の法線(u×v)は実体側を向いている。空洞側(すり鉢の内側、見える面)に
           // 貼るには符号を反転させる必要がある。
           const PURPLE_HATCH_CLEAR = -0.01; // 1cm。空洞側(内側)へ少し前に出してZファイティング回避
-          const ax2=ax+nx*PURPLE_HATCH_CLEAR, ay2=ay+ny*PURPLE_HATCH_CLEAR, az2=az+nz*PURPLE_HATCH_CLEAR;
-          const bx2=bx+nx*PURPLE_HATCH_CLEAR, by2=by+ny*PURPLE_HATCH_CLEAR, bz2=bz+nz*PURPLE_HATCH_CLEAR;
-          const cx2=cx+nx*PURPLE_HATCH_CLEAR, cy2=cy+ny*PURPLE_HATCH_CLEAR, cz2=cz+nz*PURPLE_HATCH_CLEAR;
           // UV: 法線と鉛直(0,1,0)から水平方向の接線を作り、それに沿った距離をUに、
           // 高さYをVにする(縦縞ハッチと同じ0.4m周期)。
           let tx=-nz, tz=nx; // (0,1,0)×normalの水平成分 = (-nz,0,nx)
           const tlen=Math.hypot(tx,tz)||1;
           tx/=tlen; tz/=tlen;
           const STRIPE_W=0.4;
-          purpleTriPos.push(ax2,ay2,az2, bx2,by2,bz2, cx2,cy2,cz2);
-          purpleTriUv.push(
-            (ax*tx+az*tz)/STRIPE_W, ay/STRIPE_W,
-            (bx*tx+bz*tz)/STRIPE_W, by/STRIPE_W,
-            (cx*tx+cz*tz)/STRIPE_W, cy/STRIPE_W
-          );
+          // r126: グレー(既存躯体)の角柱の内側は切り落とす(グレーを渡されていなければ三角形そのまま=従来と同じ)
+          const _pieces = _grayPrisms.length
+            ? _clipTriOutsideGrayPrisms([[ax,ay,az],[bx,by,bz],[cx,cy,cz]], _grayPrisms)
+            : [[[ax,ay,az],[bx,by,bz],[cx,cy,cz]]];
+          for(const pc of _pieces){
+            const p0=pc[0], p1=pc[1], p2=pc[2];
+            if(_grayPrisms.length){ // 切り落とし後の破片にも、元と同じスリバー除外(面積1mm²未満/高さ2cm未満)を適用
+              const ux2=p1[0]-p0[0],uy2=p1[1]-p0[1],uz2=p1[2]-p0[2], vx2=p2[0]-p0[0],vy2=p2[1]-p0[1],vz2=p2[2]-p0[2];
+              const ar=Math.hypot(uy2*vz2-uz2*vy2, uz2*vx2-ux2*vz2, ux2*vy2-uy2*vx2)*0.5;
+              if(ar < 1e-6 || (Math.max(p0[1],p1[1],p2[1]) - Math.min(p0[1],p1[1],p2[1])) < 0.02) continue;
+            }
+            purpleTriPos.push(p0[0]+nx*PURPLE_HATCH_CLEAR,p0[1]+ny*PURPLE_HATCH_CLEAR,p0[2]+nz*PURPLE_HATCH_CLEAR,
+                              p1[0]+nx*PURPLE_HATCH_CLEAR,p1[1]+ny*PURPLE_HATCH_CLEAR,p1[2]+nz*PURPLE_HATCH_CLEAR,
+                              p2[0]+nx*PURPLE_HATCH_CLEAR,p2[1]+ny*PURPLE_HATCH_CLEAR,p2[2]+nz*PURPLE_HATCH_CLEAR);
+            purpleTriUv.push(
+              (p0[0]*tx+p0[2]*tz)/STRIPE_W, p0[1]/STRIPE_W,
+              (p1[0]*tx+p1[2]*tz)/STRIPE_W, p1[1]/STRIPE_W,
+              (p2[0]*tx+p2[2]*tz)/STRIPE_W, p2[1]/STRIPE_W
+            );
+          }
         }
       }
     }
@@ -6198,7 +6277,6 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
           globalIdx.push(regV(flat[i], 0, flat[i+1]));
         }
         // 既存の穴埋めと同じく、実機確認済みの向き判定を踏襲
-        const v0i=globalIdx[tris[0]], v1i=globalIdx[tris[1]], v2i=globalIdx[tris[2]];
         const dx1=flat[tris[1]*2]-flat[tris[0]*2], dz1=flat[tris[1]*2+1]-flat[tris[0]*2+1];
         const dx2=flat[tris[2]*2]-flat[tris[0]*2], dz2=flat[tris[2]*2+1]-flat[tris[0]*2+1];
         const flip = (dz1*dx2 - dx1*dz2) >= 0;

@@ -838,7 +838,17 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     renderer.shadowMap.needsUpdate = true;
   }
 
-  window.addEventListener('message', function(ev) {
+  // r126(44回目): 配置モード中にファイル(.vold等)をドロップされても読み込まない。
+//   配置モードは親画面の上に重なったiframeなので、ドロップ先がここ(iframe内)になり、親画面のドロップ処理には届かない。
+//   何もしないと、ブラウザがiframe内でそのファイルを開こうとしてしまうので、既定動作を止めて、2Dモードに戻すよう案内する。
+window.addEventListener('dragover', function(e){ e.preventDefault(); });
+window.addEventListener('drop', function(e){
+  e.preventDefault();
+  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if(!f) return;
+  showToast('⚠ 配置モード中は.voldを読み込めません。配置モードを閉じて2Dモードに戻してから、もう一度ドロップしてください。', 6000);
+});
+window.addEventListener('message', function(ev) {
     const d = ev.data;
     if (!d || !d.type) return;
     if (d.type === 'voldia-request-ready') {

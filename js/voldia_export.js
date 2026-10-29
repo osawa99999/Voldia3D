@@ -741,10 +741,29 @@ async function exportGLB(){
 }
 
 // Voldia版: オブジェクト配置モード（開発中）を別タブで起動し、現在のGLBデータをpostMessageで渡す
+// r126(44回目): 配置モードへ移る時の「読み込み中……」画面。初回は配置モードのiframe(three.js等をCDNから読む)が立ち上がるまで数秒、
+//   画面が真っ暗に見えていた。地形GLBの生成開始〜配置モード側の準備完了(voldia-placement-ready)まで全面に出す。
+//   万一の取りこぼしに備え、60秒で必ず消す。
+function _pmLoadingShow(){
+  let e=document.getElementById('pm-loading');
+  if(!e){
+    e=document.createElement('div'); e.id='pm-loading';
+    e.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;z-index:100001;background:rgba(10,10,10,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;color:#ddd;font-size:1.3em;letter-spacing:.12em;';
+    e.innerHTML='<div class="bl-spin"></div><div>読み込み中……</div>';
+    document.body.appendChild(e);
+  }
+  clearTimeout(window._pmLoadingTimer);
+  window._pmLoadingTimer=setTimeout(_pmLoadingHide,60000);
+}
+function _pmLoadingHide(){
+  clearTimeout(window._pmLoadingTimer);
+  const e=document.getElementById('pm-loading'); if(e&&e.parentNode) e.parentNode.removeChild(e);
+}
 async function openPlacementMode(){
   const btn=document.getElementById('btn-placement');
   if(btn)btn.disabled=true;
   try{
+    _pmLoadingShow(); // r126: 読み込み中……画面
     toast('🏗 配置モード用の地形データを準備中...', 2500);
     // r075: 通常計算後は「GL平面+押し出しオブジェクト固定表示」、土量計算後は従来通り地形Unionを渡す
     const _isNormalPlacement = (window._lastCalcModeForPlacement === 'normal');
@@ -844,6 +863,7 @@ async function openPlacementMode(){
         iframeEl.contentWindow.postMessage({type:'voldia-restore-placement-state', objects:_pendingPlacementRestore}, '*');
         _pendingPlacementRestore = null;
       }
+      _pmLoadingHide(); // r126
       return;
     }
 
@@ -880,6 +900,7 @@ async function openPlacementMode(){
         }
         clearInterval(retryTimer);
         window.removeEventListener('message', onMsg);
+        _pmLoadingHide(); // r126: 配置モード側の準備完了(以降は配置モード側の#loadingが地形解析中を表示)
       }
     }
     window.addEventListener('message', onMsg);
@@ -887,16 +908,138 @@ async function openPlacementMode(){
     let retries=0;
     const retryTimer=setInterval(()=>{
       retries++;
-      if(sent || retries>20){clearInterval(retryTimer);return;}
+      if(sent || retries>20){clearInterval(retryTimer); if(!sent) _pmLoadingHide(); return;}
       try{ iframeEl.contentWindow.postMessage({type:'voldia-request-ready'}, '*'); }catch(e){}
     }, 500);
   }catch(e){
     console.error(e);
+    _pmLoadingHide(); // r126
     toast('⚠ Objectエラー！表示出来ません', 4000);
   }finally{
     if(btn)btn.disabled=false;
   }
 }
+// ════════════════════════════════════════════════════════════════
+//  r126(44回目): (C)=(A)-(B) 差引後の形状を作る
+//  ------------------------------------------------------------
+//  マスター要望: データ出力のPDF/PNGは A(通常体積)・B(減算分) の2種類だけで、A-B(実際に掘る形)が出なかった。
+//  A=グレー以外の掘削の形、B=既存躯体と掘削の重なりの形(Aに含まれる)なので、C=A-B をManifoldの差集合で作り、
+//  A/Bと同じエビル解析(_evRunAnalysis→PNG/PDF)にかける。
+//  ・向き: Aの元メッシュ(Voldia_Union)は外向き(体積+)。Cも外向きで返す(ZIPに書く表示用は他と同じくflipWinding)。
+//  ・Manifoldが作れない/差が合わない時は null を返し、呼び出し側は(A)(B)だけの従来出力に戻る(失敗してもデータ出力全体は止めない)。
+//  ・検証: A,Bそれぞれの体積と、C体積が『A-B』と0.5%以内(Bの2%以内で可)で合うことを確認してから採用する。
+// ════════════════════════════════════════════════════════════════
+// 開いた輪郭(境界エッジ)が水平な1枚の平面(GL面)上にある場合に、その平面でふたをする三角形を返す。閉じた立体なら null。
+//   エビル用のAのGLBはGL面(天端)に天蓋が無い『上が開いたすり鉢』なので、Manifoldで差集合を取る間だけふさぐ必要がある。
+function _capOpenTopTris(vp, tv){
+  const E = new Set(); for(let t=0;t<tv.length;t+=3) for(let k=0;k<3;k++) E.add(tv[t+k]+'_'+tv[t+(k+1)%3]);
+  const nxt = new Map(), bnd = [];
+  for(let t=0;t<tv.length;t+=3) for(let k=0;k<3;k++){ const a=tv[t+k], b=tv[t+(k+1)%3]; if(!E.has(b+'_'+a)){ bnd.push([a,b]); if(!nxt.has(a)) nxt.set(a, []); nxt.get(a).push(b); } }
+  if(!bnd.length) return null;
+  const used = new Set(), loops = [];
+  for(const [a0,b0] of bnd){
+    if(used.has(a0+'_'+b0)) continue;
+    const loop = [a0]; let a=a0, b=b0; used.add(a+'_'+b);
+    for(let g=0; g<100000 && b!==a0; g++){ loop.push(b); const c=(nxt.get(b)||[]).find(x=>!used.has(b+'_'+x)); if(c===undefined) throw new Error('境界が閉じた輪にならない'); used.add(b+'_'+c); a=b; b=c; }
+    loops.push(loop);
+  }
+  const y0 = vp[loops[0][0]*3+1];
+  loops.forEach(lp => lp.forEach(v => { if(Math.abs(vp[v*3+1]-y0) > 1e-4) throw new Error('開口部が水平な平面上にない'); }));
+  const xz = lp => lp.map(v => [vp[v*3], vp[v*3+2]]);
+  const area = pts => { let s=0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length; s += pts[i][0]*pts[j][1]-pts[j][0]*pts[i][1]; } return s/2; };
+  const inside = (pt, pts) => { let c=false; for(let i=0,j=pts.length-1;i<pts.length;j=i++){ if(((pts[i][1]>pt[1])!==(pts[j][1]>pt[1])) && (pt[0] < (pts[j][0]-pts[i][0])*(pt[1]-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0])) c=!c; } return c; };
+  const info = loops.map(lp => { const p = xz(lp); return {lp, p, a:Math.abs(area(p))}; }).sort((u,v) => v.a-u.a);
+  info.forEach((u,i) => { u.depth = info.filter((w,k) => k!==i && w.a>u.a && inside(u.p[0], w.p)).length; });
+  const caps = [];
+  info.filter(u => u.depth%2===0).forEach(outer => {
+    const holes = info.filter(h => h.depth===outer.depth+1 && inside(h.p[0], outer.p));
+    const ring = outer.lp.slice(), flat = []; outer.p.forEach(q => flat.push(q[0], q[1]));
+    const hi = [];
+    holes.forEach(h => { hi.push(flat.length/2); h.lp.forEach(v => ring.push(v)); h.p.forEach(q => flat.push(q[0], q[1])); });
+    const tr = earcut(flat, hi.length?hi:null, 2);
+    if(!tr.length) throw new Error('ふた(天蓋)の三角形分割に失敗');
+    for(let t=0;t<tr.length;t+=3){
+      let a=ring[tr[t]], b=ring[tr[t+1]], c=ring[tr[t+2]];
+      const ux=vp[b*3]-vp[a*3], uz=vp[b*3+2]-vp[a*3+2], wx=vp[c*3]-vp[a*3], wz=vp[c*3+2]-vp[a*3+2];
+      if(uz*wx-ux*wz < 0){ const tmp=b; b=c; c=tmp; } // 法線が+y(上向き=外向き)になる向きに揃える
+      caps.push(a,b,c);
+    }
+  });
+  return {caps, y:y0};
+}
+function _meshToWeldedManifold(m, wasm){
+  const {Manifold, Mesh} = wasm;
+  const P = m.positions, I = m.indices, map = new Map(), vp = [], tv = [];
+  const vid = i => {
+    const x=P[i*3], y=P[i*3+1], z=P[i*3+2];
+    const k = Math.round(x*1e5)+'_'+Math.round(y*1e5)+'_'+Math.round(z*1e5); // 0.01mm(メートル単位の1e-5)で頂点を溶接
+    let v = map.get(k); if(v === undefined){ v = vp.length/3; map.set(k, v); vp.push(x, y, z); } return v;
+  };
+  for(let t=0;t+2<I.length;t+=3){ const a=vid(I[t]), b=vid(I[t+1]), c=vid(I[t+2]); if(a===b||b===c||a===c) continue; tv.push(a,b,c); }
+  // 体積の符号は『開口面がy=0を通る』前提で発散定理が使えるとは限らないので、開口面があれば先にふたをしてから符号を見る
+  const vol = () => { let v=0; for(let t=0;t<tv.length;t+=3){ const a=tv[t]*3, b=tv[t+1]*3, c=tv[t+2]*3;
+    v += (vp[a]*(vp[b+1]*vp[c+2]-vp[b+2]*vp[c+1]) - vp[a+1]*(vp[b]*vp[c+2]-vp[b+2]*vp[c]) + vp[a+2]*(vp[b]*vp[c+1]-vp[b+1]*vp[c]))/6; } return v; };
+  // 向きを外向きに揃える: まず今の向きでふたをして(ふたは+y向き)、体積が負なら全体を反転(=ふたも-y向きになるので、反転前にふたをするのが正しい向きになるよう下で再処理)
+  let cap = null, capY = null;
+  try{ cap = _capOpenTopTris(vp, tv); }catch(e){ throw e; }
+  if(cap){
+    // ふたは「+y向きが外向き」を仮定して作った。メッシュが逆向き(内向き)なら、ふたも含めて全体を反転した方が一貫する
+    const n0 = tv.length; for(const x of cap.caps) tv.push(x);
+    const v = vol();
+    if(v < 0){ // 内向きだった: ふたを除いて元のメッシュを反転 → ふたをもう一度、今度は反転後の向きで作り直す
+      tv.length = n0; for(let t=0;t<tv.length;t+=3){ const tmp=tv[t+1]; tv[t+1]=tv[t+2]; tv[t+2]=tmp; }
+      const cap2 = _capOpenTopTris(vp, tv); for(const x of cap2.caps) tv.push(x); capY = cap2.y;
+    }else capY = cap.y;
+  }else{
+    if(vol() < 0) for(let t=0;t<tv.length;t+=3){ const tmp=tv[t+1]; tv[t+1]=tv[t+2]; tv[t+2]=tmp; }
+  }
+  const man = new Manifold(new Mesh({numProp:3, vertProperties:new Float32Array(vp), triVerts:new Uint32Array(tv)}));
+  if(man.status && man.status() !== 'NoError') throw new Error('Manifold変換に失敗: '+man.status());
+  return {man, capY};
+}
+async function _buildNetMeshes(meshesA, meshesB, wasmOverride){
+  const wasm = wasmOverride || await _getManifoldWasm();
+  const toDelete = []; let capYA = null;
+  try{
+    const mans = (arr, label, isA) => {
+      const list = (arr||[]).filter(m => m && m.positions && m.indices && m.indices.length>=3 && m.name!=='Voldia_ExistingStructure').map(m => {
+        const r=_meshToWeldedManifold(m, wasm); toDelete.push(r.man); if(isA && r.capY!==null) capYA = r.capY; return r.man; });
+      if(!list.length) throw new Error(label+'のメッシュが空');
+      return list.reduce((acc, x) => { if(!acc) return x; const u = acc.add(x); toDelete.push(u); return u; }, null);
+    };
+    const A = mans(meshesA, '(A)', true), B = mans(meshesB, '(B)', false);
+    const vA = A.volume(), vB = B.volume();
+    const C = A.subtract(B); toDelete.push(C);
+    if(C.status && C.status() !== 'NoError') throw new Error('差集合の結果が不正: '+C.status());
+    const vC = C.volume();
+    const expected = vA - vB, tol = Math.max(Math.abs(expected)*0.005, Math.abs(vB)*0.02, 1e-6);
+    // Bの一部がAの外にはみ出している場合は、はみ出し分だけ(A-C)がBより小さくなる。許容は上のtol。
+    if(!(vC > 0) || Math.abs(vC - expected) > tol) throw new Error(`体積が合わない: A=${vA.toFixed(3)} B=${vB.toFixed(3)} C=${vC.toFixed(3)} (A-B=${expected.toFixed(3)})`);
+    const gm = C.getMesh(), np = gm.numProp || 3, nv = gm.vertProperties.length/np;
+    const pos = new Float32Array(nv*3);
+    for(let i=0;i<nv;i++){ pos[i*3]=gm.vertProperties[i*np]; pos[i*3+1]=gm.vertProperties[i*np+1]; pos[i*3+2]=gm.vertProperties[i*np+2]; }
+    // 差集合の間だけふさいでいたGL面の天蓋を取り除き、Aと同じ『上が開いたすり鉢』に戻す(上向きの水平面でGL面の高さにある三角形だけ)
+    const idx = [];
+    for(let t=0;t<gm.triVerts.length;t+=3){
+      const a=gm.triVerts[t], b=gm.triVerts[t+1], c=gm.triVerts[t+2];
+      if(capYA!==null){
+        const ya=pos[a*3+1], yb=pos[b*3+1], yc=pos[c*3+1];
+        if(Math.abs(ya-capYA)<1e-4 && Math.abs(yb-capYA)<1e-4 && Math.abs(yc-capYA)<1e-4){
+          const ux=pos[b*3]-pos[a*3], uz=pos[b*3+2]-pos[a*3+2], wx=pos[c*3]-pos[a*3], wz=pos[c*3+2]-pos[a*3+2];
+          if(uz*wx-ux*wz > 0) continue; // 上向きの天蓋面(法線y>0)は捨てる
+        }
+      }
+      idx.push(a,b,c);
+    }
+    return {meshes:[{name:'Voldia_NetExcavation', positions:pos, indices:new Uint32Array(idx)}], volumeM3:vC, aM3:vA, bM3:vB, capped:capYA!==null};
+  }catch(e){
+    console.warn('[C側] 差引後(A-B)の形状生成に失敗、(A)(B)のみで続行します:', e);
+    return null;
+  }finally{
+    toDelete.forEach(x => { try{ x.delete(); }catch(e){} });
+  }
+}
+
 function epSet(pct,msg){
   const b=document.getElementById('ep-bar'),el=document.getElementById('ep-msg');
   if(b)b.style.width=pct+'%';if(el)el.textContent=msg;
@@ -1726,6 +1869,33 @@ async function runEvidenceAnalysis(mode){
     }
     const finalTotal = totalVolume - totalVolumeB;
 
+    // r126(44回目・マスター要望): (C)=(A)-(B)=差引後の形状も、(A)(B)と同じ方法でPNG/PDF/GLBに出力する。
+    // 既存の(A)(B)の解析・出力には一切触れず、(B)が出せた時だけ、同じAPI(_evRunAnalysis/_evRenderPlanView/_evGeneratePDFData)をもう1回叩く。
+    // 失敗しても(A)(B)の出力は従来どおり(Cだけ出ない)。
+    let meshesC=null, pngBase64C=null, pdfDataC=null, totalVolumeC=0;
+    if(mode==='earthwork' && glbB && meshesA && meshesB){
+      try{
+        epSet(93,'(C)差引後の形状を生成・解析中...');
+        await new Promise(r=>setTimeout(r,20));
+        const net = await _buildNetMeshes(meshesA, meshesB);
+        if(net){
+          const glbC = encodeMultiGLB(net.meshes);
+          const evC = await _evRunAnalysis(mode, glbC);
+          if(evC.count>0){
+            totalVolumeC = evC.totalVolume;
+            _evGenerateExcelData(); // A/Bと同じ手順(PNG/PDFの前にExcel用データ生成)。Cの結果自体はExcelには使わない
+            pngBase64C = _evRenderPlanView(2048,false).split(',')[1];
+            pdfDataC = _evGeneratePDFData();
+            meshesC = net.meshes;
+            console.log(`[C側] 差引後(A-B): メッシュ体積 ${net.volumeM3.toFixed(3)}m³ / エビル解析合計 ${totalVolumeC.toFixed(3)}m³ / (A)-(B)エビル合計 ${finalTotal.toFixed(3)}m³`);
+          }
+        }
+      }catch(e){
+        console.warn('[C側] 差引後の解析に失敗、(A)(B)のみで続行します:', e);
+        meshesC=null; pngBase64C=null; pdfDataC=null; totalVolumeC=0;
+      }
+    }
+
     epSet(95,'ZIPに圧縮中...');
     await new Promise(r=>setTimeout(r,20));
     // r046(41回目): 命名規則を「Voldia_○○export_yymmdd_hhmm」(○○=Structure/Earthwork)に変更(マスター指示: 全出力ファイルを「名前_日付」+日付はyymmdd_hhmmに統一)。
@@ -1760,6 +1930,12 @@ async function runEvidenceAnalysis(mode){
       zip.file(`${baseName}_減算分.pdf`, pdfDataB, {date:_zipDate});
       zip.file(`${baseName}_通常体積.glb`, glbForZipA, {date:_zipDate});
       zip.file(`${baseName}_減算分.glb`, glbForZipB, {date:_zipDate});
+      // r126(44回目): (C)=(A)-(B) 差引後(実際に掘る形)。名前は (A)通常体積・(B)減算分 に並べて「差引後」
+      if(pngBase64C && pdfDataC && meshesC){
+        zip.file(`${baseName}_差引後.png`, pngBase64C, {base64:true, date:_zipDate});
+        zip.file(`${baseName}_差引後.pdf`, pdfDataC, {date:_zipDate});
+        zip.file(`${baseName}_差引後.glb`, encodeMultiGLB(meshesC.map(m=>({...m, flipWinding:true}))), {date:_zipDate});
+      }
       // r024(30回目セッション、マスター指示): (A)+(B)合体GLBを追加。既存の2つの
       // encodeMultiGLB呼び出し結果(バイナリ)を後から結合するのではなく、それぞれが
       // 使った生メッシュ配列(meshesA/meshesB、ノード名で区別済み)をそのまま連結して
