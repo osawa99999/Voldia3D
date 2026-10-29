@@ -1,6 +1,10 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (voldia3d_voldia_r104.jsより分離)
 // ============================================================
+// 【r125】(44回目。Voldia_261029_1310.vold『隣り合う2オブジェクトの法面に角(とんがり)が出る』)
+//   原因・対処は _mergeTouchingSameDepthFrustums のコメント参照。3D表示(buildManifoldUnionGeom)と体積(buildUnionFrustumGeometry→_calcVolumeFallback)の両方に適用。
+//   同条件(深さ・天端・余掘り・法面)で接する/重なる非紫・非グレー・穴なしのオブジェクトだけ、オフセット前に1輪郭へ合体。合体しない時は従来と完全に同じ。
+//   安全装置: 合体した輪郭が凹形だと既存の層分け(loft)で3Dが壊れることがあるので、合体した1図形を実際に3D化して数値積分と0.5%以内で合う時だけ採用(_mergeSameDepthFrustumsValidated)。合わなければ従来どおり個別。
 // 【r124】(44回目。Voldia_261027_1508.vold『3Dイメージで山留ハッチが一部だけ消える』=配置モードでは出る)
 //   原因: r117の山留ハッチ絞り込み(_clipYamadomeOverlayToContact)が『三角形の3頂点が辺kの範囲[-0.5m,長さ+0.5m]内』を要求していた。
 //         山留に一直線上の頂点(折れ角0°。1508.voldは辺5→辺6)があると、山留でカットした壁は辺5と辺6にまたがる1枚の大きな三角形になり、
@@ -1252,11 +1256,132 @@ function buildShellMesh(frustums, offsetXmm, offsetYmm){
 //  体積計算（_calcVolumeFallback）を実行し、3D表示用データを返す。
 //  3Dメッシュ本体は initThree_watertight → buildManifoldUnionGeom で生成。
 // ────────────────────────────────────────────────────────────────
+// ============================================================
+// r125(44回目): 角問題 — 同じ条件で隣り合う/重なるオブジェクトを、法面オフセットの『前』に1つのポリゴンへ合体する。
+//   症状(Voldia_261029_1310.vold): 見た目が同じ台形でも、1個で描くと3Dがきれいで、四角形+三角形の2個に分けて描くと
+//         三角形の鋭角(45°)の角から細長いとんがり(法面の角)が出る。実際の根切ではこうならない。
+//   原因: 各オブジェクトを個別にオフセット(マイター)してから合体していた。三角形の鋭角は、合体後は台形の鈍角(135°)の内側の点になるのに、
+//         個別にマイターすると鋭角のまま 1/sin(22.5°)=2.6倍 先まで伸びる。『オフセットの合体 ≠ 合体のオフセット』(マイターでは成り立たない)。
+//         体積(_calcVolumeFallback)も同じ作りなので、とんがり分の体積が表示値に乗っていた。
+//   対処: 同条件(深さD・天端tl・余掘りOD・法面noSlope)のオブジェクトで、ポリゴンが接する/重なるものを先に1つへ合体してからオフセットする。
+//         ・対象外(従来どおり): 紫・グレー、穴付き、オフセット0(noSlope かつ OD=0 なら合体の有無で同じ形)、深さ等の条件が違うもの
+//         ・2個ずつClipperで合体を試し『ちょうど1つの輪郭(穴なし・角つまみなし)になる』ものだけ繋ぐ。ならなければ何もしない
+//         ・触れ合っていないオブジェクトは配列ごと元のまま(同じオブジェクトを返す)＝既存の形・体積は一切変わらない
+//   限界: 深さが違う隣接オブジェクトは対象外(同じ高さでもオフセット量が違うので、合体してからのオフセットは成り立たない)。
+function _mergeTouchingSameDepthFrustums(frustums){
+  try{
+    if(!frustums || frustums.length < 2) return frustums;
+    const SF = 100; // 0.01mm
+    const toPath = pts => { const r = pts.map(p => ({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
+      let a = 0; for(let i=0;i<r.length;i++){ const j=(i+1)%r.length; a += r[i].X*r[j].Y - r[j].X*r[i].Y; }
+      if(a < 0) r.reverse(); return r; };
+    const unionOf = paths => { const cl = new ClipperLib.Clipper(); paths.forEach(pa => cl.AddPath(pa, ClipperLib.PolyType.ptSubject, true));
+      const sol = new ClipperLib.Paths(); cl.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero); return sol; };
+    // 1個の輪郭(穴なし・角つまみ=同じ頂点の重複なし)ならそのパス、それ以外はnull
+    const single = sol => { if(!sol || sol.length !== 1) return null; const pa = sol[0]; if(pa.length < 3) return null;
+      if(!ClipperLib.Clipper.Orientation(pa)) return null;
+      const seen = new Set(); for(const q of pa){ const k = q.X+'_'+q.Y; if(seen.has(k)) return null; seen.add(k); }
+      return pa; };
+    const groups = new Map();
+    frustums.forEach((f,i) => {
+      if(!f || f.color === 'gray' || f.color === 'purple') return;
+      if(f.noSlope && !(f.OD > 0)) return;
+      if(f.holesMm && f.holesMm.length) return;
+      if(!f.ptsMm || f.ptsMm.length < 3) return;
+      const key = [f.D, f.tl||0, f.OD||0, f.noSlope?1:0].join('|');
+      if(!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(i);
+    });
+    const drop = new Set(), repl = new Map();
+    groups.forEach(idxs => {
+      if(idxs.length < 2) return;
+      const paths = new Map(idxs.map(i => [i, toPath(frustums[i].ptsMm)]));
+      const par = new Map(idxs.map(i => [i, i]));
+      const find = i => { while(par.get(i) !== i){ par.set(i, par.get(par.get(i))); i = par.get(i); } return i; };
+      for(let a=0;a<idxs.length;a++) for(let b=a+1;b<idxs.length;b++){
+        if(find(idxs[a]) === find(idxs[b])) continue;
+        if(single(unionOf([paths.get(idxs[a]), paths.get(idxs[b])]))) par.set(find(idxs[b]), find(idxs[a]));
+      }
+      const clusters = new Map();
+      idxs.forEach(i => { const r = find(i); if(!clusters.has(r)) clusters.set(r, []); clusters.get(r).push(i); });
+      clusters.forEach(mem => {
+        if(mem.length < 2) return;
+        const pa = single(unionOf(mem.map(i => paths.get(i))));
+        if(!pa) return; // 全体でも1輪郭にならなければ従来どおり
+        const pts = pa.map(q => ({x:q.X/SF, y:q.Y/SF}));
+        let ar = 0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length; ar += pts[i].x*pts[j].y - pts[j].x*pts[i].y; }
+        const base = frustums[mem[0]];
+        const mf = Object.assign({}, base, {
+          ptsMm: pts, holesMm: [], area: Math.abs(ar)/2/1e6,
+          x1: Math.min(...mem.map(i => frustums[i].x1)), x2: Math.max(...mem.map(i => frustums[i].x2)),
+          y1: Math.min(...mem.map(i => frustums[i].y1)), y2: Math.max(...mem.map(i => frustums[i].y2)),
+          _mergedFrom: mem.length, _members: mem.map(i => frustums[i])
+        });
+        repl.set(mem[0], mf); mem.slice(1).forEach(i => drop.add(i));
+      });
+    });
+    if(!repl.size) return frustums; // 何も合体しない時は元の配列をそのまま返す
+    const out = []; frustums.forEach((f,i) => { if(drop.has(i)) return; out.push(repl.has(i) ? repl.get(i) : f); });
+    if(frustums._offsetX !== undefined){ out._offsetX = frustums._offsetX; out._offsetY = frustums._offsetY; }
+    console.log(`[MERGE-SAME-DEPTH] 同条件で接する/重なるオブジェクトを法面オフセット前に合体: ${frustums.length}個→${out.length}個`);
+    return out;
+  }catch(e){
+    console.warn('[MERGE-SAME-DEPTH] 合体に失敗したため従来どおり個別に処理します:', e);
+    return frustums;
+  }
+}
+// r125: 合体した輪郭が安全に3D化できるかの自己チェック付きラッパー。
+//   背景: 合体で輪郭が凹形(L字など)になると、既存の層分け(loft)が苦手な形になり3Dメッシュが壊れることがある(乱数テストで体積が1/3になる例)。
+//         個別オブジェクトのままなら壊れない形でも壊れるので、合体は『安全と確認できた時だけ』使う。
+//   方法: 合体した1図形を実際に3D化し、独立した数値積分(_calcVolumeFallback)の体積と0.5%以内で一致するかを見る。合わない/例外なら、その合体は取りやめて元のオブジェクトに戻す(＝従来と同じ)。
+//   同じ入力なら必ず同じ判定(体積側・3D側で結果が食い違わないよう、判定はキャッシュ)。
+function _openTopMeshVolumeMm3(res){
+  const P = res.positions, idxLists = [res.cyanIndices, res.redIndices].filter(a => a && a.length);
+  if(!P || !idxLists.length) return 0;
+  let yTop = -Infinity; for(let i=1;i<P.length;i+=3) if(P[i] > yTop) yTop = P[i];
+  let v = 0;
+  idxLists.forEach(I => { for(let t=0;t+2<I.length;t+=3){
+    const a=I[t]*3, b=I[t+1]*3, c=I[t+2]*3;
+    const ax=P[a], ay=P[a+1]-yTop, az=P[a+2], bx=P[b], by=P[b+1]-yTop, bz=P[b+2], cx=P[c], cy=P[c+1]-yTop, cz=P[c+2];
+    v += (ax*(by*cz-bz*cy) - ay*(bx*cz-bz*cx) + az*(bx*cy-by*cx)) / 6;
+  }});
+  return Math.abs(v) * 1e9; // m3→mm3
+}
+const _MERGE_VALID_TOL = 0.005; // 0.5%
+async function _mergeSameDepthFrustumsValidated(frustums, offsetXmm, offsetYmm, isDoboku){
+  const merged = _mergeTouchingSameDepthFrustums(frustums);
+  if(merged === frustums) return frustums;
+  window._mergeValidCache = window._mergeValidCache || new Map();
+  const out = []; let kept = 0;
+  for(const f of merged){
+    if(!f._mergedFrom){ out.push(f); continue; }
+    const key = JSON.stringify([f.ptsMm.map(p => [Math.round(p.x*100), Math.round(p.y*100)]), f.D, f.tl||0, f.OD||0, f.noSlope?1:0, offsetXmm||0, offsetYmm||0, window._vertexQuantMm]);
+    let ok = window._mergeValidCache.get(key);
+    if(ok === undefined){
+      ok = false; let cacheIt = true;
+      try{
+        const probe = Object.assign({}, f, {ptsMm: f.ptsMm.map(p => ({x:p.x, y:p.y})), holesMm: []}); // buildManifoldUnionGeomは入力を量子化で書き換えるのでコピーで試す
+        const num = _calcVolumeFallback([probe], offsetXmm, offsetYmm);
+        const res = await buildManifoldUnionGeom([probe], isDoboku !== false, offsetXmm, offsetYmm, {_noMerge:true});
+        if(res && res.positions && num > 0){
+          const vol = _openTopMeshVolumeMm3(res);
+          ok = Math.abs(vol - num) / num <= _MERGE_VALID_TOL;
+          if(!ok) console.warn(`[MERGE-SAME-DEPTH] 合体した輪郭の3Dが数値積分と合わない(メッシュ ${(vol/1e9).toFixed(3)}m3 / 数値 ${(num/1e9).toFixed(3)}m3)ため、この合体は取りやめて個別のまま処理します`);
+        }
+      }catch(e){ ok = false; cacheIt = false; } // 例外(Manifold未ロード等)は一時的な失敗かもしれないのでキャッシュしない
+      if(cacheIt) window._mergeValidCache.set(key, ok);
+    }
+    if(ok){ out.push(f); kept++; } else out.push(...f._members);
+  }
+  if(!kept) return frustums;
+  if(frustums._offsetX !== undefined){ out._offsetX = frustums._offsetX; out._offsetY = frustums._offsetY; }
+  return out;
+}
 async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
   // 26回目セッション新規: 「既存躯体」機能 ― グレー色のオブジェクトは掘削対象
   // ではなく、既にそこにコンクリートがある扱い。個別ジオメトリ・体積計算からは
   // 分離し、後段で掘削体積との重複分だけを差し引く。
-  const excavFrustums = frustums.filter(f => f.color !== 'gray');
+  const excavFrustums = await _mergeSameDepthFrustumsValidated(frustums.filter(f => f.color !== 'gray'), offsetXmm, offsetYmm, true); // r125: 角問題(同条件で接するオブジェクトは法面オフセット前に合体)
   const structFrustums = frustums.filter(f => f.color === 'gray');
 
   // 個別ジオメトリ（表示用・デバッグ用に保持）
@@ -4933,7 +5058,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r124(base:VoldiaM r069)"; // r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r125(base:VoldiaM r069)"; // r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5536,6 +5661,7 @@ async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, 
     return true;
   });
   if(!frustums.length) return null;
+  if(!(opts && opts._noMerge)) frustums = await _mergeSameDepthFrustumsValidated(frustums, _ydOffsetX, _ydOffsetY, isDoboku); // r125: 角問題(同条件で接するオブジェクトは法面オフセット前に合体)
   // r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁は作らない)。山留が無ければ何もしない。
   {
     const _yr = _purpleYieldToYamadome(frustums, getYamadomeMmPolygon(_ydOffsetX, _ydOffsetY));
