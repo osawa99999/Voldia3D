@@ -1,4 +1,6 @@
 // ============================================================
+// r127(45回目): 差引後(C)の不良修正。C=A-Bだと、Aの外壁(山留バッチ角1°・微テーパー15mmで傾く)とBの壁(垂直)が食い違って5〜50mmの薄い楔が壁として残り、既存躯体の部分が底の抜けた箱になっていた(Voldia_261031_1806.vold)。
+//   (B)関数が既存躯体の実体Gも返し、_buildNetMeshesは C=A-G を第一候補に(Gは掘削の外まで広がるので楔が出ない)。Gが無い/作れない/体積がA-Bと合わない時は従来のA-B。(A)(B)の出力・解析は無変更。前版=backup/voldia_export_r126b.js
 // 現行バージョン: r049 (42回目: 縮退三角形(スリバー)判定に『実寸の高さ<60mm』を追加。長い壁を割った本物の法面の帯が「面積/最長辺²<0.01」で誤って除外され、壁ごと数量から消える不具合の修正。
 //   該当箇所=土量計算/通常計算の面クラスタ化(isSliver判定)の1か所のみ。 r048 (41回目: GLBの材質色を濃いグレーに変更(全GLB出力共通。encodeMultiGLB内のGLB_BASE_COLOR)。r047 (41回目: ①ファイル名の日付を yymmdd_hhmm に統一(CSV・GLB・データ出力ZIP。名前を先頭・日付を後ろに) ②配置モードのiframe参照を voldia_placement_v0080.html に変更)。 r045 (40回目: 捨てコン+砕石・余掘りの読み取りをparseInputNum()経由に変更(桁区切り「1,000」を正しく数値化)、.vold読込は_setMmInput()で整形・負の値は0)。r044 (40回目: 配置モードのiframe参照を voldia_placement_v0079.html に変更=古いscriptタグ(404)を除去した版)。r043 (40回目: applyVoldData(data,opts)に{loadVec:false}を追加=元図の線を読み込まない選択に対応。loadVoldFileは呼び出し元が無くなったため削除)。r042 (40回目: .voldに作成方法(calcMode: 'normal'|'doboku')を保存・復元。3D生成方法ダイアログ用。他は無改造)。r041 (39回目: 書き込みのみだったtoolsLocked変数への代入1行を削除。他は無改造)。r040 (37回目セッション: 配置モードHTMLの参照をv0078に戻した(作業員はvoldia_models.jsに統合)。r038:  現状地盤GL(glOffsetMm)を.voldに保存・復元。r037:  (B)重複GLB(Voldia_OverlapForExcel)をrunCalcのfsキャッシュから作るようにした(GL≠0で深さ・形状が異常だった不具合)。r036:  配置モードの既存躯体も現状地盤GL≠0で「現状地盤=0」座標系に揃えた(voldia3d.js r107と対)。r035: 36回目セッション: 既存躯体の底面∞(doboku系統のみ)に対応 + トースト。r034=r033スリバー橋渡し+r096山留送信 を統合済み。ファイル名は固定)
 // voldia_export.js — DXF/GLB/PDF/Excel出力+エビル(Evidence Builder)機能 (voldia3d_voldia_r104.jsより分離)
@@ -610,6 +612,20 @@ async function buildExistingStructureOverlapGLBBytes(progressCb){
   if(progressCb) progressCb(70,'(B)GLBエンコード中...');
   const meshes=[{name:'Voldia_OverlapForExcel', positions, indices: rawIdx}];
   const glb=encodeMultiGLB(meshes);
+  // r127(45回目): 差引後(C)専用に、(B)と同じstructFrustumsから既存躯体(グレー)のソリッド(1個ずつ)も返す。
+  // (C)=A-Bだと、Aの外壁(山留バッチ角1°・微テーパー15mmで傾く)とBの壁(垂直)が食い違い、差引後に5〜50mmの薄い楔が壁として残って
+  // 既存躯体の部分が箱のように見える(底が抜けて見える)。既存躯体の実体Gは掘削の外まで広がっているので、A-Gなら楔が出ない。
+  // (A)(B)の出力・解析にはこの戻り値は一切使わない。作れなければ空配列(=従来のA-B)。
+  let structMeshes=[];
+  try{
+    structMeshes = structFrustums.map(f=>{
+      const gg = buildFrustumGeometry({...f, noSlope:true, OD:0});
+      if(!gg || !gg.positions || !gg.positions.length) return null;
+      const gp = new Float32Array(gg.positions.length);
+      for(let j=0;j<gp.length;j++) gp[j]=gg.positions[j]*S;
+      return {name:'Voldia_ExistingStructure', positions:gp, indices:Uint32Array.from(gg.indices)};
+    }).filter(Boolean);
+  }catch(e){ console.warn('[C側] 既存躯体ソリッドの生成に失敗(従来のA-Bで続行):', e); structMeshes=[]; }
   // 【診断用・段階2検証後に撤去】既存躯体表示に使う正式な基準値
   // (window._lastCalcABBreakdown.existingOverlapM3、r017でrunCalc()内に既に用意されている
   // ものを流用)とこのGLBの体積を突き合わせ、法面込みでも一致するか確認する
@@ -619,7 +635,7 @@ async function buildExistingStructureOverlapGLBBytes(progressCb){
     console.log('[DIAG-B-GLB] 基準値(_lastCalcABBreakdown.existingOverlapM3)='+(_refVol==null?'未計算':_refVol.toFixed(4))+'m³ / (B)GLBメッシュ体積='+_diagVol.toFixed(4)+'m³'+(_refVol==null?'':' / 差='+(_diagVol-_refVol).toFixed(4)+'m³'));
   }catch(e){ console.warn('[DIAG-B-GLB] 検証ログでエラー:', e); }
   // r024(30回目セッション、マスター指示): (A)+(B)合体GLB組み立て用に生meshesも返す
-  return {glb, meshes, totalVerts: positions.length/3, totalTris: rawIdx.length/3};
+  return {glb, meshes, structMeshes, totalVerts: positions.length/3, totalTris: rawIdx.length/3};
 }
 
 // r075: 通常計算後に配置モードを開く専用のGLB生成。
@@ -967,7 +983,7 @@ function _capOpenTopTris(vp, tv){
   });
   return {caps, y:y0};
 }
-function _meshToWeldedManifold(m, wasm){
+function _meshToWeldedManifold(m, wasm, unifyOrient){
   const {Manifold, Mesh} = wasm;
   const P = m.positions, I = m.indices, map = new Map(), vp = [], tv = [];
   const vid = i => {
@@ -976,6 +992,19 @@ function _meshToWeldedManifold(m, wasm){
     let v = map.get(k); if(v === undefined){ v = vp.length/3; map.set(k, v); vp.push(x, y, z); } return v;
   };
   for(let t=0;t+2<I.length;t+=3){ const a=vid(I[t]), b=vid(I[t+1]), c=vid(I[t+2]); if(a===b||b===c||a===c) continue; tv.push(a,b,c); }
+  // r127(45回目): 閉じた立体の三角形の向きを、辺を共有する隣どうしで幅優先に揃える(既存躯体ソリッドは上面と底面の巻きが同じ向きで、
+  //   このままだとManifoldが非多様体と判定する)。全体の裏表は下の体積の符号で決まる。(A)(B)には使わない(unifyOrient=trueの時だけ)。
+  if(unifyOrient){
+    const nT=tv.length/3, tri=[]; for(let q=0;q<nT;q++) tri.push([tv[q*3],tv[q*3+1],tv[q*3+2]]);
+    const em=new Map(); tri.forEach((tr,i)=>{ for(let k=0;k<3;k++){ const a=tr[k], b=tr[(k+1)%3], key=Math.min(a,b)+'_'+Math.max(a,b); let l=em.get(key); if(!l){ l=[]; em.set(key,l); } l.push(i); } });
+    const seen=new Array(nT).fill(false);
+    const fwd=(tr,a,b)=>{ for(let k=0;k<3;k++) if(tr[k]===a && tr[(k+1)%3]===b) return true; return false; };
+    for(let s0=0;s0<nT;s0++){ if(seen[s0]) continue; seen[s0]=true; const st=[s0];
+      while(st.length){ const i=st.pop(), tr=tri[i];
+        for(let k=0;k<3;k++){ const a=tr[k], b=tr[(k+1)%3], key=Math.min(a,b)+'_'+Math.max(a,b);
+          for(const j of em.get(key)){ if(j===i||seen[j]) continue; const u=tri[j]; if(fwd(u,a,b)) tri[j]=[u[0],u[2],u[1]]; seen[j]=true; st.push(j); } } } }
+    tv.length=0; tri.forEach(tr=>{ tv.push(tr[0],tr[1],tr[2]); });
+  }
   // 体積の符号は『開口面がy=0を通る』前提で発散定理が使えるとは限らないので、開口面があれば先にふたをしてから符号を見る
   const vol = () => { let v=0; for(let t=0;t<tv.length;t+=3){ const a=tv[t]*3, b=tv[t+1]*3, c=tv[t+2]*3;
     v += (vp[a]*(vp[b+1]*vp[c+2]-vp[b+2]*vp[c+1]) - vp[a+1]*(vp[b]*vp[c+2]-vp[b+2]*vp[c]) + vp[a+2]*(vp[b]*vp[c+1]-vp[b+1]*vp[c]))/6; } return v; };
@@ -997,7 +1026,7 @@ function _meshToWeldedManifold(m, wasm){
   if(man.status && man.status() !== 'NoError') throw new Error('Manifold変換に失敗: '+man.status());
   return {man, capY};
 }
-async function _buildNetMeshes(meshesA, meshesB, wasmOverride){
+async function _buildNetMeshes(meshesA, meshesB, wasmOverride, meshesG){
   const wasm = wasmOverride || await _getManifoldWasm();
   const toDelete = []; let capYA = null;
   try{
@@ -1009,10 +1038,28 @@ async function _buildNetMeshes(meshesA, meshesB, wasmOverride){
     };
     const A = mans(meshesA, '(A)', true), B = mans(meshesB, '(B)', false);
     const vA = A.volume(), vB = B.volume();
-    const C = A.subtract(B); toDelete.push(C);
+    const expected = vA - vB, tol = Math.max(Math.abs(expected)*0.005, Math.abs(vB)*0.02, 1e-6);
+    // r127(45回目): 第一候補は C=A-G(G=既存躯体の実体)。A-Bだと、Aの外壁(山留バッチ角1°・微テーパーで傾く)とBの壁(垂直)の食い違いで
+    //   5〜50mmの薄い楔が残り、既存躯体の部分が底の抜けた箱に見える(Voldia_261031_1806.vold)。Gは掘削の外まで広がるので楔が出ない。
+    //   Gが無い・Manifoldにできない・体積がA-Bと合わない時は、従来どおりC=A-Bに戻る(体積の検証は従来と同じtol)。
+    let C = null, usedG = false;
+    if(meshesG && meshesG.length){
+      try{
+        const gl = meshesG.filter(m => m && m.positions && m.indices && m.indices.length>=3).map(m => { const r=_meshToWeldedManifold(m, wasm, true); toDelete.push(r.man); return r.man; });
+        if(gl.length){
+          const G = gl.reduce((acc, x) => { if(!acc) return x; const u = acc.add(x); toDelete.push(u); return u; }, null);
+          const cg = A.subtract(G); toDelete.push(cg);
+          if((!cg.status || cg.status() === 'NoError')){
+            const v = cg.volume();
+            if(v > 0 && Math.abs(v - expected) <= tol){ C = cg; usedG = true; }
+            else console.warn(`[C側] A-G の体積が合わないためA-Bに戻します: A-G=${v.toFixed(3)} A-B=${expected.toFixed(3)}`);
+          }
+        }
+      }catch(e){ console.warn('[C側] A-G の生成に失敗、A-Bに戻します:', e); C = null; usedG = false; }
+    }
+    if(!C){ C = A.subtract(B); toDelete.push(C); }
     if(C.status && C.status() !== 'NoError') throw new Error('差集合の結果が不正: '+C.status());
     const vC = C.volume();
-    const expected = vA - vB, tol = Math.max(Math.abs(expected)*0.005, Math.abs(vB)*0.02, 1e-6);
     // Bの一部がAの外にはみ出している場合は、はみ出し分だけ(A-C)がBより小さくなる。許容は上のtol。
     if(!(vC > 0) || Math.abs(vC - expected) > tol) throw new Error(`体積が合わない: A=${vA.toFixed(3)} B=${vB.toFixed(3)} C=${vC.toFixed(3)} (A-B=${expected.toFixed(3)})`);
     const gm = C.getMesh(), np = gm.numProp || 3, nv = gm.vertProperties.length/np;
@@ -1031,7 +1078,7 @@ async function _buildNetMeshes(meshesA, meshesB, wasmOverride){
       }
       idx.push(a,b,c);
     }
-    return {meshes:[{name:'Voldia_NetExcavation', positions:pos, indices:new Uint32Array(idx)}], volumeM3:vC, aM3:vA, bM3:vB, capped:capYA!==null};
+    return {meshes:[{name:'Voldia_NetExcavation', positions:pos, indices:new Uint32Array(idx)}], volumeM3:vC, aM3:vA, bM3:vB, capped:capYA!==null, usedGray:usedG};
   }catch(e){
     console.warn('[C側] 差引後(A-B)の形状生成に失敗、(A)(B)のみで続行します:', e);
     return null;
@@ -1686,13 +1733,16 @@ function _evGenerateExcelData(){
 // スタイル崩壊の真因だったため、read()を廃止。_evGenerateExcelData()が計算と同時に
 // 返すようになった生のワークシートオブジェクト(wsA/wsB)をそのまま受け取って
 // 新しいworkbookに追加するだけにした。
-function _evMergeABExcel(wsA, wsB, totalA, totalB, finalTotal){
+// r126b(44回目・マスター要望): 差引後(C)の計算書も同じxlsxに入れる。wsC/totalCは省略可(Cが作れなかった時は従来どおり(A)(B)のみ)。
+//   Cは(A)-(B)の形状を別に解析した結果なので、総合計(A)-(B)とは数値が少し違うことがある。総合計シートには参考行として並べるだけで、総合計の値は変えない。
+function _evMergeABExcel(wsA, wsB, totalA, totalB, finalTotal, wsC, totalC){
   const summaryData = [
     ['項目', '体積(m³)'],
     ['(A) 基本形状', totalA],
     ['(B) 既存躯体重複(控除)', totalB],
     ['総合計 (A)-(B)', finalTotal]
   ];
+  if(wsC) summaryData.push(['(C) 差引後の形状(参考・別解析)', totalC]);
   const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
   wsSummary['!cols']=[{wch:24},{wch:14}];
   // r029(30回目セッション、マスター報告「Excelに色が無い」の残り分・原因特定):
@@ -1719,6 +1769,7 @@ function _evMergeABExcel(wsA, wsB, totalA, totalB, finalTotal){
   XLSX.utils.book_append_sheet(merged, wsSummary, "総合計");
   XLSX.utils.book_append_sheet(merged, wsA, "(A)基本形状");
   XLSX.utils.book_append_sheet(merged, wsB, "(B)既存躯体重複");
+  if(wsC) XLSX.utils.book_append_sheet(merged, wsC, "(C)差引後"); // r126b
   return XLSX.write(merged, {bookType:'xlsx', type:'array'});
 }
 
@@ -1843,7 +1894,7 @@ async function runEvidenceAnalysis(mode){
     // 一致しない場合は速やかにfalseへ戻すこと(過去2回、机上の修正が実機で誤りと
     // 判明した実績があるため)。
     const B_PIPELINE_ENABLED = true;
-    let totalVolumeB=0, glbB=null, meshesB=null, excelDataB=null, wsExcelB=null, pngBase64B=null, pdfDataB=null;
+    let totalVolumeB=0, glbB=null, meshesB=null, meshesG=null, excelDataB=null, wsExcelB=null, pngBase64B=null, pdfDataB=null;
     if(B_PIPELINE_ENABLED && mode==='earthwork'){
       try{
         epSet(90,'(B)既存躯体重複を解析中...');
@@ -1851,6 +1902,7 @@ async function runEvidenceAnalysis(mode){
         if(bResult && bResult.glb){
           glbB = bResult.glb;
           meshesB = bResult.meshes;
+          meshesG = bResult.structMeshes || null; // r127: (C)専用
           const evB = await _evRunAnalysis(mode, glbB);
           if(evB.count>0){
             totalVolumeB = evB.totalVolume;
@@ -1864,7 +1916,7 @@ async function runEvidenceAnalysis(mode){
         }
       }catch(e){
         console.warn('[B側] 既存躯体重複の解析に失敗、(A)のみで続行します:', e);
-        totalVolumeB=0; glbB=null; meshesB=null; excelDataB=null; wsExcelB=null; pngBase64B=null; pdfDataB=null;
+        totalVolumeB=0; glbB=null; meshesB=null; meshesG=null; excelDataB=null; wsExcelB=null; pngBase64B=null; pdfDataB=null;
       }
     }
     const finalTotal = totalVolume - totalVolumeB;
@@ -1872,18 +1924,18 @@ async function runEvidenceAnalysis(mode){
     // r126(44回目・マスター要望): (C)=(A)-(B)=差引後の形状も、(A)(B)と同じ方法でPNG/PDF/GLBに出力する。
     // 既存の(A)(B)の解析・出力には一切触れず、(B)が出せた時だけ、同じAPI(_evRunAnalysis/_evRenderPlanView/_evGeneratePDFData)をもう1回叩く。
     // 失敗しても(A)(B)の出力は従来どおり(Cだけ出ない)。
-    let meshesC=null, pngBase64C=null, pdfDataC=null, totalVolumeC=0;
+    let meshesC=null, pngBase64C=null, pdfDataC=null, totalVolumeC=0, wsExcelC=null;
     if(mode==='earthwork' && glbB && meshesA && meshesB){
       try{
         epSet(93,'(C)差引後の形状を生成・解析中...');
         await new Promise(r=>setTimeout(r,20));
-        const net = await _buildNetMeshes(meshesA, meshesB);
+        const net = await _buildNetMeshes(meshesA, meshesB, undefined, meshesG);
         if(net){
           const glbC = encodeMultiGLB(net.meshes);
           const evC = await _evRunAnalysis(mode, glbC);
           if(evC.count>0){
             totalVolumeC = evC.totalVolume;
-            _evGenerateExcelData(); // A/Bと同じ手順(PNG/PDFの前にExcel用データ生成)。Cの結果自体はExcelには使わない
+            wsExcelC = _evGenerateExcelData().ws; // A/Bと同じ手順(PNG/PDFの前にExcel用データ生成)。r126b(マスター要望): このwsを(C)差引後シートとしてxlsxにも入れる
             pngBase64C = _evRenderPlanView(2048,false).split(',')[1];
             pdfDataC = _evGeneratePDFData();
             meshesC = net.meshes;
@@ -1892,7 +1944,7 @@ async function runEvidenceAnalysis(mode){
         }
       }catch(e){
         console.warn('[C側] 差引後の解析に失敗、(A)(B)のみで続行します:', e);
-        meshesC=null; pngBase64C=null; pdfDataC=null; totalVolumeC=0;
+        meshesC=null; pngBase64C=null; pdfDataC=null; totalVolumeC=0; wsExcelC=null;
       }
     }
 
@@ -1922,7 +1974,7 @@ async function runEvidenceAnalysis(mode){
     // (B)=減算分。JSZipはUTF-8ファイル名をデフォルトで正しく扱う(Pythonのzipfileと
     // 違ってエンコーディングフラグを別途立てる必要はない)。
     if(excelDataB){
-      const mergedExcel=_evMergeABExcel(wsExcelA, wsExcelB, totalVolume, totalVolumeB, finalTotal);
+      const mergedExcel=_evMergeABExcel(wsExcelA, wsExcelB, totalVolume, totalVolumeB, finalTotal, wsExcelC, totalVolumeC);
       zip.file(`${baseName}.xlsx`, mergedExcel, {date:_zipDate});
       zip.file(`${baseName}_通常体積.png`, pngBase64A, {base64:true, date:_zipDate});
       zip.file(`${baseName}_減算分.png`, pngBase64B, {base64:true, date:_zipDate});
