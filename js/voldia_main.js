@@ -466,7 +466,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.addEventListener('dragenter',e=>{
     if(!e.dataTransfer.types.includes('Files'))return;
     overlay.classList.add('active');
-    // r053(44回目): 3Dイメージ表示中・配置モード中は読み込めない旨を、ドロップ前から案内する
+    // r054(44回目): 3Dイメージ表示中・配置モード中は読み込めない旨を、ドロップ前から案内する
     if(_isVoldLoadBlocked()){ overlay.querySelector('span').textContent='⛔ 3Dイメージ/配置モード中は読み込めません（2Dモードに戻してください）'; return; }
     overlay.querySelector('span').textContent=_gridPaperActive?'⚠ 方眼紙モードではPDFを読み込めません。':(pdfDoc?'⛔ PDFは1枚のみ読み込めます（.voldなら読込可）':'📄 PDF または .vold をここにドロップ');
   });
@@ -476,7 +476,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   document.addEventListener('dragover',e=>e.preventDefault());
   // r013: .vold/.jsonならプロジェクト全体読込、PDFなら従来通りPDF読込に振り分け
-  // r053(44回目): 3Dイメージ(#calc-modal.show)・配置モード(#placement-overlay表示中)の間は、Voldファイルを読み込まない
+  // r054(44回目): 3Dイメージ(#calc-modal.show)・配置モード(#placement-overlay表示中)の間は、Voldファイルを読み込まない
   function _isVoldLoadBlocked(){
     const m=document.getElementById('calc-modal');
     if(m&&m.classList.contains('show'))return true;
@@ -491,7 +491,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     const f=e.dataTransfer.files[0];
     if(!f)return;
     if(isVoldFile(f)){
-      // r053(44回目): 3Dイメージ表示中にドロップすると、3Dを閉じた後にVold読込ダイアログが出て紛らわしかった。
+      // r054(44回目): 3Dイメージ表示中にドロップすると、3Dを閉じた後にVold読込ダイアログが出て紛らわしかった。
       // 3Dイメージ表示中は読み込まず、2Dモードに戻してからドロップするよう警告する(配置モード中は配置モード側の画面で同じ警告を出す)。
       if(_isVoldLoadBlocked()){
         toast('⚠ 3Dイメージ表示中は.voldを読み込めません。「閉じる」で2Dモードに戻してから、もう一度ドロップしてください。',6000,true);
