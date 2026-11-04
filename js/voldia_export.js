@@ -1,4 +1,5 @@
 // ============================================================
+// r128(45回目): 配置モードのiframe参照を voldia_placement_v0081.html に変更(足場(テスト機能)追加)。
 // r127(45回目): 差引後(C)の不良修正。C=A-Bだと、Aの外壁(山留バッチ角1°・微テーパー15mmで傾く)とBの壁(垂直)が食い違って5〜50mmの薄い楔が壁として残り、既存躯体の部分が底の抜けた箱になっていた(Voldia_261031_1806.vold)。
 //   (B)関数が既存躯体の実体Gも返し、_buildNetMeshesは C=A-G を第一候補に(Gは掘削の外まで広がるので楔が出ない)。Gが無い/作れない/体積がA-Bと合わない時は従来のA-B。(A)(B)の出力・解析は無変更。前版=backup/voldia_export_r126b.js
 // 現行バージョン: r049 (42回目: 縮退三角形(スリバー)判定に『実寸の高さ<60mm』を追加。長い壁を割った本物の法面の帯が「面積/最長辺²<0.01」で誤って除外され、壁ごと数量から消える不具合の修正。
@@ -813,7 +814,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0080.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
+      iframe.src='voldia_placement_v0081.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);
