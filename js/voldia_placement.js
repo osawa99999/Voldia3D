@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 45回目(r131): 足場は地形が傾斜していても傾けない(updateOrientationで常に鉛直)。前版=backup/voldia_placement_r130_before_upright.js
 // 45回目(r130): 足場の影を約2倍の長さに(柱0.6→1.2m)・地面から離れた柱(0.3m超)は影なし(着地・ドロップ・クリック回転・復元後に再判定)。前版=backup/voldia_placement_r129_before_float.js
 // 45回目(r129): 足場の足元に短い影(見えない小さい柱のcastShadow)。前版=backup/voldia_placement_r128_before_shadow.js
 // 45回目(r128): 右UI「仮設構造物」に「🪜 足場(テスト機能)」を追加(段・列・幅の入力ダイアログ→ビテイ式枠組足場風の四角。透かしテクスチャ・影なし。ボックス(custom_box)と同じ扱い)。※配置モードHTMLは voldia_placement_v0081.html。前版=backup/voldia_placement_before_scaffold.js
@@ -2820,7 +2821,8 @@ window.addEventListener('message', function(ev) {
     if (obj.userData.type === 'text_balloon') {
       return; 
     }
-    const n = obj.userData.normal || new THREE.Vector3(0, 1, 0);
+    // r131(マスター要望): 足場は地形が傾斜していても傾けない(常に鉛直。回転は向き(yaw)だけ)。他の設置物は従来どおり地形の傾きに追従。
+    const n = (obj.userData.type === 'scaffold') ? new THREE.Vector3(0, 1, 0) : (obj.userData.normal || new THREE.Vector3(0, 1, 0));
     const yaw = obj.userData.yaw || 0;
     const qNormal = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
     const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
