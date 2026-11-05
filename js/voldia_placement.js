@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 45回目(r132): 足場のテクスチャを、マスターの図面から作った画像(data/voldia_scaffold_tex.js。側面・小口。巾木つき)に変更。ジャッキベース部はコード描きのまま。無い時は従来のコード描き。※配置モードHTMLは voldia_placement_v0082.html。前版=backup/voldia_placement_r131_before_tex.js
 // 45回目(r131): 足場は地形が傾斜していても傾けない(updateOrientationで常に鉛直)。前版=backup/voldia_placement_r130_before_upright.js
 // 45回目(r130): 足場の影を約2倍の長さに(柱0.6→1.2m)・地面から離れた柱(0.3m超)は影なし(着地・ドロップ・クリック回転・復元後に再判定)。前版=backup/voldia_placement_r129_before_float.js
 // 45回目(r129): 足場の足元に短い影(見えない小さい柱のcastShadow)。前版=backup/voldia_placement_r128_before_shadow.js
@@ -1659,7 +1660,14 @@ window.addEventListener('message', function(ev) {
       c.fillStyle = LIGHT; c.fillRect(0, 0, 4, 26); c.fillRect(124, 0, 4, 26); // ジャッキの軸
       c.fillStyle = DARK; c.fillRect(0, 26, 6, 6); c.fillRect(122, 26, 6, 6);  // ベース板
     });
-    _scfTex = { body, base };
+    // r132: マスターの図面から作った画像(data/voldia_scaffold_tex.js)があればそれを使う(側面=side・小口=end)。無い時はコード描き(上のbody)で、小口も同じ絵。
+    let sideT = body, endT = body;
+    if (window.SCAFFOLD_TEX && window.SCAFFOLD_TEX.side && window.SCAFFOLD_TEX.end) {
+      const load = (url) => { const tx = new THREE.TextureLoader().load(url); tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.anisotropy = aniso; return tx; };
+      sideT = load(window.SCAFFOLD_TEX.side);
+      endT = load(window.SCAFFOLD_TEX.end);
+    }
+    _scfTex = { body: sideT, end: endT, base };
     return _scfTex;
   }
 
@@ -1697,8 +1705,8 @@ window.addEventListener('message', function(ev) {
     // 長辺(±z)・短辺(±x)の本体(段)とベース部
     panel(L, HS, spans, steps, T.body, 0, HB + HS / 2, W / 2, 0);
     panel(L, HS, spans, steps, T.body, 0, HB + HS / 2, -W / 2, Math.PI);
-    panel(W, HS, 1, steps, T.body, L / 2, HB + HS / 2, 0, Math.PI / 2);
-    panel(W, HS, 1, steps, T.body, -L / 2, HB + HS / 2, 0, -Math.PI / 2);
+    panel(W, HS, 1, steps, T.end, L / 2, HB + HS / 2, 0, Math.PI / 2);
+    panel(W, HS, 1, steps, T.end, -L / 2, HB + HS / 2, 0, -Math.PI / 2);
     panel(L, HB, spans, 1, T.base, 0, HB / 2, W / 2, 0);
     panel(L, HB, spans, 1, T.base, 0, HB / 2, -W / 2, Math.PI);
     panel(W, HB, 1, 1, T.base, L / 2, HB / 2, 0, Math.PI / 2);
