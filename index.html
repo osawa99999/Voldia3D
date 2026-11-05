@@ -538,7 +538,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0146</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0147</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1495,6 +1495,33 @@ In addition, if you combine or link compiled forms of this Software with softwar
   function hide(){var e=document.getElementById('boot-loading');if(!e)return;e.classList.add('hide');setTimeout(function(){if(e.parentNode)e.parentNode.removeChild(e);},500);}
   if(document.readyState==='complete')hide();else window.addEventListener('load',hide);
   setTimeout(hide,60000);
+})();
+</script>
+
+<!-- v0147(45回目): 「簡単な説明（F1）」ヘルプガイド(Arecal側Claude姉さん作の HelpGuide v02 を取り込み)。F1・起動画面の左下のボタンで開く。
+     画像は Explan/ フォルダに Explan_1.png, Explan_2.png … (連番・欠番なし)。※Arecalが同じフォルダにある場合は、下の DIR/PREFIX を変える(例 'ExplanVoldia/' と 'ExplanV_')。
+     配置モード(iframe)の「簡単な説明（F1）」ボタン・F1も、postMessage('voldia-helpguide-toggle')でここのガイドを開閉する。 -->
+<script>
+window.HELPGUIDE_CFG = {
+  DIR: 'Explan/', PREFIX: 'Explan_',
+  ACCENT: '#e8a020',                       // Voldiaのアクセント色(--accent)
+  START_BTN_PARENT: '#cv-wrap',            // 起動画面(中央ビューの左下)に出すボタン。cv-wrapは position:relative
+  START_VISIBLE: function () { var e = document.getElementById('drop-hint'); return !!e && getComputedStyle(e).display !== 'none'; },
+  TOAST_PC: '“簡単な説明”は、F1キーでいつでも呼び出せます。'
+};
+</script>
+<script src="js/voldia_helpguide.js"></script>
+<script>
+// 起動画面(#drop-hint)の表示/非表示に合わせて、起動画面のボタンを出し入れする(voldia_main.jsは触らず、スタイル変化を見張る)
+(function () {
+  var dh = document.getElementById('drop-hint');
+  if (dh && window.HelpGuide && window.MutationObserver) new MutationObserver(function () { window.HelpGuide.syncStart(); }).observe(dh, { attributes: true, attributeFilter: ['style', 'class'] });
+  // 配置モード(iframe)の「簡単な説明（F1）」ボタン・F1キーから開閉する
+  window.addEventListener('message', function (ev) {
+    var ifr = document.getElementById('placement-iframe');
+    if (!ifr || ev.source !== ifr.contentWindow) return;
+    if (ev.data && ev.data.type === 'voldia-helpguide-toggle' && window.HelpGuide) window.HelpGuide.toggle();
+  });
 })();
 </script>
 </body>

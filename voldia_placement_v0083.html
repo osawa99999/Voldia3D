@@ -311,15 +311,14 @@
   <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷(A3 PDF)</button>
   <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
 
-  <!-- r071(20回目引継ぎ・マスター要望): 影の精度(shadow.mapSize)を軽量/標準/高画質の
-       3段階から選べるUI。4096は綺麗だが重い可能性があるため選択式にし、デフォルトは
-       標準(2048)。 -->
+  <!-- r071(20回目引継ぎ・マスター要望): 影の精度(shadow.mapSize)を選べるUI。
+       v0083(45回目・マスター要望): 軽量/標準/高画質の3段階 → Low/Highの2段階に変更。
+       Low=旧「軽量」(1024)と旧「標準」(2048)の中間=1536(既定)、High=旧「高画質」=4096。 -->
   <div id="shadow-quality-group" style="margin-top:6px;padding:6px;background:#1a1a1a;border-radius:4px;">
     <div style="font-size:.68em;color:#888;margin-bottom:4px;">影の精度</div>
     <div style="display:flex;gap:3px;">
-      <button class="shadow-q-btn" data-size="1024" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">軽量</button>
-      <button class="shadow-q-btn active" data-size="2048" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#d0d0d0;color:#000;border:1px solid #d0d0d0;font-weight:bold;cursor:pointer;">標準</button>
-      <button class="shadow-q-btn" data-size="4096" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">高画質</button>
+      <button class="shadow-q-btn active" data-size="1536" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#d0d0d0;color:#000;border:1px solid #d0d0d0;font-weight:bold;cursor:pointer;">Low</button>
+      <button class="shadow-q-btn" data-size="4096" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">High</button>
     </div>
   </div>
 
@@ -331,26 +330,14 @@
     <canvas id="radar-canvas" width="216" height="216"></canvas>
   </div>
 
+  <!-- v0083(45回目・マスター要望): 「❔ 使い方」(文章の吹き出し)を、ヘルプガイド「簡単な説明（F1）」(画像ガイド。本体Voldia側のガイドを開く)に変更。
+       旧文章は backup/voldia_placement_v0082.html に残してある。地形(GLB)の手動読込ボタンは吹き出しの中にあったので、ここに独立させた。 -->
   <div id="help-btn-wrap">
-    <div id="help-block-overlay"></div>
-    <div id="help-btn">❔ 使い方</div>
-    <div id="help-tooltip">
-      <h1 style="margin:0 0 8px;font-size:1.05em;color:#a5d6a7;">🏗️ Voldia 配置モード</h1>
-      <p>    1. パレット選択で <b>配置モードON</b> (右クリックで解除)<br>
-       2. 配置モード中: 3D地形を <b>左クリック</b> で配置<br>
-       3. 通常モード時: <b>左/右ドラッグ</b> で移動・回転<br>
-       4. 通常モード時: 重機類を <b>左クリック</b> で回転(15度)<br>
-       5. 通常モード時: コメントと矢印は <b>ダブルクリック</b> で拡大(1〜3倍)<br>
-       6. 通常モード時: クレーンを <b style="color:#ef5350;">右クリック</b> で作業半径記入<br>
-       7. 通常モード時: 線を <b>ダブルクリック</b> で削除<br>
-       8. クレーン上体や矢印は <b style="color:#4fc3f7;">青い点</b> を<b>ドラッグ</b>で水平旋回<br>
-       <span style="color:#f1c40f;">※ 各ツールは1回使用すると自動終了します。連続配置時は都度選択してください。</span><br>
-       <span style="color:#888;font-size:0.9em;">※ オブジェクトのサイズ・形状は正確ではありません。<br>
-       　重機等の形状を簡略化しているのは、低性能のPCでも動くように配慮したためです。</span></p>
-      <button id="load-glb-btn" class="load-btn" onclick="document.getElementById('glb-input').click()" style="margin-top:10px;">📂 地形(GLB)を手動読込</button>
-      <input type="file" id="glb-input" accept=".glb,.gltf" style="display:none">
-    </div>
+    <div id="help-btn">簡単な説明（F1）</div>
+    <button id="load-glb-btn" class="load-btn" onclick="document.getElementById('glb-input').click()" style="margin-top:6px;">📂 地形(GLB)を手動読込</button>
+    <input type="file" id="glb-input" accept=".glb,.gltf" style="display:none">
   </div>
+</div>
 </div>
 
 <div id="placement-mode-msg">
@@ -555,6 +542,11 @@
      なぜ消したか: 作業員のモデルデータ(LOW_1TOKO_GEO)と生成関数(createWorkerFromModel)はr073でdata/voldia_models.js内に統合済み(別ファイル不要)。
      voldia_placement.jsも両ファイルを参照しない。ファイルは存在せず、読み込みのたびに404(コンソールにエラー)になっていた。
      voldia_models.jsはvoldia_placement.jsより前に読み込むこと(順序は従来どおり)。 -->
+<script>
+// v0083(45回目): ヘルプガイドの読み込み。本体(Voldia)内のiframeでは本体のガイドを開くので読み込まない。単独で開いた時だけ自前のガイドを使う。
+window.HELPGUIDE_CFG = { DIR: 'Explan/', PREFIX: 'Explan_', ACCENT: '#4caf50', PANEL_TOP: 120, TOAST_PC: '“簡単な説明”は、F1キーでいつでも呼び出せます。' };
+if (window.parent === window) { document.write('<script src="js/voldia_helpguide.js"><\/script>'); }
+</script>
 <script src="js/voldia_placement.js"></script>
 
 </body>

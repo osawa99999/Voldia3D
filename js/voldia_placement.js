@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 45回目(r133): 足場の途中の枠(各スパンの境目に小口の絵)・足場の上に作業員を配置可・範囲外へD&Dして削除する時に「落下して消える」演出(vanishObject)。影の精度をLow(1536・既定)/High(4096)の2段階に(HTML v0083)。※配置モードHTMLは voldia_placement_v0083.html。前版=backup/voldia_placement_r132_before_45b.js
 // 45回目(r132): 足場のテクスチャを、マスターの図面から作った画像(data/voldia_scaffold_tex.js。側面・小口。巾木つき)に変更。ジャッキベース部はコード描きのまま。無い時は従来のコード描き。※配置モードHTMLは voldia_placement_v0082.html。前版=backup/voldia_placement_r131_before_tex.js
 // 45回目(r131): 足場は地形が傾斜していても傾けない(updateOrientationで常に鉛直)。前版=backup/voldia_placement_r130_before_upright.js
 // 45回目(r130): 足場の影を約2倍の長さに(柱0.6→1.2m)・地面から離れた柱(0.3m超)は影なし(着地・ドロップ・クリック回転・復元後に再判定)。前版=backup/voldia_placement_r129_before_float.js
@@ -77,8 +78,8 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.75);
   dirLight.position.set(30, 50, -20);
   dirLight.castShadow = true;
-  dirLight.shadow.mapSize.width = 2048;
-  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.mapSize.width = 1536;  // v0083(45回目): 既定=Low(旧軽量1024と旧標準2048の中間)。High=4096
+  dirLight.shadow.mapSize.height = 1536;
   dirLight.shadow.camera.left = -50; dirLight.shadow.camera.right = 50;
   dirLight.shadow.camera.top = 50; dirLight.shadow.camera.bottom = -50;
   // r068(20回目引継ぎ・マスター指摘「影が浮いて見える」=peter panning対策):
@@ -125,7 +126,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   updateShadowBias();
   scene.add(dirLight); // r071: 私の前回編集(r068)でこの行を誤って消してしまっていた。復元。
 
-  // r071: 影の精度セレクタ(軽量1024/標準2048/高画質4096)。切替時はmapSizeを
+  // r071: 影の精度セレクタ(45回目から Low=1536(既定)/High=4096 の2段階。旧: 軽量1024/標準2048/高画質4096)。切替時はmapSizeを
   // 変更してからupdateShadowBias()を呼ぶ(内部でmap破棄+needsUpdateも行う)。
   document.querySelectorAll('.shadow-q-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -287,25 +288,30 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   }
 
   // ==========================================
-  // 1.5. 「使い方」パネル 開閉トグル(r062: ホバー式→クリック式に変更)
+  // 1.5. 「簡単な説明（F1）」ボタン (45回目・マスター要望: 旧「❔ 使い方」の文章吹き出しを、画像のヘルプガイドに変更)
+  //   本体(Voldia)内のiframeで動いている時: ボタン/F1 → 親ページへ postMessage('voldia-helpguide-toggle')。親が Document Picture-in-Picture の小窓を開閉する
+  //     (iframe内のクリックのユーザー操作は親ページにも伝わるので、親側で requestWindow できる)。
+  //   単独で開いた時: 同じページに読み込まれた HelpGuide(js/voldia_helpguide.js)を直接開閉する(F1はHelpGuide自身が処理)。
   // ==========================================
   (function () {
     const btn = document.getElementById('help-btn');
-    const tooltip = document.getElementById('help-tooltip');
-    const overlay = document.getElementById('help-block-overlay');
-    function openHelp() {
-      tooltip.classList.add('show');
-      overlay.classList.add('show');
+    const embedded = (window.parent !== window);
+    const touch = /iPhone|iPad|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+    btn.textContent = touch ? '簡単な説明' : '簡単な説明（F1）'; // ガイドの表記ルール(PC=（F1）つき・タッチ端末=なし)
+    function toggleGuide() {
+      if (embedded) { try { window.parent.postMessage({ type: 'voldia-helpguide-toggle' }, '*'); } catch (e) { console.warn('ヘルプガイドを開けません', e); } }
+      else if (window.HelpGuide) window.HelpGuide.toggle();
     }
-    function closeHelp() {
-      tooltip.classList.remove('show');
-      overlay.classList.remove('show');
+    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleGuide(); });
+    if (embedded) {
+      // F1: ブラウザのヘルプを出さず、親のガイドを開閉(IME変換中・キーの連打は無視)。親ページのF1はiframeにフォーカスがある間は届かないので、ここで受ける
+      window.addEventListener('keydown', (e) => {
+        if (e.key !== 'F1' || e.isComposing) return;
+        e.preventDefault();
+        if (e.repeat) return;
+        toggleGuide();
+      }, true);
     }
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation(); // ボタン自身のクリックがoverlayへ伝播して即座に閉じるのを防ぐ
-      if (tooltip.classList.contains('show')) closeHelp(); else openHelp();
-    });
-    overlay.addEventListener('click', closeHelp); // 画面の他の場所(overlay部分)クリックで閉じる
   })();
 
   // ==========================================
@@ -1711,11 +1717,37 @@ window.addEventListener('message', function(ev) {
     panel(L, HB, spans, 1, T.base, 0, HB / 2, -W / 2, Math.PI);
     panel(W, HB, 1, 1, T.base, L / 2, HB / 2, 0, Math.PI / 2);
     panel(W, HB, 1, 1, T.base, -L / 2, HB / 2, 0, -Math.PI / 2);
+    // r133(マスター要望・赤線): 各スパンの境目(=支柱の位置)にも「小口の絵」の枠を置く(両端は上の小口面)。
+    //   枠は全部1枚のメッシュ(1つのジオメトリ・1回の描画)にまとめる=列数が多くても重くならない。透かし(alphaTest)の板なので描画負荷は小さい。
+    if (spans >= 2) {
+      const frames = (tex, y0, h, repV) => {
+        const pos = [], uvs = [], nor = [], idx = [];
+        for (let i = 1; i < spans; i++) {
+          const x = -L / 2 + SCF.W_SPAN * i, b = pos.length / 3;
+          pos.push(x, y0, -W / 2,  x, y0, W / 2,  x, y0 + h, W / 2,  x, y0 + h, -W / 2);
+          uvs.push(0, 0,  1, 0,  1, repV,  0, repV);
+          nor.push(1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0);
+          idx.push(b, b + 1, b + 2,  b, b + 2, b + 3);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setIndex(idx);
+        const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide }));
+        m.castShadow = false; m.receiveShadow = false;
+        m.userData.isScfFrame = true;
+        g.add(m);
+      };
+      frames(T.end, HB, HS, steps);   // 段(本体)の部分
+      frames(T.base, 0, HB, 1);       // ベース部
+    }
     // 各段の床板(薄い箱。最上段の床板の上面=全体の高さ)
     for (let k = 1; k <= steps; k++) {
       const deck = new THREE.Mesh(new THREE.BoxGeometry(L - 0.04, 0.05, W - 0.04), new THREE.MeshLambertMaterial({ color: 0x9aa1a8 }));
       deck.position.set(0, HB + SCF.H_STEP * k - 0.025, 0);
       deck.castShadow = false; deck.receiveShadow = false;
+      deck.userData.isScfDeck = true; // r133: 作業員が載れる面
       g.add(deck);
     }
     // 足元だけの短い影(マスター要望・45回目r129): 各支柱の足元に「見えない小さい柱」を置き、影の計算にだけ参加させる。
@@ -1737,6 +1769,43 @@ window.addEventListener('message', function(ev) {
       }
     }
     return g;
+  }
+
+  // ==========================================
+  // ★ 足場の上の作業員 (45回目 r133・マスター要望「足場の2段目・3段目にも作業員(のみ)を配置したい」)
+  //   ・足場の床板(isScfDeck)は「作業員だけが載れる面」。通常の着地面(_getFloorMeshes=地形+構台)には入れない(他のオブジェクトは今までどおり地面へ)。
+  //   ・段の選び方=マウスが指している面。作業員の配置クリック/ドラッグで、カメラ→マウスの線が最初に当たったのが床板なら、その段に載る。
+  //     (側面は透かしなので、中の床板が見える。地面を指せば従来どおり地面=足場の下にも置ける)
+  //   ・作業員と足場は重なりを許す(重なり回避の押し出し・落下中の「はじき」から除外)。
+  //   ・足場を動かす/回す/消した時、載っていた作業員は支えを失うので落下させる(_scfSettleWorkers)。
+  // ==========================================
+  function _scfDeckMeshes() {
+    const out = [];
+    for (const o of placedObjects) {
+      if (!o.userData || o.userData.type !== 'scaffold') continue;
+      o.updateMatrixWorld(true); // 動かした直後でもレイが正しい位置に当たるように
+      o.traverse(c => { if (c.isMesh && c.userData && c.userData.isScfDeck) out.push(c); });
+    }
+    return out;
+  }
+  function _floorsForType(type) { // 作業員だけ、床板も着地面に含める
+    return (type === 'worker') ? [..._getFloorMeshes(), ..._scfDeckMeshes()] : _getFloorMeshes();
+  }
+  function _noCollidePair(a, b) { // 作業員⇔足場は重なりOK
+    const ta = a.userData && a.userData.type, tb = b.userData && b.userData.type;
+    return (ta === 'worker' && tb === 'scaffold') || (ta === 'scaffold' && tb === 'worker');
+  }
+  function _scfSettleWorkers() { // 支え(床板・地面)が無くなった作業員を落下させる
+    const decks = _scfDeckMeshes();
+    for (const w of placedObjects) {
+      if (!w.userData || w.userData.type !== 'worker' || !w.userData.isPlaced) continue;
+      if (fallingObjects.some(d => d.mesh === w)) continue;
+      fallRaycaster.set(new THREE.Vector3(w.position.x, w.position.y + 0.4, w.position.z), new THREE.Vector3(0, -1, 0));
+      const hits = fallRaycaster.intersectObjects([..._getFloorMeshes(), ...decks], true).filter(h => h.object.isMesh);
+      if (hits.length > 0 && hits[0].point.y >= w.position.y - 0.3) continue; // 足元に面がある=そのまま
+      w.userData.isPlaced = false;
+      fallingObjects.push({ mesh: w, targetY: hits.length > 0 ? hits[0].point.y : -Infinity, normal: new THREE.Vector3(0, 1, 0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
+    }
   }
 
   // ==========================================
@@ -1777,7 +1846,7 @@ window.addEventListener('message', function(ev) {
     const objBox = getBoundingBox(obj);
     for (const other of placedObjects) {
       // r065: 構台は「載る面」であって障害物ではないため、通常の衝突判定からは除外する
-      if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai') continue;
+      if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai' || _noCollidePair(obj, other)) continue;
       const otherBox = getBoundingBox(other);
       if (objBox.intersectsBox(otherBox)) {
         return true;
@@ -1826,7 +1895,7 @@ window.addEventListener('message', function(ev) {
       const objBox = getBoundingBox(obj);
       
       for (const other of placedObjects) {
-        if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai') continue;
+        if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai' || _noCollidePair(obj, other)) continue;
         other.updateMatrixWorld(true);
         const otherBox = getBoundingBox(other);
         
@@ -1855,7 +1924,7 @@ window.addEventListener('message', function(ev) {
   }
 
   function checkFallenStatus(obj, isDrop = false) {
-    if (obj.userData.type === 'scaffold' && isDrop) _scfUpdateShadowPosts(obj); // r130: 足場の空中の柱は影なし(着地・ドロップ時のみ判定。ドラッグ中は重いので呼ばない)
+    if (obj.userData.type === 'scaffold' && isDrop) { _scfUpdateShadowPosts(obj); _scfSettleWorkers(); } // r130/r133: 足場が動いたら載っていた作業員は落下: 足場の空中の柱は影なし(着地・ドロップ時のみ判定。ドラッグ中は重いので呼ばない)
     const excemptTypes = ['bh_mini', 'bh_025', 'bh_045', 'bh_07', 'bh_12', 'custom_box', 'scaffold', 'conebar', 'worker', 'guard', 'text_balloon', 'arrow'];
     if (excemptTypes.includes(obj.userData.type)) return;
 
@@ -1884,6 +1953,35 @@ window.addEventListener('message', function(ev) {
     }
   }
 
+  // 45回目(r133・マスター要望): 作図範囲外へD&Dして削除する時、突然消えると「どこにいった?」と探す人が出るため、
+  //   「ちょっと落下して小さくなりながら消える」演出を付ける(約0.5秒。落下距離は約3m・最後に向けて縮小)。
+  //   削除の判定・結果(removeObject/トースト)は従来どおり。演出中は placedObjects から外して、操作・衝突・影の対象にしない。
+  const vanishingObjects = [];
+  const VANISH_MS = 500, VANISH_G = 24; // 24m/s² × 0.5s² / 2 = 3m
+  function vanishObject(mesh) {
+    const idx = placedObjects.indexOf(mesh);
+    if (idx !== -1) placedObjects.splice(idx, 1);
+    if (mesh.userData.type === 'scaffold') _scfSettleWorkers(); // r133: 載っていた作業員は落下
+    if (mesh.userData.radiusMesh) mesh.userData.radiusMesh.visible = false; // クレーンの作業半径円は先に消す
+    mesh.userData.isVanishing = true;
+    vanishingObjects.push({ mesh, t0: performance.now(), y0: mesh.position.y, s0: mesh.scale.clone() });
+    renderer.shadowMap.needsUpdate = true;
+  }
+  function updateVanishingObjects() { // animate()から毎フレーム呼ぶ
+    if (!vanishingObjects.length) return;
+    const now = performance.now();
+    for (let i = vanishingObjects.length - 1; i >= 0; i--) {
+      const v = vanishingObjects[i];
+      const dt = now - v.t0;
+      if (dt >= VANISH_MS) { removeObject(v.mesh); vanishingObjects.splice(i, 1); continue; }
+      const s = dt / 1000;
+      v.mesh.position.y = v.y0 - 0.5 * VANISH_G * s * s;
+      const k = Math.max(0, (dt / VANISH_MS - 0.4) / 0.6); // 後半60%で縮小(最大でおよそ0.15倍)
+      v.mesh.scale.copy(v.s0).multiplyScalar(1 - 0.85 * k * k);
+    }
+    renderer.shadowMap.needsUpdate = true;
+  }
+
   function removeObject(mesh) {
     scene.remove(mesh);
     if (mesh.userData.radiusMesh) {
@@ -1907,6 +2005,7 @@ window.addEventListener('message', function(ev) {
     });
     const idx = placedObjects.indexOf(mesh);
     if (idx !== -1) placedObjects.splice(idx, 1);
+    if (mesh.userData.type === 'scaffold') _scfSettleWorkers(); // r133: 足場を消したら載っていた作業員は落下
     renderer.shadowMap.needsUpdate = true; 
   }
 
@@ -2263,7 +2362,7 @@ window.addEventListener('message', function(ev) {
 
   const fallingObjects = [];
 
-  function spawnObject(wx, wz) {
+  function spawnObject(wx, wz, pick) { // pick={y} : 作業員で床板を指した時、その高さの少し上から落とす(=その段の床板に載る)
     let mesh;
     // r064: 実機カタログ全幅/全高[m](コマツPC60=0.25/PC120=0.45/PC200=0.7/PC350=1.2)
     // r065(20回目引継ぎ・マスター提供の実寸図面): ミニBHはマスターが提示した
@@ -2328,8 +2427,9 @@ window.addEventListener('message', function(ev) {
     scene.add(mesh);
     placedObjects.push(mesh);
 
-    fallRaycaster.set(new THREE.Vector3(wx, 100, wz), new THREE.Vector3(0, -1, 0));
-    const intersects = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+    const _onDeck = !!(pick && currentType === 'worker' && pick.y !== undefined);
+    fallRaycaster.set(new THREE.Vector3(wx, _onDeck ? pick.y + 0.4 : 100, wz), new THREE.Vector3(0, -1, 0));
+    const intersects = fallRaycaster.intersectObjects(_onDeck ? _floorsForType('worker') : _getFloorMeshes(), true).filter(h => h.object.isMesh);
 
     let targetY = -Infinity;
     let normal = new THREE.Vector3(0, 1, 0); 
@@ -3031,7 +3131,7 @@ window.addEventListener('message', function(ev) {
     mouse.y = -(cy / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
-    const terrainHits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+    const terrainHits = raycaster.intersectObjects(_floorsForType(currentType), true).filter(h => h.object.isMesh); // r133: 作業員配置中は床板もマーカーの対象
 
     // r073(21回目引継ぎ・マスター要望「構台にマウスオーバーで削除方法を表示」):
     // 作図中(currentTypeあり)やドラッグ中は誤解を招くため対象外。構台の上に
@@ -3132,8 +3232,18 @@ window.addEventListener('message', function(ev) {
           newPos.y = HPILE_TOP_Y;
           dragObj.position.copy(newPos);
         } else {
-          fallRaycaster.set(new THREE.Vector3(newPos.x, 100, newPos.z), new THREE.Vector3(0, -1, 0));
-          const hits = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+          // r133: 作業員は、マウスが指している最初の面が足場の床板なら、その段に載る(newPos.x/zもその点に合わせる)
+          let _deckY;
+          if (dragObj.userData.type === 'worker') {
+            const _decks = _scfDeckMeshes();
+            if (_decks.length) {
+              const ph = raycaster.intersectObjects([..._getFloorMeshes(), ..._decks], true).filter(h => h.object.isMesh);
+              if (ph.length && ph[0].object.userData.isScfDeck) { newPos.x = ph[0].point.x; newPos.z = ph[0].point.z; _deckY = ph[0].point.y; }
+            }
+            dragObj.userData.deckPickY = _deckY; // undefined=地面を指している
+          }
+          fallRaycaster.set(new THREE.Vector3(newPos.x, _deckY !== undefined ? _deckY + 0.4 : 100, newPos.z), new THREE.Vector3(0, -1, 0));
+          const hits = fallRaycaster.intersectObjects(_deckY !== undefined ? _floorsForType('worker') : _getFloorMeshes(), true).filter(h => h.object.isMesh);
           
           if (hits.length > 0) {
             newPos.y = hits[0].point.y;
@@ -3186,7 +3296,7 @@ window.addEventListener('message', function(ev) {
           } else if (currentType === 'custom_box_input' || currentType === 'scaffold_input') {
             // ダイアログ操作中のためスキップ
           } else {
-            const terrainHits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+            const terrainHits = raycaster.intersectObjects(_floorsForType(currentType), true).filter(h => h.object.isMesh); // r133: 作業員は足場の床板も指せる
             if (terrainHits.length > 0) {
               if (currentType === 'line') {
                 // r025: 始点付近ホバー中のクリックは「閉じる」扱い（マスター指示）
@@ -3206,7 +3316,7 @@ window.addEventListener('message', function(ev) {
                 updateCurrentLineMesh();
                 updatePreviewLine(terrainHits[0].point);
               } else {
-                spawnObject(terrainHits[0].point.x, terrainHits[0].point.z);
+                spawnObject(terrainHits[0].point.x, terrainHits[0].point.z, (currentType === 'worker' && terrainHits[0].object.userData.isScfDeck) ? { y: terrainHits[0].point.y } : undefined); // r133
                 exitPlacementMode(); 
               }
             }
@@ -3225,7 +3335,7 @@ window.addEventListener('message', function(ev) {
               } else {
                 obj.userData.yaw = (obj.userData.yaw || 0) - Math.PI / 12;
                 updateOrientation(obj);
-                if (obj.userData.type === 'scaffold') _scfUpdateShadowPosts(obj); // r130
+                if (obj.userData.type === 'scaffold') { _scfUpdateShadowPosts(obj); _scfSettleWorkers(); } // r130/r133
               }
               renderer.shadowMap.needsUpdate = true; 
             }
@@ -3256,7 +3366,7 @@ window.addEventListener('message', function(ev) {
         } else {
           dragObj.userData.yaw = (dragObj.userData.yaw || 0) - Math.PI / 12;
           updateOrientation(dragObj);
-          if (dragObj.userData.type === 'scaffold') _scfUpdateShadowPosts(dragObj); // r130
+          if (dragObj.userData.type === 'scaffold') { _scfUpdateShadowPosts(dragObj); _scfSettleWorkers(); } // r130/r133
         }
       }
 
@@ -3265,7 +3375,7 @@ window.addEventListener('message', function(ev) {
         const targets = [...terrainMeshes, ...placedObjects.filter(o => o !== dragObj && o.userData.type !== 'text_balloon')];
         const hits = fallRaycaster.intersectObjects(targets, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
         if (hits.length === 0) {
-          removeObject(dragObj);
+          vanishObject(dragObj); // r133: 落下して消える演出
           showToast('🗑️ オブジェクトを削除しました');
         } else {
           dragObj.position.y = hits[0].point.y;
@@ -3284,7 +3394,7 @@ window.addEventListener('message', function(ev) {
         fallRaycaster.set(new THREE.Vector3(dragObj.position.x, 100, dragObj.position.z), new THREE.Vector3(0, -1, 0));
         const groundHits = fallRaycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
         if (groundHits.length === 0) {
-          removeObject(dragObj);
+          vanishObject(dragObj); // r133: 落下して消える演出
           showToast('🗑️ オブジェクトを削除しました');
         } else {
           resolveOverlap(dragObj);
@@ -3296,11 +3406,13 @@ window.addEventListener('message', function(ev) {
         resolveOverlap(dragObj);
         if (!kotaiVisible) resolveKotaiOverlap(dragObj); // r065: 構台非表示時は再表示時の衝突を先回りで回避
 
-        fallRaycaster.set(new THREE.Vector3(dragObj.position.x, 100, dragObj.position.z), new THREE.Vector3(0, -1, 0));
-        const hits = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+        const _relDeck = (dragObj.userData.type === 'worker' && dragObj.userData.deckPickY !== undefined);
+        fallRaycaster.set(new THREE.Vector3(dragObj.position.x, _relDeck ? dragObj.userData.deckPickY + 0.4 : 100, dragObj.position.z), new THREE.Vector3(0, -1, 0));
+        const hits = fallRaycaster.intersectObjects(_relDeck ? _floorsForType('worker') : _getFloorMeshes(), true).filter(h => h.object.isMesh);
+        if (dragObj.userData.type === 'worker') delete dragObj.userData.deckPickY;
         
         if (hits.length === 0) {
-          removeObject(dragObj);
+          vanishObject(dragObj); // r133: 落下して消える演出
           showToast('🗑️ オブジェクトを削除しました');
         } else {
           dragObj.position.y = hits[0].point.y;
@@ -3446,6 +3558,8 @@ window.addEventListener('message', function(ev) {
         showToast('🗑️ オブジェクトを削除しました');
       }
     }
+
+    updateVanishingObjects(); // r133: 範囲外削除の「落下して消える」演出
 
     radarCtx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
 
