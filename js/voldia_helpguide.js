@@ -17,7 +17,7 @@
      never when closed with F1 or by code.
 
    Integration: paste this whole file inside a <script> near the end of <body> (after the app's own
-   scripts), then edit only the CFG block. Public API: window.HelpGuide = {toggle, open, close, syncStart}.
+   scripts), then edit only the CFG block. Public API: window.HelpGuide = {toggle, open, close, syncStart, setDir(Voldia追加)}.
    All ids/classes are prefixed "hg-" to avoid collisions.
    ============================================================================ */
 (function () {
@@ -125,17 +125,26 @@
   }
   // A browser cannot list a folder: probe Explan_1, Explan_2 ... sequentially and stop at the first that fails to load.
   // URLs are stored ABSOLUTE so that they also resolve inside the PiP window (a different document).
+  let probeGen = 0;   // Voldia(45回目): setDir()で探索をやり直した時、古い探索の結果を捨てるための番号
   function probe() {
     if (probing) return; probing = true;
+    const gen = probeGen;
     const found = []; let n = 1;
-    const done = function () { slides = found; probing = false; idx = 0; render(); };
+    const done = function () { if (gen !== probeGen) return; slides = found; probing = false; idx = 0; render(); };
     (function next() {
+      if (gen !== probeGen) return;
       if (n > CFG.MAX_PAGES) { done(); return; }
       const url = CFG.DIR + CFG.PREFIX + n + CFG.EXT, im = new Image();
-      im.onload = function () { let abs = url; try { abs = new URL(url, document.baseURI).href; } catch (_) {} found.push(abs); n++; next(); };
+      im.onload = function () { if (gen !== probeGen) return; let abs = url; try { abs = new URL(url, document.baseURI).href; } catch (_) {} found.push(abs); n++; next(); };
       im.onerror = done;
       im.src = url;
     })();
+  }
+  // Voldia(45回目): 画像フォルダを切り替えて1ページ目に戻す(モード切替用: Voldia=Explan_A/・3Dイメージ=Explan_B/・配置モード=Explan_C/)。開いていれば読み込み直す
+  function setDir(dir) {
+    if (dir === CFG.DIR) return;
+    CFG.DIR = dir; probeGen++; slides = null; probing = false; idx = 0;
+    if (isOpen()) { render(); probe(); }
   }
 
   /* ---------- Document Picture-in-Picture ---------- */
@@ -250,5 +259,5 @@
     wb.addEventListener('click', toggle); wp.appendChild(wb);
   }
 
-  window.HelpGuide = { toggle: toggle, open: open, close: function () { close(false); }, syncStart: syncStart };
+  window.HelpGuide = { toggle: toggle, open: open, close: function () { close(false); }, syncStart: syncStart, setDir: setDir };
 })();

@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 45回目(r134): 足場の開口(編集ボタン→立面の別窓でダブルクリックで絵を消す・最下段とその上だけ)・最上段の床板を無し・足場の上の作業員は影なし&足場と一緒に動く・落下して消える演出を変更(縮小なし・下へ落として1秒後にパッと消す)。※配置モードHTMLは voldia_placement_v0084.html。前版=backup/voldia_placement_r133.js
 // 45回目(r133): 足場の途中の枠(各スパンの境目に小口の絵)・足場の上に作業員を配置可・範囲外へD&Dして削除する時に「落下して消える」演出(vanishObject)。影の精度をLow(1536・既定)/High(4096)の2段階に(HTML v0083)。※配置モードHTMLは voldia_placement_v0083.html。前版=backup/voldia_placement_r132_before_45b.js
 // 45回目(r132): 足場のテクスチャを、マスターの図面から作った画像(data/voldia_scaffold_tex.js。側面・小口。巾木つき)に変更。ジャッキベース部はコード描きのまま。無い時は従来のコード描き。※配置モードHTMLは voldia_placement_v0082.html。前版=backup/voldia_placement_r131_before_tex.js
 // 45回目(r131): 足場は地形が傾斜していても傾けない(updateOrientationで常に鉛直)。前版=backup/voldia_placement_r130_before_upright.js
@@ -769,7 +770,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       if(u.type === 'custom_box'){
         d.boxW = u.boxW; d.boxD = u.boxD; d.boxH = u.boxH; d.boxColor = u.boxColor;
       }
-      if(u.type === 'scaffold'){ d.scfSteps = u.scfSteps; d.scfSpans = u.scfSpans; d.scfWidth = u.scfWidth; } // r128: 足場
+      if(u.type === 'scaffold'){ d.scfSteps = u.scfSteps; d.scfSpans = u.scfSpans; d.scfWidth = u.scfWidth; d.scfOpen = u.scfOpen || []; } // r128: 足場
       if(u.type === 'kotai') d.kotaiPoints = u.kotaiPoints || [];
       if(u.type === 'h_pile') d.heightM = u.heightM || 0;
       return d;
@@ -830,7 +831,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
           boxParams = { boxW:d.boxW, boxD:d.boxD, boxH:d.boxH };
           boxColor = d.boxColor;
         }
-        if(d.type === 'scaffold'){ scaffoldParams = { steps:String(d.scfSteps), spans:String(d.scfSpans), width:String(d.scfWidth) }; } // r128: 足場
+        if(d.type === 'scaffold'){ scaffoldParams = { steps:String(d.scfSteps), spans:String(d.scfSpans), width:String(d.scfWidth), open: (d.scfOpen || []).slice() }; } // r128: 足場
         currentType = d.type;
         spawnObject(d.x, d.z);
         currentType = prevType; boxParams = prevBoxParams; boxColor = prevBoxColor; scaffoldParams = prevScfParams;
@@ -1552,7 +1553,7 @@ window.addEventListener('message', function(ev) {
   //   当たり判定・選択は全面(箱形)のまま。保存はuserData.scfSteps/scfSpans/scfWidth。
   // ==========================================
   const SCF = { H_STEP: 1.7, W_SPAN: 1.8, H_BASE: 0.2, MAX_STEPS: 30, MAX_SPANS: 50, SHADOW_POST: { w: 0.15, h: 1.2 }, FLOAT_TOL: 0.3 };
-  let scaffoldParams = { steps: "2", spans: "3", width: "0.9" }; // 前回の入力値を覚えておく(ダイアログを開き直した時の初期値)
+  let scaffoldParams = { steps: "2", spans: "3", width: "0.9", open: [] }; // 前回の入力値を覚えておく(ダイアログを開き直した時の初期値)
   let activeScfParam = null;
   let scfFresh = false;
 
@@ -1566,7 +1567,8 @@ window.addEventListener('message', function(ev) {
     if (!el) return;
     if (s < 1 || n < 1) { el.textContent = '段・列は1以上を入力してください'; return; }
     const H = SCF.H_STEP * s + SCF.H_BASE, L = SCF.W_SPAN * n;
-    el.textContent = `高さ ${H.toFixed(1)}m(1.7×${s}段+0.2) ／ 長さ ${L.toFixed(1)}m(1.8×${n}列) ／ 幅 ${w.toFixed(1)}m`;
+    const nOpen = _scfOpenSet(s, n, scaffoldParams.open).size;
+    el.textContent = `高さ ${H.toFixed(1)}m(1.7×${s}段+0.2) ／ 長さ ${L.toFixed(1)}m(1.8×${n}列) ／ 幅 ${w.toFixed(1)}m` + (nOpen ? ` ／ 開口 ${nOpen}マス` : '');
   }
 
   function _scfSelectParam(key) {
@@ -1592,6 +1594,7 @@ window.addEventListener('message', function(ev) {
   }
 
   function _scfOpenDialog() {
+    scaffoldParams.open = []; // 開口は毎回なし(前回の開口を引き継がない)
     _scfUi().style.display = 'block';
     controls.enabled = false;
     document.getElementById('scf-val-steps').innerText = scaffoldParams.steps;
@@ -1615,6 +1618,7 @@ window.addEventListener('message', function(ev) {
     if (!(s >= 1 && s <= SCF.MAX_STEPS)) { showToast(`⚠ 段数は1〜${SCF.MAX_STEPS}で入力してください`); _scfSelectParam('steps'); return; }
     if (!(n >= 1 && n <= SCF.MAX_SPANS)) { showToast(`⚠ 列数は1〜${SCF.MAX_SPANS}で入力してください`); _scfSelectParam('spans'); return; }
     scaffoldParams.steps = String(s); scaffoldParams.spans = String(n);
+    scaffoldParams.open = [..._scfOpenSet(s, n, scaffoldParams.open)]; // 段・列を変えた時に範囲外になった開口を捨てる
     scaffoldParams.width = document.getElementById('scf-width').value || "0.9";
     _scfUi().style.display = 'none';
     currentType = 'scaffold';
@@ -1623,9 +1627,79 @@ window.addEventListener('message', function(ev) {
     document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
     setTimeout(() => { controls.enabled = true; }, 10);
   });
+  // --- 開口の編集窓 (r134・マスター要望): 「編集」ボタン→足場の立面を別窓で表示→開けたい所をダブルクリックで、その部分の絵を消す(もう一度で戻る)。
+  //   消せるのは最下段(r=0)とその上の段(r=1)だけ。「2段まとめて」(既定ON=車両通行用)は、クリックした列の下2段を一緒に消す/戻す。
+  //   立面は 足場の絵(側面タイル)を並べて描き、消したマスは空白。ここで決めた開口は scaffoldParams.open に入り、配置時にメッシュへ反映される。
+  let _scfEdit = null; // {steps, spans, img}
+  function _scfEditIsOpen() { const u = document.getElementById('scaffold-edit-ui'); return !!u && u.style.display === 'block'; }
+  function _scfEditClose() {
+    document.getElementById('scaffold-edit-ui').style.display = 'none';
+    _scfEdit = null;
+    _scfRefreshInfo();
+  }
+  function _scfEditDraw() {
+    if (!_scfEdit) return;
+    const { steps, spans } = _scfEdit, cv = document.getElementById('scf-edit-cv');
+    const cw = Math.max(14, Math.min(80, Math.floor(760 / spans))), ch = Math.round(cw * SCF.H_STEP / SCF.W_SPAN), bh = Math.max(4, Math.round(cw * SCF.H_BASE / SCF.W_SPAN));
+    const M = 10; cv.width = spans * cw + M * 2; cv.height = steps * ch + bh + M * 2;
+    _scfEdit.geom = { cw, ch, bh, M };
+    const c = cv.getContext('2d'), open = _scfOpenSet(steps, spans, scaffoldParams.open);
+    c.fillStyle = '#e9eef3'; c.fillRect(0, 0, cv.width, cv.height);
+    const T = _scfMakeTextures(), baseImg = T.base.image, sideImg = _scfEdit.img || T.body.image;
+    for (let r = 0; r < steps; r++) {
+      for (let col = 0; col < spans; col++) {
+        const x = M + col * cw, y = M + (steps - 1 - r) * ch;
+        if (open.has(r + ',' + col)) { c.fillStyle = '#ffffff'; c.fillRect(x, y, cw, ch); c.strokeStyle = '#9aa7b3'; c.setLineDash([3, 3]); c.strokeRect(x + .5, y + .5, cw - 1, ch - 1); c.setLineDash([]); }
+        else if (sideImg && (sideImg.complete !== false)) { try { c.drawImage(sideImg, x, y, cw, ch); } catch (e) { /* 読み込み中 */ } }
+        if (r >= 2) { c.fillStyle = 'rgba(40,50,60,0.22)'; c.fillRect(x, y, cw, ch); } // 編集できない段は暗くする
+      }
+    }
+    for (let col = 0; col < spans; col++) { // 足元(ジャッキベース部)。開口の下は描かない
+      if (open.has('0,' + col)) continue;
+      try { c.drawImage(baseImg, M + col * cw, M + steps * ch, cw, bh); } catch (e) { /* noop */ }
+    }
+    c.fillStyle = '#6f7a5f'; c.fillRect(0, M + steps * ch + bh, cv.width, M); // 地面
+  }
+  function _scfEditOpen() {
+    const s = parseInt(scaffoldParams.steps, 10), n = parseInt(scaffoldParams.spans, 10);
+    if (!(s >= 1 && s <= SCF.MAX_STEPS)) { showToast(`⚠ 段数は1〜${SCF.MAX_STEPS}で入力してください`); _scfSelectParam('steps'); return; }
+    if (!(n >= 1 && n <= SCF.MAX_SPANS)) { showToast(`⚠ 列数は1〜${SCF.MAX_SPANS}で入力してください`); _scfSelectParam('spans'); return; }
+    scaffoldParams.open = [..._scfOpenSet(s, n, scaffoldParams.open)];
+    _scfEdit = { steps: s, spans: n, img: null };
+    if (window.SCAFFOLD_TEX && window.SCAFFOLD_TEX.side) { const im = new Image(); im.onload = () => { if (_scfEdit) { _scfEdit.img = im; _scfEditDraw(); } }; im.src = window.SCAFFOLD_TEX.side; }
+    document.getElementById('scaffold-edit-ui').style.display = 'block';
+    _scfEditDraw();
+  }
+  function _scfEditToggle(r, c) { // (r,c)=下からr段目・左からc列目
+    const { steps, spans } = _scfEdit; if (r >= 2 || r >= steps) { showToast('編集できるのは「最下段とその上の段」だけです'); return; }
+    const set = _scfOpenSet(steps, spans, scaffoldParams.open), key = (rr) => rr + ',' + c;
+    const pair = document.getElementById('scf-edit-pair').checked && steps >= 2;
+    const rows = pair ? [0, 1] : [r];
+    const allOpen = rows.every(rr => set.has(key(rr)));
+    rows.forEach(rr => { if (allOpen) set.delete(key(rr)); else set.add(key(rr)); });
+    scaffoldParams.open = [...set];
+    _scfEditDraw();
+  }
+  document.getElementById('scf-btn-edit').addEventListener('click', _scfEditOpen);
+  document.getElementById('scf-edit-close').addEventListener('click', _scfEditClose);
+  document.getElementById('scf-edit-clear').addEventListener('click', () => { scaffoldParams.open = []; _scfEditDraw(); });
+  document.getElementById('scf-edit-cv').addEventListener('dblclick', (e) => {
+    if (!_scfEdit || !_scfEdit.geom) return;
+    const cv = e.currentTarget, rc = cv.getBoundingClientRect(), { cw, ch, M } = _scfEdit.geom;
+    const x = (e.clientX - rc.left) * cv.width / rc.width - M, y = (e.clientY - rc.top) * cv.height / rc.height - M;
+    const col = Math.floor(x / cw), rowFromTop = Math.floor(y / ch);
+    if (col < 0 || col >= _scfEdit.spans || rowFromTop < 0 || rowFromTop >= _scfEdit.steps) return;
+    _scfEditToggle(_scfEdit.steps - 1 - rowFromTop, col);
+  });
+
   // ダイアログ中のキーボード: 数字(テンキー含む)・Backspace・Enter(配置)・Esc(キャンセル)。矢印キーは足場ダイアログ中にカメラを動かさない。
   // キャプチャ段階で受けて、他のkeydown(リピート・矢印カメラ・Esc)には渡さない。幅のドロップダウンにフォーカスがある間は何も奪わない。
   window.addEventListener('keydown', (e) => {
+    if (_scfEditIsOpen()) { // 開口の編集窓が開いている間: Esc/Enterは編集窓だけを閉じ、他のキー(数字・矢印)は誰にも渡さない
+      if (e.key === 'Escape' || e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); _scfEditClose(); }
+      else e.stopPropagation();
+      return;
+    }
     if (!_scfIsOpen()) return;
     const onSelect = document.activeElement && document.activeElement.tagName === 'SELECT';
     if (e.key.startsWith('Arrow')) { e.stopPropagation(); return; }
@@ -1695,10 +1769,24 @@ window.addEventListener('message', function(ev) {
     renderer.shadowMap.needsUpdate = true;
   }
 
-  function createScaffoldMesh(steps, spans, widthM) {
+  // 開口(r134・マスター要望「足場に車両通行用の開口」): 側面の絵を消すだけ(本当の開口ではない。床板・当たり判定は変えない)。
+  //   消せるのは「最下段(r=0)とその上の段(r=1)」だけ。cell=(r,c): r=下からの段(0始まり)・c=左からの列(0始まり)。前後の両面を同時に消す(車両は前→後ろへ通り抜ける)。
+  //   隣り合う2つの開口の間は、境目の枠(小口の絵)・ジャッキベース・足元の影の柱も消す。
+  function _scfOpenSet(steps, spans, list) {
+    const s = new Set();
+    for (const e of (list || [])) {
+      const r = Array.isArray(e) ? e[0] : parseInt(String(e).split(',')[0], 10), c = Array.isArray(e) ? e[1] : parseInt(String(e).split(',')[1], 10);
+      if (r >= 0 && r < Math.min(2, steps) && c >= 0 && c < spans) s.add(r + ',' + c);
+    }
+    return s;
+  }
+
+  function createScaffoldMesh(steps, spans, widthM, openList) {
     const L = SCF.W_SPAN * spans, W = widthM, HB = SCF.H_BASE, HS = SCF.H_STEP * steps;
     const T = _scfMakeTextures();
     const g = new THREE.Group();
+    const open = _scfOpenSet(steps, spans, openList), hasOpen = open.size > 0;
+    const isOpen = (r, c) => open.has(r + ',' + c);
     const panel = (w, h, repU, repV, tex, x, y, z, rotY) => {
       const geo = new THREE.PlaneGeometry(w, h);
       const uv = geo.attributes.uv;
@@ -1708,42 +1796,102 @@ window.addEventListener('message', function(ev) {
       m.castShadow = false; m.receiveShadow = false; // 影なし(マスター確定)
       g.add(m);
     };
-    // 長辺(±z)・短辺(±x)の本体(段)とベース部
-    panel(L, HS, spans, steps, T.body, 0, HB + HS / 2, W / 2, 0);
-    panel(L, HS, spans, steps, T.body, 0, HB + HS / 2, -W / 2, Math.PI);
-    panel(W, HS, 1, steps, T.end, L / 2, HB + HS / 2, 0, Math.PI / 2);
-    panel(W, HS, 1, steps, T.end, -L / 2, HB + HS / 2, 0, -Math.PI / 2);
-    panel(L, HB, spans, 1, T.base, 0, HB / 2, W / 2, 0);
-    panel(L, HB, spans, 1, T.base, 0, HB / 2, -W / 2, Math.PI);
-    panel(W, HB, 1, 1, T.base, L / 2, HB / 2, 0, Math.PI / 2);
-    panel(W, HB, 1, 1, T.base, -L / 2, HB / 2, 0, -Math.PI / 2);
+    // 四角形(quad)を1つのジオメトリにまとめて1メッシュにする(開口で「1マスずつ消す」時用。枚数が多くても描画は1回)
+    const quadMesh = (quads, tex, flag) => {
+      if (!quads.length) return;
+      const pos = [], uvs = [], nor = [], idx = [];
+      for (const q of quads) {
+        const b = pos.length / 3;
+        for (let k = 0; k < 4; k++) { pos.push(q.p[k][0], q.p[k][1], q.p[k][2]); nor.push(q.n[0], q.n[1], q.n[2]); }
+        uvs.push(0, 0, 1, 0, 1, 1, 0, 1);
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide }));
+      m.castShadow = false; m.receiveShadow = false;
+      if (flag) m.userData[flag] = true;
+      g.add(m);
+    };
+    if (!hasOpen) {
+      // 長辺(±z)・短辺(±x)の本体(段)とベース部
+      panel(L, HS, spans, steps, T.body, 0, HB + HS / 2, W / 2, 0);
+      panel(L, HS, spans, steps, T.body, 0, HB + HS / 2, -W / 2, Math.PI);
+      panel(W, HS, 1, steps, T.end, L / 2, HB + HS / 2, 0, Math.PI / 2);
+      panel(W, HS, 1, steps, T.end, -L / 2, HB + HS / 2, 0, -Math.PI / 2);
+      panel(L, HB, spans, 1, T.base, 0, HB / 2, W / 2, 0);
+      panel(L, HB, spans, 1, T.base, 0, HB / 2, -W / 2, Math.PI);
+      panel(W, HB, 1, 1, T.base, L / 2, HB / 2, 0, Math.PI / 2);
+      panel(W, HB, 1, 1, T.base, -L / 2, HB / 2, 0, -Math.PI / 2);
+    } else {
+      // 短辺(小口)は今までどおり。長辺は1マス(1スパン×1段)ずつの四角にして、開口のマスを抜く
+      panel(W, HS, 1, steps, T.end, L / 2, HB + HS / 2, 0, Math.PI / 2);
+      panel(W, HS, 1, steps, T.end, -L / 2, HB + HS / 2, 0, -Math.PI / 2);
+      panel(W, HB, 1, 1, T.base, L / 2, HB / 2, 0, Math.PI / 2);
+      panel(W, HB, 1, 1, T.base, -L / 2, HB / 2, 0, -Math.PI / 2);
+      const body = [], base = [];
+      for (const sz of [1, -1]) {
+        const z = sz * W / 2;
+        for (let c = 0; c < spans; c++) {
+          const x0 = -L / 2 + SCF.W_SPAN * c, x1 = x0 + SCF.W_SPAN;
+          // 前(+z)は左→右、後ろ(-z)は外から見て左→右になるよう向きを反転(絵が裏返らない)
+          const xa = sz === 1 ? x0 : x1, xb = sz === 1 ? x1 : x0;
+          for (let r = 0; r < steps; r++) {
+            if (isOpen(r, c)) continue;
+            const y0 = HB + SCF.H_STEP * r, y1 = y0 + SCF.H_STEP;
+            body.push({ p: [[xa, y0, z], [xb, y0, z], [xb, y1, z], [xa, y1, z]], n: [0, 0, sz] });
+          }
+          if (!isOpen(0, c)) base.push({ p: [[xa, 0, z], [xb, 0, z], [xb, HB, z], [xa, HB, z]], n: [0, 0, sz] });
+        }
+      }
+      quadMesh(body, T.body); quadMesh(base, T.base);
+    }
     // r133(マスター要望・赤線): 各スパンの境目(=支柱の位置)にも「小口の絵」の枠を置く(両端は上の小口面)。
     //   枠は全部1枚のメッシュ(1つのジオメトリ・1回の描画)にまとめる=列数が多くても重くならない。透かし(alphaTest)の板なので描画負荷は小さい。
+    //   r134: 開口がある時は、隣り合う2つの開口の間の枠(その段の分)を抜く。
     if (spans >= 2) {
-      const frames = (tex, y0, h, repV) => {
-        const pos = [], uvs = [], nor = [], idx = [];
+      if (!hasOpen) {
+        const frames = (tex, y0, h, repV) => {
+          const pos = [], uvs = [], nor = [], idx = [];
+          for (let i = 1; i < spans; i++) {
+            const x = -L / 2 + SCF.W_SPAN * i, b = pos.length / 3;
+            pos.push(x, y0, -W / 2,  x, y0, W / 2,  x, y0 + h, W / 2,  x, y0 + h, -W / 2);
+            uvs.push(0, 0,  1, 0,  1, repV,  0, repV);
+            nor.push(1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0);
+            idx.push(b, b + 1, b + 2,  b, b + 2, b + 3);
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+          geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+          geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+          geo.setIndex(idx);
+          const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide }));
+          m.castShadow = false; m.receiveShadow = false;
+          m.userData.isScfFrame = true;
+          g.add(m);
+        };
+        frames(T.end, HB, HS, steps);   // 段(本体)の部分
+        frames(T.base, 0, HB, 1);       // ベース部
+      } else {
+        const fb = [], fs = [];
         for (let i = 1; i < spans; i++) {
-          const x = -L / 2 + SCF.W_SPAN * i, b = pos.length / 3;
-          pos.push(x, y0, -W / 2,  x, y0, W / 2,  x, y0 + h, W / 2,  x, y0 + h, -W / 2);
-          uvs.push(0, 0,  1, 0,  1, repV,  0, repV);
-          nor.push(1, 0, 0,  1, 0, 0,  1, 0, 0,  1, 0, 0);
-          idx.push(b, b + 1, b + 2,  b, b + 2, b + 3);
+          const x = -L / 2 + SCF.W_SPAN * i;
+          for (let r = 0; r < steps; r++) {
+            if (isOpen(r, i - 1) && isOpen(r, i)) continue; // 両隣が開口=その段の枠は抜く
+            const y0 = HB + SCF.H_STEP * r;
+            fb.push({ p: [[x, y0, -W / 2], [x, y0, W / 2], [x, y0 + SCF.H_STEP, W / 2], [x, y0 + SCF.H_STEP, -W / 2]], n: [1, 0, 0] });
+          }
+          if (!(isOpen(0, i - 1) && isOpen(0, i))) fs.push({ p: [[x, 0, -W / 2], [x, 0, W / 2], [x, HB, W / 2], [x, HB, -W / 2]], n: [1, 0, 0] });
         }
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-        geo.setIndex(idx);
-        const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.4, side: THREE.DoubleSide }));
-        m.castShadow = false; m.receiveShadow = false;
-        m.userData.isScfFrame = true;
-        g.add(m);
-      };
-      frames(T.end, HB, HS, steps);   // 段(本体)の部分
-      frames(T.base, 0, HB, 1);       // ベース部
+        quadMesh(fb, T.end, 'isScfFrame'); quadMesh(fs, T.base, 'isScfFrame');
+      }
     }
-    // 各段の床板(薄い箱。最上段の床板の上面=全体の高さ)
-    for (let k = 1; k <= steps; k++) {
+    // 各段の床板(薄い箱)。r134(マスター要望): 一番上の床板は付けない(手すりの無い所に床面(通路)があると安全衛生法上アウトのため)。
+    //   床板は「各段の上面」に置くので、k=1..段数-1(最上段の上面=全体の高さには置かない)。1段だけの足場には床板が無い。
+    for (let k = 1; k <= steps - 1; k++) {
       const deck = new THREE.Mesh(new THREE.BoxGeometry(L - 0.04, 0.05, W - 0.04), new THREE.MeshLambertMaterial({ color: 0x9aa1a8 }));
       deck.position.set(0, HB + SCF.H_STEP * k - 0.025, 0);
       deck.castShadow = false; deck.receiveShadow = false;
@@ -1756,6 +1904,7 @@ window.addEventListener('message', function(ev) {
     //   柱の寸法: 幅0.15m角・高さ1.2m(r130で0.6→1.2m=影の長さ約2倍。影の解像度=作業エリア幅÷2048。細すぎると薄くなるため太めにしてある)。選択・クリックの判定には出さない。
     const SH = SCF.SHADOW_POST;
     for (let i = 0; i <= spans; i++) {
+      if (i > 0 && i < spans && isOpen(0, i - 1) && isOpen(0, i)) continue; // r134: 2つ並びの開口の間の足(ジャッキベースも消すので影も無し)
       for (const sz of [-1, 1]) {
         const post = new THREE.Mesh(
           new THREE.BoxGeometry(SH.w, SH.h, SH.w),
@@ -1794,6 +1943,48 @@ window.addEventListener('message', function(ev) {
   function _noCollidePair(a, b) { // 作業員⇔足場は重なりOK
     const ta = a.userData && a.userData.type, tb = b.userData && b.userData.type;
     return (ta === 'worker' && tb === 'scaffold') || (ta === 'scaffold' && tb === 'worker');
+  }
+  // 足場の上(地面から浮いている)の作業員は影を出さない(r134・マスター要望: 影が空中に浮いてしまうため)。
+  //   足元から下向きに地面(地形+構台)を調べ、地面から0.3mを超えて浮いていれば castShadow=false(足場の2段目以上)。地面に付いていれば元どおり。
+  //   メッシュごとの元のcastShadowは userData._cs0 に覚えておく。着地・ドロップ(checkFallenStatus)のたびに判定する。
+  function _scfSetCast(obj, on) {
+    obj.traverse(c => { if (!c.isMesh) return; if (c.userData._cs0 === undefined) c.userData._cs0 = !!c.castShadow; c.castShadow = on ? c.userData._cs0 : false; });
+  }
+  function _scfWorkerShadow(w) {
+    fallRaycaster.set(new THREE.Vector3(w.position.x, w.position.y + 0.4, w.position.z), new THREE.Vector3(0, -1, 0));
+    const hits = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+    const above = hits.length > 0 ? (w.position.y - hits[0].point.y) : 0;
+    _scfSetCast(w, !(above > 0.3));
+    renderer.shadowMap.needsUpdate = true;
+  }
+  // 足場を動かす/回す時、床板に載っている作業員も一緒に動かす(r134・マスター要望)。
+  //   begin: 足場のローカル座標で「床板の高さ(±0.2m)・足場の平面内」にいる作業員を覚える(最上段の上面には床板が無いので対象外)。
+  //   apply: 足場の今の位置・向きから、覚えたローカル座標を世界座標へ戻して作業員を置く。足場のyaw(向き)の変化ぶんだけ作業員の向きも回す。
+  function _scfCarryBegin(scaf) {
+    scaf.updateMatrixWorld(true);
+    const spans = scaf.userData.scfSpans || 1, steps = scaf.userData.scfSteps || 1, W = scaf.userData.scfWidth || 0.9, L = SCF.W_SPAN * spans;
+    const riders = [];
+    for (const w of placedObjects) {
+      if (!w.userData || w.userData.type !== 'worker' || !w.userData.isPlaced) continue;
+      const loc = scaf.worldToLocal(w.position.clone());
+      if (Math.abs(loc.x) > L / 2 + 0.05 || Math.abs(loc.z) > W / 2 + 0.05) continue;
+      let on = false;
+      for (let k = 1; k <= steps - 1; k++) if (Math.abs(loc.y - (SCF.H_BASE + SCF.H_STEP * k)) < 0.2) on = true;
+      if (on) riders.push({ w, loc, yaw0: w.userData.yaw || 0 });
+    }
+    return { scaf, riders, yaw0: scaf.userData.yaw || 0 };
+  }
+  function _scfCarryApply(c) {
+    if (!c || !c.riders.length) return;
+    c.scaf.updateMatrixWorld(true);
+    const dyaw = (c.scaf.userData.yaw || 0) - c.yaw0;
+    for (const r of c.riders) {
+      r.w.position.copy(c.scaf.localToWorld(r.loc.clone()));
+      r.w.userData.yaw = r.yaw0 + dyaw;
+      updateOrientation(r.w);
+      r.w.updateMatrixWorld(true);
+    }
+    renderer.shadowMap.needsUpdate = true;
   }
   function _scfSettleWorkers() { // 支え(床板・地面)が無くなった作業員を落下させる
     const decks = _scfDeckMeshes();
@@ -1924,6 +2115,7 @@ window.addEventListener('message', function(ev) {
   }
 
   function checkFallenStatus(obj, isDrop = false) {
+    if (obj.userData.type === 'worker' && isDrop) _scfWorkerShadow(obj); // r134: 足場の上(地面から浮いている)の作業員は影なし
     if (obj.userData.type === 'scaffold' && isDrop) { _scfUpdateShadowPosts(obj); _scfSettleWorkers(); } // r130/r133: 足場が動いたら載っていた作業員は落下: 足場の空中の柱は影なし(着地・ドロップ時のみ判定。ドラッグ中は重いので呼ばない)
     const excemptTypes = ['bh_mini', 'bh_025', 'bh_045', 'bh_07', 'bh_12', 'custom_box', 'scaffold', 'conebar', 'worker', 'guard', 'text_balloon', 'arrow'];
     if (excemptTypes.includes(obj.userData.type)) return;
@@ -1954,10 +2146,11 @@ window.addEventListener('message', function(ev) {
   }
 
   // 45回目(r133・マスター要望): 作図範囲外へD&Dして削除する時、突然消えると「どこにいった?」と探す人が出るため、
-  //   「ちょっと落下して小さくなりながら消える」演出を付ける(約0.5秒。落下距離は約3m・最後に向けて縮小)。
+  //   「下(Z方向=地面の下)へ落ちて消える」演出を付ける。
+  //   r134(マスター指示): 小さくならず、そのままの大きさで画面外まで下へ落とし、1秒後に「パッ」と消す(0.5×80×1² = 40m落下=画面外)。
   //   削除の判定・結果(removeObject/トースト)は従来どおり。演出中は placedObjects から外して、操作・衝突・影の対象にしない。
   const vanishingObjects = [];
-  const VANISH_MS = 500, VANISH_G = 24; // 24m/s² × 0.5s² / 2 = 3m
+  const VANISH_MS = 1000, VANISH_G = 80; // 80m/s² × 1s² / 2 = 40m
   function vanishObject(mesh) {
     const idx = placedObjects.indexOf(mesh);
     if (idx !== -1) placedObjects.splice(idx, 1);
@@ -1975,9 +2168,7 @@ window.addEventListener('message', function(ev) {
       const dt = now - v.t0;
       if (dt >= VANISH_MS) { removeObject(v.mesh); vanishingObjects.splice(i, 1); continue; }
       const s = dt / 1000;
-      v.mesh.position.y = v.y0 - 0.5 * VANISH_G * s * s;
-      const k = Math.max(0, (dt / VANISH_MS - 0.4) / 0.6); // 後半60%で縮小(最大でおよそ0.15倍)
-      v.mesh.scale.copy(v.s0).multiplyScalar(1 - 0.85 * k * k);
+      v.mesh.position.y = v.y0 - 0.5 * VANISH_G * s * s; // 縮小はしない(r134)
     }
     renderer.shadowMap.needsUpdate = true;
   }
@@ -2384,7 +2575,7 @@ window.addEventListener('message', function(ev) {
     else if (currentType === 'cp_10t') mesh = createPumpTruck();
     else if (currentType === 'arrow') mesh = createArrowMesh();
     else if (currentType === 'scaffold') { // r128: 足場(テスト機能)
-      mesh = createScaffoldMesh(parseInt(scaffoldParams.steps, 10) || 1, parseInt(scaffoldParams.spans, 10) || 1, parseFloat(scaffoldParams.width) || 0.9);
+      mesh = createScaffoldMesh(parseInt(scaffoldParams.steps, 10) || 1, parseInt(scaffoldParams.spans, 10) || 1, parseFloat(scaffoldParams.width) || 0.9, scaffoldParams.open);
     }
     else if (currentType === 'custom_box') {
       const bw = parseFloat(boxParams.boxW) || 1.0;
@@ -2412,6 +2603,7 @@ window.addEventListener('message', function(ev) {
       mesh.userData.scfSteps = parseInt(scaffoldParams.steps, 10) || 1;
       mesh.userData.scfSpans = parseInt(scaffoldParams.spans, 10) || 1;
       mesh.userData.scfWidth = parseFloat(scaffoldParams.width) || 0.9;
+      mesh.userData.scfOpen = (scaffoldParams.open || []).slice(); // r134: 開口("段,列"の文字列の配列)
     }
     if(currentType === 'custom_box'){
       mesh.userData.boxW = parseFloat(boxParams.boxW) || 1.0;
@@ -3258,7 +3450,9 @@ window.addEventListener('message', function(ev) {
             dragObj.userData.normal = new THREE.Vector3(0, 1, 0);
             updateOrientation(dragObj);
           }
+          if (dragObj.userData.type === 'scaffold' && !dragObj.userData._carry) dragObj.userData._carry = _scfCarryBegin(dragObj); // r134: 足場に載っている作業員も一緒に動かす(最初の移動の前に覚える)
           dragObj.position.copy(newPos);
+          if (dragObj.userData._carry) _scfCarryApply(dragObj.userData._carry);
           checkFallenStatus(dragObj, false);
         }
         renderer.shadowMap.needsUpdate = true; 
@@ -3333,8 +3527,10 @@ window.addEventListener('message', function(ev) {
               if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow' || obj.userData.type === 'kotai') {
                 // シングルクリックによる処理は削除
               } else {
+                const _carry1 = (obj.userData.type === 'scaffold') ? _scfCarryBegin(obj) : null; // r134: 載っている作業員も一緒に回す
                 obj.userData.yaw = (obj.userData.yaw || 0) - Math.PI / 12;
                 updateOrientation(obj);
+                if (_carry1) _scfCarryApply(_carry1);
                 if (obj.userData.type === 'scaffold') { _scfUpdateShadowPosts(obj); _scfSettleWorkers(); } // r130/r133
               }
               renderer.shadowMap.needsUpdate = true; 
@@ -3364,8 +3560,10 @@ window.addEventListener('message', function(ev) {
         if (dragObj.userData.type === 'text_balloon' || dragObj.userData.type === 'arrow') {
           // シングルクリックでの処理削除
         } else {
+          if (dragObj.userData.type === 'scaffold' && !dragObj.userData._carry) dragObj.userData._carry = _scfCarryBegin(dragObj); // r134
           dragObj.userData.yaw = (dragObj.userData.yaw || 0) - Math.PI / 12;
           updateOrientation(dragObj);
+          if (dragObj.userData._carry) _scfCarryApply(dragObj.userData._carry);
           if (dragObj.userData.type === 'scaffold') { _scfUpdateShadowPosts(dragObj); _scfSettleWorkers(); } // r130/r133
         }
       }
@@ -3412,6 +3610,7 @@ window.addEventListener('message', function(ev) {
         if (dragObj.userData.type === 'worker') delete dragObj.userData.deckPickY;
         
         if (hits.length === 0) {
+          delete dragObj.userData._carry; // r134: 範囲外=足場ごと落ちる。載っていた作業員は vanishObject の中で支え直し(落下)される
           vanishObject(dragObj); // r133: 落下して消える演出
           showToast('🗑️ オブジェクトを削除しました');
         } else {
@@ -3421,6 +3620,7 @@ window.addEventListener('message', function(ev) {
           normal.applyMatrix3(nMat).normalize();
           dragObj.userData.normal = normal;
           updateOrientation(dragObj);
+          if (dragObj.userData._carry) { _scfCarryApply(dragObj.userData._carry); delete dragObj.userData._carry; } // r134: 最終位置に合わせて載っている作業員を置く
 
           dragObj.userData.isPlaced = true; 
           checkFallenStatus(dragObj, true);

@@ -538,7 +538,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0147</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0148</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -621,7 +621,7 @@ D&D or クリックでロードしてください</p>
     </div>
     <!-- r062: 方眼紙ボタンをdrop-hint内(画面中央、内容次第で高さがはみ出すことがあった)から
          作図エリア左下の独立配置に変更。デバッグ用だったが好評につき正式運用として位置を固定化 -->
-    <button id="grid-paper-btn" style="position:absolute;left:16px;bottom:16px;z-index:11;background:#37474f;color:#cfd8dc;border:1px solid #546e7a;border-radius:6px;padding:8px 18px;font-size:.9em;cursor:pointer;letter-spacing:.05em;">
+    <button id="grid-paper-btn" style="position:absolute;right:16px;bottom:16px;z-index:11;background:#37474f;color:#cfd8dc;border:1px solid #546e7a;border-radius:6px;padding:8px 18px;font-size:.9em;cursor:pointer;letter-spacing:.05em;">
       📐 方眼紙から作図する
     </button>
     <canvas id="pdf-cv"></canvas>
@@ -1499,11 +1499,12 @@ In addition, if you combine or link compiled forms of this Software with softwar
 </script>
 
 <!-- v0147(45回目): 「簡単な説明（F1）」ヘルプガイド(Arecal側Claude姉さん作の HelpGuide v02 を取り込み)。F1・起動画面の左下のボタンで開く。
-     画像は Explan/ フォルダに Explan_1.png, Explan_2.png … (連番・欠番なし)。※Arecalが同じフォルダにある場合は、下の DIR/PREFIX を変える(例 'ExplanVoldia/' と 'ExplanV_')。
+     画像は モード別フォルダ Explan_A/(Voldia)・Explan_B/(3Dイメージ)・Explan_C/(配置モード)に Explan_1.png, Explan_2.png … (連番・欠番なし)。※Arecalと衝突する時は PREFIX を変える。
      配置モード(iframe)の「簡単な説明（F1）」ボタン・F1も、postMessage('voldia-helpguide-toggle')でここのガイドを開閉する。 -->
 <script>
 window.HELPGUIDE_CFG = {
-  DIR: 'Explan/', PREFIX: 'Explan_',
+  DIR: 'Explan_A/', PREFIX: 'Explan_',   // v0148: モード別フォルダ Explan_A=Voldia(作図) / Explan_B=3Dイメージ / Explan_C=配置モード(下の監視で自動切替)
+ 
   ACCENT: '#e8a020',                       // Voldiaのアクセント色(--accent)
   START_BTN_PARENT: '#cv-wrap',            // 起動画面(中央ビューの左下)に出すボタン。cv-wrapは position:relative
   START_VISIBLE: function () { var e = document.getElementById('drop-hint'); return !!e && getComputedStyle(e).display !== 'none'; },
@@ -1516,6 +1517,26 @@ window.HELPGUIDE_CFG = {
 (function () {
   var dh = document.getElementById('drop-hint');
   if (dh && window.HelpGuide && window.MutationObserver) new MutationObserver(function () { window.HelpGuide.syncStart(); }).observe(dh, { attributes: true, attributeFilter: ['style', 'class'] });
+  // v0148(45回目): モードごとにヘルプ画像のフォルダを切り替え、切り替わった時は1ページ目に戻す。
+  //   Voldia(作図)=Explan_A/・3Dイメージ(#calc-modal.show)=Explan_B/・配置モード(#placement-overlay表示中)=Explan_C/。配置が最優先。
+  //   voldia_main.js/export.jsは触らず、200msごとに今のモードを見る(軽い判定だけ)。ガイドが開いていれば、その場で読み込み直す。
+  (function () {
+    var cur = 'A';
+    function mode() {
+      var pl = document.getElementById('placement-overlay');
+      if (pl && pl.style.display !== 'none') return 'C';
+      var cm = document.getElementById('calc-modal');
+      if (cm && cm.classList.contains('show')) return 'B';
+      return 'A';
+    }
+    window.__hgMode = mode;
+    setInterval(function () {
+      var m = mode();
+      if (m === cur) return;
+      cur = m;
+      if (window.HelpGuide) window.HelpGuide.setDir('Explan_' + m + '/');
+    }, 200);
+  })();
   // 配置モード(iframe)の「簡単な説明（F1）」ボタン・F1キーから開閉する
   window.addEventListener('message', function (ev) {
     var ifr = document.getElementById('placement-iframe');

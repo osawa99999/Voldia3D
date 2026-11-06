@@ -1,4 +1,5 @@
 // ============================================================
+// r134(45回目): 配置モードのiframe参照を voldia_placement_v0084.html に変更(足場の開口の編集ボタン・ヘルプ画像のモード別フォルダ)。
 // r133(45回目): 配置モードのiframe参照を voldia_placement_v0083.html に変更(ヘルプガイド・影の精度Low/High・足場の途中の枠・作業員を足場に・落下して消える演出)。
 // r132(45回目): 配置モードのiframe参照を voldia_placement_v0082.html に変更(足場のテクスチャ画像 data/voldia_scaffold_tex.js を読み込むため)。
 // r128(45回目): 配置モードのiframe参照を voldia_placement_v0081.html に変更(足場(テスト機能)追加)。
@@ -816,7 +817,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0083.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
+      iframe.src='voldia_placement_v0084.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);

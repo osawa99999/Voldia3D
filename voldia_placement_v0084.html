@@ -236,6 +236,19 @@
   }
   .scf-numpad-btn:hover { background: #3a5a7a; }
 
+  /* v0084(45回目): 足場の開口の編集窓(足場ダイアログの上に重ねて出す) */
+  #scaffold-edit-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.97); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.85);
+    display: none; z-index: 1100; max-width: 92vw;
+  }
+  #scf-edit-title { font-size: 0.95em; color: #a5d6a7; margin-bottom: 8px; text-align: center; font-weight: bold; }
+  #scf-edit-help { font-size: 0.75em; color: #b9c6d2; margin-bottom: 8px; line-height: 1.5; }
+  #scf-edit-pairlabel { display: block; font-size: 0.8em; color: #dfe9f2; margin-bottom: 8px; cursor: pointer; }
+  #scf-edit-scroll { max-width: 86vw; max-height: 56vh; overflow: auto; background: #e9eef3; border-radius: 4px; }
+  #scf-edit-cv { display: block; cursor: pointer; }
+
   /* テキスト入力UI */
   #text-input-ui {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -497,7 +510,20 @@
   </div>
   <div class="text-ui-btns">
     <button id="scf-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="scf-btn-edit" class="text-ui-btn" style="background:#37474f">編 集</button>
     <button id="scf-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+
+<!-- 足場の開口の編集窓 v0084(45回目): 立面を表示し、ダブルクリックでその部分の絵を消す(車両通行用)。消せるのは最下段とその上の段だけ -->
+<div id="scaffold-edit-ui">
+  <div id="scf-edit-title">🪜 足場の立面（開口の編集）</div>
+  <div id="scf-edit-help">開けたい所を<b>ダブルクリック</b>（もう一度で元に戻る）。編集できるのは<b>最下段とその上の段</b>だけです（暗い段は編集できません）。</div>
+  <label id="scf-edit-pairlabel"><input type="checkbox" id="scf-edit-pair" checked> 2段まとめて開ける（車両通行用）</label>
+  <div id="scf-edit-scroll"><canvas id="scf-edit-cv" width="10" height="10"></canvas></div>
+  <div class="text-ui-btns">
+    <button id="scf-edit-clear" class="text-ui-btn" style="background:#6d4c41">すべて元に戻す</button>
+    <button id="scf-edit-close" class="text-ui-btn" style="background:#2e7d32">閉じる</button>
   </div>
 </div>
 
@@ -544,7 +570,7 @@
      voldia_models.jsはvoldia_placement.jsより前に読み込むこと(順序は従来どおり)。 -->
 <script>
 // v0083(45回目): ヘルプガイドの読み込み。本体(Voldia)内のiframeでは本体のガイドを開くので読み込まない。単独で開いた時だけ自前のガイドを使う。
-window.HELPGUIDE_CFG = { DIR: 'Explan/', PREFIX: 'Explan_', ACCENT: '#4caf50', PANEL_TOP: 120, TOAST_PC: '“簡単な説明”は、F1キーでいつでも呼び出せます。' };
+window.HELPGUIDE_CFG = { DIR: 'Explan_C/', PREFIX: 'Explan_', ACCENT: '#4caf50', PANEL_TOP: 120, TOAST_PC: '“簡単な説明”は、F1キーでいつでも呼び出せます。' };
 if (window.parent === window) { document.write('<script src="js/voldia_helpguide.js"><\/script>'); }
 </script>
 <script src="js/voldia_placement.js"></script>
