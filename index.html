@@ -538,7 +538,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0148</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0149</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1503,6 +1503,8 @@ In addition, if you combine or link compiled forms of this Software with softwar
      配置モード(iframe)の「簡単な説明（F1）」ボタン・F1も、postMessage('voldia-helpguide-toggle')でここのガイドを開閉する。 -->
 <script>
 window.HELPGUIDE_CFG = {
+  PAGES: { 'Explan_A/': 0, 'Explan_B/': 0, 'Explan_C/': 0 },   // v0149: 各フォルダの総ページ数。0=不明(探査・1枚目が見つかり次第表示)。画像が完成したら枚数を入れると探査が無くなり速い
+  // EXT: '.webp',                           // 画像をWebPにする時は、この行の頭の // を外す(ファイル名 Explan_1.webp …)
   DIR: 'Explan_A/', PREFIX: 'Explan_',   // v0148: モード別フォルダ Explan_A=Voldia(作図) / Explan_B=3Dイメージ / Explan_C=配置モード(下の監視で自動切替)
  
   ACCENT: '#e8a020',                       // Voldiaのアクセント色(--accent)
@@ -1518,13 +1520,15 @@ window.HELPGUIDE_CFG = {
   var dh = document.getElementById('drop-hint');
   if (dh && window.HelpGuide && window.MutationObserver) new MutationObserver(function () { window.HelpGuide.syncStart(); }).observe(dh, { attributes: true, attributeFilter: ['style', 'class'] });
   // v0148(45回目): モードごとにヘルプ画像のフォルダを切り替え、切り替わった時は1ページ目に戻す。
-  //   Voldia(作図)=Explan_A/・3Dイメージ(#calc-modal.show)=Explan_B/・配置モード(#placement-overlay表示中)=Explan_C/。配置が最優先。
+  //   Voldia(作図)=Explan_A/・3Dイメージ(「3D生成方法」ダイアログ #gm-overlay 表示中、または3D画面 #calc-modal.show)=Explan_B/・配置モード(#placement-overlay表示中)=Explan_C/。配置が最優先。
   //   voldia_main.js/export.jsは触らず、200msごとに今のモードを見る(軽い判定だけ)。ガイドが開いていれば、その場で読み込み直す。
   (function () {
     var cur = 'A';
     function mode() {
       var pl = document.getElementById('placement-overlay');
       if (pl && pl.style.display !== 'none') return 'C';
+      var gm = document.getElementById('gm-overlay');   // v0149: 「3Dイメージ」ボタンで出る「3D生成方法」ダイアログが出た時点で、3Dイメージのガイド(B)に切り替える
+      if (gm && gm.style.display === 'flex') return 'B';
       var cm = document.getElementById('calc-modal');
       if (cm && cm.classList.contains('show')) return 'B';
       return 'A';

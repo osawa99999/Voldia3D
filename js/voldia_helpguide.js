@@ -52,7 +52,8 @@
     },
     // theme (CSS variables). Orange example for Voldia: accent '#ff9800'
     ACCENT: '#4488cc', BG: '#1e1e2e', BG_DARK: '#12121f', BG_IMG: '#05050a', FG: '#cde',
-    Z_INDEX: 10000             // keep BELOW the host app's modal/confirm dialogs
+    Z_INDEX: 10000,            // keep BELOW the host app's modal/confirm dialogs
+    PAGES: 0                   // Voldia(45回目): 総ページ数(数 or フォルダごとの数)。0=不明(探査)。入れると探査を省いて高速化
   }, window.HELPGUIDE_CFG || {});   // Voldia(45回目): ホスト側HTMLの window.HELPGUIDE_CFG で上書き(本体は仕様書v02のまま)
   /* ========================================================================= */
 
@@ -113,7 +114,7 @@
       showMsg('ガイド画像が見つかりません。\n' + CFG.DIR + CFG.PREFIX + '1' + CFG.EXT + ' から連番（' + CFG.PREFIX + '2' + CFG.EXT + '…）で配置してください。');
       ind.textContent = '0 / 0'; bPrev.disabled = bNext.disabled = true; return;
     }
-    ind.textContent = (idx + 1) + ' / ' + slides.length;
+    ind.textContent = (idx + 1) + ' / ' + slides.length + (probing ? '+' : '');   // Voldia: 探査中は「+」(まだ増えるかも)
     bPrev.disabled = (idx === 0); bNext.disabled = (idx === slides.length - 1);
     const url = slides[idx];
     img.onload = function () { clearTimeout(loadTimer); msg.style.display = 'none'; img.style.display = 'block'; clamp(); };   // image size changes the panel size
@@ -126,16 +127,45 @@
   // A browser cannot list a folder: probe Explan_1, Explan_2 ... sequentially and stop at the first that fails to load.
   // URLs are stored ABSOLUTE so that they also resolve inside the PiP window (a different document).
   let probeGen = 0;   // Voldia(45回目): setDir()で探索をやり直した時、古い探索の結果を捨てるための番号
+  // Voldia(45回目・高速化): 以前は「全ページを1枚ずつ最後まで読み込み、最後の404も待ってから」1ページ目を出していたため、GitHub Pages等で遅かった。
+  //   (1) CFG.PAGES に総ページ数が入っていれば、探査せず即座に1ページ目を出し、2ページ目以降はバックグラウンドで先読みする(404の待ちも無い)。
+  //       CFG.PAGES は数(全フォルダ共通)か、フォルダごとの数 { 'Explan_A/': 12, 'Explan_B/': 5, 'Explan_C/': 8 }。0または未指定=総数不明。
+  //   (2) 総数が不明なら従来どおり探査するが、1ページ目が見つかった時点で表示を始める(残りは裏で探査を続け、見つかるたびに「n / m+」が増える)。
+  function knownPages() {
+    const p = CFG.PAGES, n = (typeof p === 'number') ? p : ((p && typeof p === 'object') ? p[CFG.DIR] : 0);
+    return (n > 0) ? Math.min(Math.floor(n), CFG.MAX_PAGES) : 0;
+  }
+  function absUrl(url) { try { return new URL(url, document.baseURI).href; } catch (_) { return url; } }
   function probe() {
-    if (probing) return; probing = true;
-    const gen = probeGen;
+    if (probing) return;
+    const gen = probeGen, known = knownPages();
+    if (known > 0) {
+      const urls = []; for (let i = 1; i <= known; i++) urls.push(absUrl(CFG.DIR + CFG.PREFIX + i + CFG.EXT));
+      slides = urls; idx = 0; render();   // 1ページ目を今すぐ表示
+      // 1ページ目が届いたら(失敗しても)、残りを並行して先読み
+      const first = new Image();
+      first.onload = first.onerror = function () { if (gen !== probeGen) return; urls.slice(1).forEach(function (u) { new Image().src = u; }); };
+      first.src = urls[0];
+      return;
+    }
+    probing = true;
     const found = []; let n = 1;
-    const done = function () { if (gen !== probeGen) return; slides = found; probing = false; idx = 0; render(); };
+    const done = function () {
+      if (gen !== probeGen) return;
+      const wasNull = (slides === null);
+      slides = found; probing = false; if (wasNull) idx = 0; render();
+    };
     (function next() {
       if (gen !== probeGen) return;
       if (n > CFG.MAX_PAGES) { done(); return; }
       const url = CFG.DIR + CFG.PREFIX + n + CFG.EXT, im = new Image();
-      im.onload = function () { if (gen !== probeGen) return; let abs = url; try { abs = new URL(url, document.baseURI).href; } catch (_) {} found.push(abs); n++; next(); };
+      im.onload = function () {
+        if (gen !== probeGen) return;
+        found.push(absUrl(url)); n++;
+        if (found.length === 1) { slides = found; idx = 0; }   // 1ページ目が見つかった時点で表示を始める
+        render();
+        next();
+      };
       im.onerror = done;
       im.src = url;
     })();

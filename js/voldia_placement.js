@@ -1,6 +1,8 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 46回目(r136): ホイールクリック(中ボタン)で「地面の点へ移動」(広い図形で端に寄れない対策)。地面の上にカーソルがある間は黄色い丸アイコンを出し、ホイールをほぼ動かさずに押して離すと、カメラがその点へなめらかに寄って回転・ズームの中心になる(ドラッグ=従来のパン)。※配置モードHTMLは voldia_placement_v0085.html。前版=backup/voldia_placement_r135.js
+// 45回目(r135): 足場の開口の「中」の床板(開口の2段の間)も消す・開口の天井になる床板は残す。
 // 45回目(r134): 足場の開口(編集ボタン→立面の別窓でダブルクリックで絵を消す・最下段とその上だけ)・最上段の床板を無し・足場の上の作業員は影なし&足場と一緒に動く・落下して消える演出を変更(縮小なし・下へ落として1秒後にパッと消す)。※配置モードHTMLは voldia_placement_v0084.html。前版=backup/voldia_placement_r133.js
 // 45回目(r133): 足場の途中の枠(各スパンの境目に小口の絵)・足場の上に作業員を配置可・範囲外へD&Dして削除する時に「落下して消える」演出(vanishObject)。影の精度をLow(1536・既定)/High(4096)の2段階に(HTML v0083)。※配置モードHTMLは voldia_placement_v0083.html。前版=backup/voldia_placement_r132_before_45b.js
 // 45回目(r132): 足場のテクスチャを、マスターの図面から作った画像(data/voldia_scaffold_tex.js。側面・小口。巾木つき)に変更。ジャッキベース部はコード描きのまま。無い時は従来のコード描き。※配置モードHTMLは voldia_placement_v0082.html。前版=backup/voldia_placement_r131_before_tex.js
@@ -1891,12 +1893,21 @@ window.addEventListener('message', function(ev) {
     }
     // 各段の床板(薄い箱)。r134(マスター要望): 一番上の床板は付けない(手すりの無い所に床面(通路)があると安全衛生法上アウトのため)。
     //   床板は「各段の上面」に置くので、k=1..段数-1(最上段の上面=全体の高さには置かない)。1段だけの足場には床板が無い。
+    //   r135(マスター要望): 開口の「中」にある床板は消す。床板k(=下からk段目の上面)は、その下の段(k-1)と上の段(k)の両方が開口の列だけ抜く
+    //   (=開口の2段の間の床板)。開口の「天井」になる床板(開口の最上段の上面)は残す。残った床板は連続する列ごとに1枚の箱にする。
     for (let k = 1; k <= steps - 1; k++) {
-      const deck = new THREE.Mesh(new THREE.BoxGeometry(L - 0.04, 0.05, W - 0.04), new THREE.MeshLambertMaterial({ color: 0x9aa1a8 }));
-      deck.position.set(0, HB + SCF.H_STEP * k - 0.025, 0);
-      deck.castShadow = false; deck.receiveShadow = false;
-      deck.userData.isScfDeck = true; // r133: 作業員が載れる面
-      g.add(deck);
+      let c = 0;
+      while (c < spans) {
+        if (isOpen(k - 1, c) && isOpen(k, c)) { c++; continue; }
+        let e = c; while (e < spans && !(isOpen(k - 1, e) && isOpen(k, e))) e++;   // c..e-1 が残る連続した列
+        const x0 = -L / 2 + SCF.W_SPAN * c + (c === 0 ? 0.02 : 0), x1 = -L / 2 + SCF.W_SPAN * e - (e === spans ? 0.02 : 0);
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 0.05, W - 0.04), new THREE.MeshLambertMaterial({ color: 0x9aa1a8 }));
+        deck.position.set((x0 + x1) / 2, HB + SCF.H_STEP * k - 0.025, 0);
+        deck.castShadow = false; deck.receiveShadow = false;
+        deck.userData.isScfDeck = true; // r133: 作業員が載れる面
+        g.add(deck);
+        c = e;
+      }
     }
     // 足元だけの短い影(マスター要望・45回目r129): 各支柱の足元に「見えない小さい柱」を置き、影の計算にだけ参加させる。
     //   色・深度を書かない(colorWrite/depthWrite=false)ので描画には出ない。three r128の影パスは object.visible と material.visible だけを見て
@@ -3381,6 +3392,9 @@ window.addEventListener('message', function(ev) {
       placementMarker.visible = false;
     }
 
+    // r136(46回目): ホイールクリック移動のアイコン(既存の地面レイ terrainHits を使う)
+    { let _tg = null, _bt = 0; try { _tg = e.target; _bt = e.buttons; } catch (_) {} _moveIconUpdate(_tg, _bt, terrainHits); }
+
     if (!dragObj) return;
 
     // r073(21回目引継ぎ・マスター指摘「1372オブジェクト規模で発生」): 上でcx/cyに
@@ -3640,6 +3654,91 @@ window.addEventListener('message', function(ev) {
   // ==========================================
   // 6. メインループ
   // ==========================================
+  // ==========================================
+  // ★ ホイールクリック移動 46回目 r136
+  // ==========================================
+  // 背景: 面積の大きな3Dを作ると、ホイールのズームが「回転の中心(controls.target)」に向かうだけなので、
+  //       中心から遠い所へ寄れない(three r128のOrbitControlsにカーソル位置へのズームは無い)。
+  // 仕様(マスター案): 地面の上にカーソルがある間は丸いアイコンを出す。ホイールクリック(中ボタンをほぼ動かさずに押して離す=5px未満)で、
+  //       クリックした地面の点へカメラが約0.45秒でなめらかに移動し、その点が新しい回転・ズームの中心になる。距離は今の4割(最小3m・今より遠くはしない)。
+  //       中ボタンのドラッグは従来どおりパン。構台作図中・各ダイアログ中・オブジェクトのドラッグ中・足場ダイアログ中は無効。
+  //       アイコンは、配置するオブジェクトを選んでいる間(既存の配置マーカーと紛らわしい)・マウスボタンを押している間は隠す。
+  //       アイコンの判定は既存の pointermove の地面レイ(terrainHits)をそのまま使う(追加のレイは無し=広い地形でも重くならない)。
+  const MOVE_DIST_K = 0.4, MOVE_MIN_DIST = 3, MOVE_MS = 450;
+  const moveIcon = new THREE.Group();
+  {
+    const ringGeo = new THREE.RingGeometry(0.7, 1.0, 32); ringGeo.rotateX(-Math.PI / 2);
+    const dotGeo = new THREE.CircleGeometry(0.22, 20); dotGeo.rotateX(-Math.PI / 2);
+    [ringGeo, dotGeo].forEach(g => {
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffd54f, side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false }));
+      m.renderOrder = 999; m.raycast = function() {};
+      moveIcon.add(m);
+    });
+  }
+  moveIcon.visible = false;
+  scene.add(moveIcon);
+  let _moveAnim = null;
+
+  function _moveBlocked() {
+    if (_kotaiSavedCam || currentType === 'kotai' || dragObj || _scfIsOpen()) return true;
+    for (const id of ['numpad-ui', 'text-input-ui', 'box-input-ui']) {
+      const el = document.getElementById(id); if (el && el.style.display === 'block') return true;
+    }
+    const cc = document.getElementById('custom-confirm-overlay');
+    return !!(cc && cc.style.display === 'flex');
+  }
+  function _moveIconUpdate(target, buttons, hits) { // pointermove から(hits=既存の地面レイの結果)
+    const isCanvas = !!target && target.tagName === 'CANVAS' && target.id !== 'radar-canvas';
+    if (!isCanvas || buttons !== 0 || currentType || _moveAnim || !hits.length || _moveBlocked()) { moveIcon.visible = false; return; }
+    const h = hits[0];
+    const n = new THREE.Vector3(0, 1, 0);
+    if (h.face) { n.copy(h.face.normal).applyMatrix3(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize(); }
+    if (n.y < 0) n.negate();
+    const s = Math.max(0.15, camera.position.distanceTo(h.point) * 0.02); // 画面上でほぼ一定の大きさ
+    moveIcon.position.copy(h.point).addScaledVector(n, 0.05);
+    moveIcon.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    moveIcon.scale.setScalar(s);
+    moveIcon.visible = true;
+  }
+  function _moveStart(pt) {
+    const p0 = camera.position.clone(), q0 = controls.target.clone();
+    const dist = p0.distanceTo(pt);
+    const dir = p0.clone().sub(pt);
+    if (dir.lengthSq() < 1e-8) dir.set(0, 0.6, 1);
+    dir.normalize();
+    if (dir.y < 0.05) { dir.y = 0.05; dir.normalize(); } // 点が今のカメラより高くても、カメラを地面の下へ潜らせない(maxPolarAngleで跳ねない)
+    const newDist = Math.min(dist, Math.max(MOVE_MIN_DIST, dist * MOVE_DIST_K));
+    _moveAnim = { p0, q0, p1: pt.clone().addScaledVector(dir, newDist), q1: pt.clone(), t0: performance.now() };
+    moveIcon.visible = false;
+  }
+  function _moveUpdate() { // animate()から毎フレーム
+    if (!_moveAnim) return;
+    const a = _moveAnim;
+    const t = Math.min(1, (performance.now() - a.t0) / MOVE_MS);
+    const k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; // easeInOutCubic
+    camera.position.lerpVectors(a.p0, a.p1, k);
+    controls.target.lerpVectors(a.q0, a.q1, k);
+    controls.update();
+    if (t >= 1) _moveAnim = null;
+  }
+  const _moveCancel = () => { _moveAnim = null; }; // 移動中に利用者が操作したら、その操作を優先する
+  renderer.domElement.addEventListener('pointerdown', _moveCancel);
+  renderer.domElement.addEventListener('wheel', _moveCancel, { passive: true });
+  window.addEventListener('keydown', e => { if (e.key && e.key.indexOf('Arrow') === 0) _moveCancel(); });
+  document.addEventListener('mouseleave', () => { moveIcon.visible = false; });
+  window.addEventListener('pointerup', e => {
+    if (e.button !== 1) return; // ホイールクリックだけ
+    if (!e.target || e.target.tagName !== 'CANVAS' || e.target.id === 'radar-canvas') return;
+    if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) >= 5) return; // ドラッグ=パンだったので移動しない
+    if (_moveBlocked()) return;
+    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+    if (hits.length > 0) _moveStart(hits[0].point);
+  });
+  // ★ ホイールクリック移動 ここまで
+
   function animate() {
     requestAnimationFrame(animate);
 
@@ -3760,6 +3859,7 @@ window.addEventListener('message', function(ev) {
     }
 
     updateVanishingObjects(); // r133: 範囲外削除の「落下して消える」演出
+    _moveUpdate(); // r136(46回目): ホイールクリック移動のなめらかな移動
 
     radarCtx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
 
