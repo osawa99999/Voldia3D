@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 46回目(r140): エッジ線(addEdgeLines)をメッシュごとに調整できるようにした。mesh.userData.noEdges=true=線を付けない / mesh.userData.edgeAngle=その面の折れ角しきい値(度。省略=30)。カラーコーンは「底の四角(90°)の線だけ残す」ため、赤の本体=edgeAngle:85・黒/黄/白=noEdges(data/voldia_models.js の createConeBar で指定)。他の種類(重機など)は従来どおり。
 // 46回目(r139): ホイールクリックで移動できない所(掴めるオブジェクトの上・地面が無い所)を指した時は、トーストで「そこには移動できません」と出す。画面下の説明は「指定位置に移動」・「ホイールドラッグ:回転」の表記は削除(機能は残す=ホイールドラッグでも回転する)。※配置モードHTMLは voldia_placement_v0088.html。前版=backup/voldia_placement_r138.js
 // 46回目(r138): ①ホイールドラッグ=回転(3Dイメージと同じ。マウス操作は3Dイメージが正)・右ドラッグ=パンは据え置き ②丸いアイコンの色分け: 地面=黄色(ホイールクリックでカメラ移動できる)・掴めるオブジェクト=水色(左ドラッグでオブジェクトを動かす。この上ではホイールクリックでカメラは動かない)。※配置モードHTMLは voldia_placement_v0087.html。前版=backup/voldia_placement_r137.js
 // 46回目(r137): ①右ドラッグ=パン(3Dイメージと同じ。左=回転・ホイールドラッグ=パン・ホイール=ズーム) ②左UIの「簡単な説明（F1）」ボタンはPCでは非表示(F1で開く)・タッチ端末だけ残す。※配置モードHTMLは voldia_placement_v0086.html。前版=backup/voldia_placement_r136.js
@@ -1122,7 +1123,8 @@ window.addEventListener('message', function(ev) {
       }
     });
     meshes.forEach(mesh => {
-      const edges = computeEdgesGeometrySafe(mesh.geometry, 30);
+      if (mesh.userData.noEdges) return; // r140(46回目): このメッシュには線を付けない(例: カラーコーンのバー・白帯)
+      const edges = computeEdgesGeometrySafe(mesh.geometry, mesh.userData.edgeAngle || 30); // r140: メッシュごとのしきい値(省略=30°=従来どおり)
       const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x111111 }));
       line.raycast = function(){};
       mesh.add(line);
