@@ -112,8 +112,8 @@
 
   #controls {
     position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.7); padding: 8px 15px; border-radius: 20px; font-size: 0.8em; color: #ccc;
-    pointer-events: none; border: 1px solid #555;
+    background: rgba(0, 0, 0, 0.7); padding: 8px 18px; border-radius: 16px; font-size: 0.8em; color: #ccc;
+    pointer-events: none; border: 1px solid #555; text-align: center; line-height: 1.7; white-space: nowrap; /* v0086: 2行表示 */
   }
   #controls span { color: #4caf50; font-weight: bold; }
 
@@ -236,7 +236,10 @@
   }
   .scf-numpad-btn:hover { background: #3a5a7a; }
 
-  /* v0085(46回目): 変更なし(JS側で、ホイールクリックで地面の点へ移動する機能を追加。前版=backup/voldia_placement_v0084.html) */
+  /* v0088(46回目): 画面下の説明を「ホイールクリック:指定位置に移動」に変更・「ホイールドラッグ:回転」の表記を削除(機能は残す)し、2行の分け方を調整。前版=backup/voldia_placement_v0087.html */
+  /* v0087(46回目): ホイールドラッグ=回転(3Dイメージと同じ。マウス操作は3Dイメージが正)に合わせて、画面下の説明を「ホイールドラッグ:回転」に。前版=backup/voldia_placement_v0086.html */
+  /* v0086(46回目): ①画面下の操作説明を2行に(右ドラッグ=パン・ホイールドラッグ=パン・ホイールクリック=地面へ移動・F1=操作説明を追加。3Dイメージと同じ操作に) ②右UIの整頓(ボタンの表示名の変更・「保安用品」と「仮設構造物」を「仮設（テスト機能）」に統合し2列2行に) ③左UIの「簡単な説明（F1）」ボタンはPCでは非表示(F1で開く。タッチ端末だけ残す)。前版=backup/voldia_placement_v0085.html */
+  /* v0085(46回目): 変更なし(JS側で、ホイールクリックで地面の点へ移動する機能を追加) */
   /* v0084(45回目): 足場の開口の編集窓(足場ダイアログの上に重ねて出す) */
   #scaffold-edit-ui {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -384,7 +387,7 @@
       <button class="pal-btn" data-type="arrow">➡ 矢印</button>
     </div>
 
-    <div class="pal-title">🚜 掘削機 (Backhoe)</div>
+    <div class="pal-title">🚜 重機</div>
     <div class="pal-grid">
       <button class="pal-btn" data-type="bh_mini">ミニBH</button>
       <button class="pal-btn" data-type="bh_025">0.25m³ BH</button>
@@ -404,34 +407,31 @@
       <button class="pal-btn" data-type="cr_80t">80t クローラー</button>
     </div>
 
-    <div class="pal-title">🚚 ダンプ (Dump Truck)</div>
+    <div class="pal-title">🚚 車両</div>
     <div class="pal-grid">
       <button class="pal-btn" data-type="dump_4t">4tダンプ</button>
       <button class="pal-btn" data-type="dump_10t">10tダンプ</button>
       <button class="pal-btn" data-type="mx_10t">生コン車</button>
       <button class="pal-btn" data-type="cp_10t">ポンプ車</button>
     </div>
-    <div class="pal-title">👷 人員 (Workers)</div>
+    <div class="pal-title">👷 作業員</div>
     <div class="pal-grid">
       <button class="pal-btn" data-type="worker">作業員</button>
       <button class="pal-btn" data-type="guard">誘導員</button>
     </div>
-    <div class="pal-title">🚧 保安用品 (Safety)</div>
+    <div class="pal-title">🚧 仮設（テスト機能）</div>
     <div class="pal-grid">
-      <button class="pal-btn" data-type="conebar" style="grid-column: 1 / -1;">カラーコーン＆バー</button>
-    </div>
-
-    <div class="pal-title">🏗️ 仮設構造物</div>
-    <div class="pal-grid">
-      <button class="pal-btn" data-type="kotai" style="grid-column: 1 / -1;">🏗️ 構台</button>
-      <button class="pal-btn" data-type="h_pile" style="grid-column: 1 / -1;">🔩 鋼材柱 (H鋼杭)</button>
-      <button class="pal-btn" data-type="scaffold_input" style="grid-column: 1 / -1;">🪜 足場 (テスト機能)</button>
+      <button class="pal-btn" data-type="kotai">🏗️ 構台</button>
+      <button class="pal-btn" data-type="h_pile">🔩 H鋼杭</button>
+      <button class="pal-btn" data-type="scaffold_input">🪜 足場</button>
+      <button class="pal-btn" data-type="conebar">カラーコーン</button>
     </div>
   </div>
 </div>
 
 <div id="controls">
-  🖱 <span>左/右ドラッグ</span>:オービット(3D回転) ｜ 🖱 <span>中ドラッグ</span>:パン(画面移動) ｜ ⚙️ <span>ホイール</span>:ズーム ｜ ⌨️ <span>矢印キー</span>:カメラ移動
+  🖱 <span>左ドラッグ</span>:回転 ｜ 🖱 <span>右ドラッグ</span>:パン ｜ ⌨️ <span>矢印キー</span>:カメラ移動<br>
+  ⚙️ <span>ホイール</span>:ズーム ｜ 🖱 <span>ホイールクリック</span>:指定位置に移動 ｜ ⌨️ <span>F1</span>:操作説明
 </div>
 
 <div id="loading">GLB 解析・再構築中...</div>

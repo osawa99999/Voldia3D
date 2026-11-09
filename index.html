@@ -311,9 +311,9 @@ select#sc-select{width:100%;background:#333;color:var(--text);border:1px solid v
 .c3d canvas{display:block;width:100%!important;height:100%!important;}
 .c3d-label{position:absolute;top:10px;left:12px;font-size:.65em;font-family:'Consolas',monospace;color:#555;letter-spacing:1px;}
 .c3d-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
-          background:rgba(13,15,20,.8);border:1px solid var(--bdr);border-radius:20px;
+          background:rgba(13,15,20,.8);border:1px solid var(--bdr);border-radius:14px;
           padding:4px 14px;font-size:.7em;color:#666;pointer-events:none;
-          white-space:nowrap;font-family:'Consolas',monospace;}
+          white-space:nowrap;font-family:'Consolas',monospace;text-align:center;line-height:1.7;}
 .crp{width:320px;flex-shrink:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}
 .sec-ttl{font-size:.72em;font-weight:700;letter-spacing:2px;color:#666;text-transform:uppercase;}
 .csep{height:1px;background:var(--bdr);}
@@ -538,7 +538,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0149</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0152</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -737,7 +737,8 @@ D&D or クリックでロードしてください</p>
         ⬛ <b style="color:#ccc;">四角形</b>: 対角の2点をクリックで確定（1つ描くと自動終了）<br>
         🔵 <b style="color:#ccc;">多角形</b>: 頂点を順にクリック、始点クリック or Enter=確定（1つ描くと自動終了・Shiftで直交）<br>
         🏗 <b style="color:#ccc;">山留</b>: 頂点を順にクリック、始点クリック or Enter=確定（1図面に1本のみ／再描画は要確認・Shiftで直交）<br>
-        <b style="color:#ccc;">ESC</b>: キャンセル
+        <b style="color:#ccc;">ESC</b>: キャンセル<br>
+        ⌨ <b style="color:#ccc;">F1</b>: 操作説明
       </div>
     </div>
   </div>
@@ -861,7 +862,8 @@ D&D or クリックでロードしてください</p>
     <div class="calc-body">
       <div class="c3d" id="c3d-pane">
         <div class="c3d-label">3D PREVIEW</div>
-        <div class="c3d-hint">ドラッグ: 回転 ／ ホイール: ズーム</div>
+        <!-- v0151(46回目): 3Dイメージの操作説明を2行に。配置モードの画面下の説明と言い回しをそろえてある。v0152: 「ホイールドラッグ:回転」の表記は消した(機能は残してある=ホイールドラッグでも回転する。AutoCADに慣れた人が自然に使うため) -->
+        <div class="c3d-hint">🖱 左ドラッグ:回転 ｜ 🖱 右ドラッグ:パン<br>⚙️ ホイール:ズーム ｜ ⌨️ F1:操作説明</div>
       </div>
 <div class="crp">
         <!-- 【v0134(40回目) 3D右UIの整理・削除/移設一覧】挙動は変えていない(体積計算・runCalcは無改造)。
@@ -1519,6 +1521,33 @@ window.HELPGUIDE_CFG = {
 (function () {
   var dh = document.getElementById('drop-hint');
   if (dh && window.HelpGuide && window.MutationObserver) new MutationObserver(function () { window.HelpGuide.syncStart(); }).observe(dh, { attributes: true, attributeFilter: ['style', 'class'] });
+  // v0150(46回目・マスター要望): 起動画面の「簡単な説明（F1）」ボタンの上に、ゆっくり上下に動く吹き出し「初めての人は押してね！」を出して、押すように促す。
+  // v0152(46回目): 毎回出す(「押したら以後出さない」記録は廃止)。ボタン(#hg-start-btn)が見えている間だけ出し、起動画面でなくなればボタンと一緒に消える。
+  //   動き: 控えめな上下。OSの「視覚効果を減らす/アニメーション効果オフ」の設定(prefers-reduced-motion)の時は、上下の代わりにゆっくり点滅(動かすと不快な人への配慮。吹き出し自体は出す)。
+  //   ボタンの位置・HelpGuide本体(js/voldia_helpguide.js)は触らない
+  (function () {
+    var wrap = document.getElementById('cv-wrap'), btn = document.getElementById('hg-start-btn');
+    if (!wrap || !btn) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '#hg-start-bubble{display:none;position:absolute;left:14px;z-index:11;padding:7px 13px;border-radius:12px;background:#e8a020;color:#1a1200;font-size:.85em;font-weight:800;white-space:nowrap;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45);animation:hgBubbleBob 1.4s ease-in-out infinite;}' +
+      '#hg-start-bubble::after{content:"";position:absolute;left:24px;top:100%;border:7px solid transparent;border-top-color:#e8a020;border-bottom:0;}' +
+      '@keyframes hgBubbleBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}' +
+      '@keyframes hgBubbleBlink{0%,100%{opacity:1}50%{opacity:.4}}' +
+      '@media (prefers-reduced-motion:reduce){#hg-start-bubble{animation:hgBubbleBlink 1.8s ease-in-out infinite}}';
+    document.head.appendChild(st);
+    var bub = document.createElement('div'); bub.id = 'hg-start-bubble'; bub.textContent = '初めての人は押してね！';
+    wrap.appendChild(bub);
+    function sync() {
+      var vis = btn.style.display !== 'none';
+      bub.style.display = vis ? 'block' : 'none';
+      if (vis) bub.style.bottom = (14 + btn.offsetHeight + 12) + 'px'; // ボタンの真上(ボタンの高さ+すき間)
+    }
+    ['pointerdown', 'mousedown', 'touchstart', 'dblclick'].forEach(function (t) { bub.addEventListener(t, function (e) { e.stopPropagation(); }); }); // 起動画面のクリック(ファイルを開く等)を発火させない
+    bub.addEventListener('click', function (e) { e.stopPropagation(); if (window.HelpGuide) window.HelpGuide.toggle(); });
+    if (window.MutationObserver) new MutationObserver(sync).observe(btn, { attributes: true, attributeFilter: ['style'] });
+    sync();
+  })();
   // v0148(45回目): モードごとにヘルプ画像のフォルダを切り替え、切り替わった時は1ページ目に戻す。
   //   Voldia(作図)=Explan_A/・3Dイメージ(「3D生成方法」ダイアログ #gm-overlay 表示中、または3D画面 #calc-modal.show)=Explan_B/・配置モード(#placement-overlay表示中)=Explan_C/。配置が最優先。
   //   voldia_main.js/export.jsは触らず、200msごとに今のモードを見る(軽い判定だけ)。ガイドが開いていれば、その場で読み込み直す。

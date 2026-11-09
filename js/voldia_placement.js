@@ -1,6 +1,9 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 46回目(r139): ホイールクリックで移動できない所(掴めるオブジェクトの上・地面が無い所)を指した時は、トーストで「そこには移動できません」と出す。画面下の説明は「指定位置に移動」・「ホイールドラッグ:回転」の表記は削除(機能は残す=ホイールドラッグでも回転する)。※配置モードHTMLは voldia_placement_v0088.html。前版=backup/voldia_placement_r138.js
+// 46回目(r138): ①ホイールドラッグ=回転(3Dイメージと同じ。マウス操作は3Dイメージが正)・右ドラッグ=パンは据え置き ②丸いアイコンの色分け: 地面=黄色(ホイールクリックでカメラ移動できる)・掴めるオブジェクト=水色(左ドラッグでオブジェクトを動かす。この上ではホイールクリックでカメラは動かない)。※配置モードHTMLは voldia_placement_v0087.html。前版=backup/voldia_placement_r137.js
+// 46回目(r137): ①右ドラッグ=パン(3Dイメージと同じ。左=回転・ホイールドラッグ=パン・ホイール=ズーム) ②左UIの「簡単な説明（F1）」ボタンはPCでは非表示(F1で開く)・タッチ端末だけ残す。※配置モードHTMLは voldia_placement_v0086.html。前版=backup/voldia_placement_r136.js
 // 46回目(r136): ホイールクリック(中ボタン)で「地面の点へ移動」(広い図形で端に寄れない対策)。地面の上にカーソルがある間は黄色い丸アイコンを出し、ホイールをほぼ動かさずに押して離すと、カメラがその点へなめらかに寄って回転・ズームの中心になる(ドラッグ=従来のパン)。※配置モードHTMLは voldia_placement_v0085.html。前版=backup/voldia_placement_r135.js
 // 45回目(r135): 足場の開口の「中」の床板(開口の2段の間)も消す・開口の天井になる床板は残す。
 // 45回目(r134): 足場の開口(編集ボタン→立面の別窓でダブルクリックで絵を消す・最下段とその上だけ)・最上段の床板を無し・足場の上の作業員は影なし&足場と一緒に動く・落下して消える演出を変更(縮小なし・下へ落として1秒後にパッと消す)。※配置モードHTMLは voldia_placement_v0084.html。前版=backup/voldia_placement_r133.js
@@ -67,7 +70,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0);
   controls.maxPolarAngle = Math.PI / 2 - 0.01; 
-  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN }; // r137/r138(46回目): 3Dイメージ(voldia3d.js)と同じ操作=左・ホイールドラッグ=回転/右ドラッグ=パン(以前は 中=パン・右=回転)
   controls.update();
 
   // r012(27回目セッション根治修正): 環境光0.7+直射光1.0の合計1.7倍が、完全水平で
@@ -300,7 +303,8 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
     const btn = document.getElementById('help-btn');
     const embedded = (window.parent !== window);
     const touch = /iPhone|iPad|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
-    btn.textContent = touch ? '簡単な説明' : '簡単な説明（F1）'; // ガイドの表記ルール(PC=（F1）つき・タッチ端末=なし)
+    // r137(46回目・マスター要望): 左UIの「簡単な説明（F1）」ボタンはPCでは消す(F1キーで開く)。F1が無いタッチ端末では開く手段が無くなるので、そちらだけ残す
+    if (touch) { btn.textContent = '簡単な説明'; } else { btn.style.display = 'none'; }
     function toggleGuide() {
       if (embedded) { try { window.parent.postMessage({ type: 'voldia-helpguide-toggle' }, '*'); } catch (e) { console.warn('ヘルプガイドを開けません', e); } }
       else if (window.HelpGuide) window.HelpGuide.toggle();
@@ -3663,16 +3667,23 @@ window.addEventListener('message', function(ev) {
   //       クリックした地面の点へカメラが約0.45秒でなめらかに移動し、その点が新しい回転・ズームの中心になる。距離は今の4割(最小3m・今より遠くはしない)。
   //       中ボタンのドラッグは従来どおりパン。構台作図中・各ダイアログ中・オブジェクトのドラッグ中・足場ダイアログ中は無効。
   //       アイコンは、配置するオブジェクトを選んでいる間(既存の配置マーカーと紛らわしい)・マウスボタンを押している間は隠す。
-  //       アイコンの判定は既存の pointermove の地面レイ(terrainHits)をそのまま使う(追加のレイは無し=広い地形でも重くならない)。
+  //       アイコンの判定は既存の pointermove の地面レイ(terrainHits)をそのまま使う。
+  // r138(マスター要望): アイコンの色で「いま何ができるか」を示す。地面(構台含む)=黄色=ホイールクリックでカメラが移動する/
+  //       掴めるオブジェクト(左ドラッグで動かせるもの。pointerdownの掴む判定と同じ条件)=水色=その点にアイコンを出し、ホイールクリックではカメラは動かさない。
+  //       オブジェクトの判定は placedObjects へのレイが増えるので、アイコン表示用は60msに1回に間引く(ホイールクリックの瞬間は毎回その場で判定)。
   const MOVE_DIST_K = 0.4, MOVE_MIN_DIST = 3, MOVE_MS = 450;
+  const MOVE_NG_MSG = 'そこには移動できません';
+  const MOVE_COLOR_GROUND = 0xffd54f, MOVE_COLOR_OBJECT = 0x4fc3f7, MOVE_OBJ_INTERVAL_MS = 60; // 地面=黄 / 掴めるオブジェクト=水色
   const moveIcon = new THREE.Group();
   {
     const ringGeo = new THREE.RingGeometry(0.7, 1.0, 32); ringGeo.rotateX(-Math.PI / 2);
     const dotGeo = new THREE.CircleGeometry(0.22, 20); dotGeo.rotateX(-Math.PI / 2);
+    moveIcon.userData.mats = [];
     [ringGeo, dotGeo].forEach(g => {
-      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffd54f, side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false }));
+      const mat = new THREE.MeshBasicMaterial({ color: MOVE_COLOR_GROUND, side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthTest: false, depthWrite: false });
+      const m = new THREE.Mesh(g, mat);
       m.renderOrder = 999; m.raycast = function() {};
-      moveIcon.add(m);
+      moveIcon.add(m); moveIcon.userData.mats.push(mat);
     });
   }
   moveIcon.visible = false;
@@ -3687,13 +3698,26 @@ window.addEventListener('message', function(ev) {
     const cc = document.getElementById('custom-confirm-overlay');
     return !!(cc && cc.style.display === 'flex');
   }
+  // 掴めるオブジェクト(pointerdownの掴む判定と同じ条件)の上にカーソルがあれば、そのレイ結果を返す。無ければnull。※raycasterはsetFromCamera済みの前提
+  function _moveObjectHit() {
+    const hs = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
+    if (!hs.length) return null;
+    let o = hs[0].object; while (o && !o.userData.isRoot) o = o.parent;
+    return (o && o.userData.type !== 'kotai') ? hs[0] : null;
+  }
+  let _moveObjAt = -1e9, _moveObjHit = null;
   function _moveIconUpdate(target, buttons, hits) { // pointermove から(hits=既存の地面レイの結果)
     const isCanvas = !!target && target.tagName === 'CANVAS' && target.id !== 'radar-canvas';
-    if (!isCanvas || buttons !== 0 || currentType || _moveAnim || !hits.length || _moveBlocked()) { moveIcon.visible = false; return; }
-    const h = hits[0];
+    if (!isCanvas || buttons !== 0 || currentType || _moveAnim || _moveBlocked()) { moveIcon.visible = false; return; }
+    const t = performance.now();
+    if (t - _moveObjAt >= MOVE_OBJ_INTERVAL_MS) { _moveObjHit = _moveObjectHit(); _moveObjAt = t; } // 間引き
+    const oh = _moveObjHit, h = oh || hits[0];
+    if (!h) { moveIcon.visible = false; return; }
     const n = new THREE.Vector3(0, 1, 0);
     if (h.face) { n.copy(h.face.normal).applyMatrix3(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize(); }
     if (n.y < 0) n.negate();
+    const c = oh ? MOVE_COLOR_OBJECT : MOVE_COLOR_GROUND;
+    moveIcon.userData.mats.forEach(m => m.color.setHex(c));
     const s = Math.max(0.15, camera.position.distanceTo(h.point) * 0.02); // 画面上でほぼ一定の大きさ
     moveIcon.position.copy(h.point).addScaledVector(n, 0.05);
     moveIcon.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
@@ -3734,8 +3758,9 @@ window.addEventListener('message', function(ev) {
     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
+    if (_moveObjectHit()) { showToast(MOVE_NG_MSG, 1500); return; } // r138: 掴めるオブジェクトの上(水色のアイコン)ではカメラを動かさない / r139: 理由をトーストで知らせる
     const hits = raycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
-    if (hits.length > 0) _moveStart(hits[0].point);
+    if (hits.length > 0) _moveStart(hits[0].point); else showToast(MOVE_NG_MSG, 1500); // r139: 地面が無い所(空・地形の外)も同じ
   });
   // ★ ホイールクリック移動 ここまで
 
