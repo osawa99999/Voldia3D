@@ -5,6 +5,7 @@
 // 24回目セッションで抽出。THREE.jsグローバルにのみ依存する自己完結モジュール。
 // 依存関係はAST解析で検証済み(24回目セッション時点)。
 // 46回目: カラーコーン(createConeBar)をGLB「R_bar.glb」の新モデル(R_BAR_GEO=GLB変換ツール出力)に入れ替え。旧・手組みと専用マテリアル(matStripe/matCone/matWhite)は削除。前版=backup/voldia_models_before46.js
+// 46回目(追): カラーコーンのエッジ線は「底の四角い板の線だけ」残す(赤の本体=edgeAngle:85・黒/黄/白=noEdges。js/voldia_placement.js r140の addEdgeLines が参照)。
 // 41回目: 生コン車も新モデル(MIX_GEO)に入れ替え(createMixerTruck)。ダンプ・生コン車の組み立ては共通の createTruckFromModel。
 // 41回目: 10tダンプ・4tダンプを新モデル(DUMP_10T_GEO/DUMP_4T_GEO)に入れ替え(createDump)。
 // r073(37回目): 作業員(createWorker(false))をGLB実測モデル(LOW_1TOKO_GEO)に入れ替え。LOW_1TOKO_GEO・生成関数ともこのファイル内に統合(別ファイル不要)。
@@ -855,6 +856,10 @@ const MIX_GEO = {
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       geo.computeVertexNormals(); // 面ごとに頂点を複製済み(非インデックス)なのでフラットシェーディングになる
       const mesh = new THREE.Mesh(geo, R_BAR_MATS[name]);
+      // エッジ線(js/voldia_placement.js の addEdgeLines が見る設定): 赤の本体は「折れ角85°以上」だけ=底の四角い板(90°)の線だけ残す。
+      //   (数値で確認済み: 赤の204辺のうち85°以上は底板の24本=コーン1つにつき12本で、次に大きいのが79.6°=側面の縦線・底板とコーンの境目・先端の輪。)
+      //   バーの黒/黄・白帯は線を付けない。userData は数値・真偽値だけ(clone で失われない)。
+      if (name === '球006') mesh.userData.edgeAngle = 85; else mesh.userData.noEdges = true;
       setShadows(mesh);
       group.add(mesh);
     });
