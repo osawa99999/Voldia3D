@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 47回目(r141): 足場の開口の「当たり判定」を本当に抜いた。開口のある足場だけ、当たり判定を小箱の集合にする(開口のない列=全高・開口の列=開けた段より上だけ)。getCollisionBoxes(obj)=当たり判定の箱の配列(足場以外・開口なしは従来の1つの箱=挙動不変)。checkOverlapSimple/resolveOverlapが使う(足場を動かす側・動かされる側の両方)。前版=backup/voldia_placement_r140.js。※配置モードHTMLは変更なし(v0088のまま)
 // 46回目(r140): エッジ線(addEdgeLines)をメッシュごとに調整できるようにした。mesh.userData.noEdges=true=線を付けない / mesh.userData.edgeAngle=その面の折れ角しきい値(度。省略=30)。カラーコーンは「底の四角(90°)の線だけ残す」ため、赤の本体=edgeAngle:85・黒/黄/白=noEdges(data/voldia_models.js の createConeBar で指定)。他の種類(重機など)は従来どおり。
 // 46回目(r139): ホイールクリックで移動できない所(掴めるオブジェクトの上・地面が無い所)を指した時は、トーストで「そこには移動できません」と出す。画面下の説明は「指定位置に移動」・「ホイールドラッグ:回転」の表記は削除(機能は残す=ホイールドラッグでも回転する)。※配置モードHTMLは voldia_placement_v0088.html。前版=backup/voldia_placement_r138.js
 // 46回目(r138): ①ホイールドラッグ=回転(3Dイメージと同じ。マウス操作は3Dイメージが正)・右ドラッグ=パンは据え置き ②丸いアイコンの色分け: 地面=黄色(ホイールクリックでカメラ移動できる)・掴めるオブジェクト=水色(左ドラッグでオブジェクトを動かす。この上ではホイールクリックでカメラは動かない)。※配置モードHTMLは voldia_placement_v0087.html。前版=backup/voldia_placement_r137.js
@@ -1558,7 +1559,7 @@ window.addEventListener('message', function(ev) {
   //   ビテイ式枠組足場(通称ビティ足場)風の「四角」。高さ=1.7m×段+ジャッキベース0.2m・長さ=1.8m×列・奥行=幅(0.6/0.9/1.2m)。
   //   流れはボックス(custom_box)と同じ: ボタン(scaffold_input)→入力ダイアログ→配置待ち(scaffold)→クリックでspawnObject。
   //   見た目: 側面は「透かし」テクスチャ(支柱・手すり・X筋違・幅木・ベース板。銀灰色。alphaTestで抜く)、各段の床板は薄い箱。本体は影を出さない(castShadow=false)。足元だけ「見えない小さい柱」で短い影を落とす(r129)。
-  //   当たり判定・選択は全面(箱形)のまま。保存はuserData.scfSteps/scfSpans/scfWidth。
+  //   当たり判定は箱形(r141: 開口がある足場だけ小箱の集合)・選択は全面。保存はuserData.scfSteps/scfSpans/scfWidth/scfOpen。
   // ==========================================
   const SCF = { H_STEP: 1.7, W_SPAN: 1.8, H_BASE: 0.2, MAX_STEPS: 30, MAX_SPANS: 50, SHADOW_POST: { w: 0.15, h: 1.2 }, FLOAT_TOL: 0.3 };
   let scaffoldParams = { steps: "2", spans: "3", width: "0.9", open: [] }; // 前回の入力値を覚えておく(ダイアログを開き直した時の初期値)
@@ -1777,7 +1778,7 @@ window.addEventListener('message', function(ev) {
     renderer.shadowMap.needsUpdate = true;
   }
 
-  // 開口(r134・マスター要望「足場に車両通行用の開口」): 側面の絵を消すだけ(本当の開口ではない。床板・当たり判定は変えない)。
+  // 開口(r134・マスター要望「足場に車両通行用の開口」): 側面の絵と床板を消す。r141で当たり判定も開口を抜く(_scfSolidParts / getCollisionBoxes)。
   //   消せるのは「最下段(r=0)とその上の段(r=1)」だけ。cell=(r,c): r=下からの段(0始まり)・c=左からの列(0始まり)。前後の両面を同時に消す(車両は前→後ろへ通り抜ける)。
   //   隣り合う2つの開口の間は、境目の枠(小口の絵)・ジャッキベース・足元の影の柱も消す。
   function _scfOpenSet(steps, spans, list) {
@@ -1937,6 +1938,35 @@ window.addEventListener('message', function(ev) {
     return g;
   }
 
+  // r141(マスター要望「足場の開口部だけ当たり判定を無くす」): 開口のある足場の「中身がある部分」を、足場のローカル座標の小箱の配列で返す。
+  //   開口が無ければ null(=従来どおり全体で1つの箱)。列ごとに、開口でない段の高さ区間(下から連続する段は1区間にまとめる。1段目はベース部0.2mも含む)を求め、
+  //   区間が同じ連続した列を1つの箱にする。開口の列=開けた段より上だけ(開口の天井の床板の高さから上)・開口でない列=全高。全部の段が開口の列は箱なし(素通り)。
+  //   戻り値の各要素 {x0,x1,y0,y1,hw}: x=長手方向の範囲・y=高さの範囲・z=±hw(幅の半分)。
+  function _scfSolidParts(steps, spans, widthM, openList) {
+    const open = _scfOpenSet(steps, spans, openList);
+    if (open.size === 0) return null;
+    const L = SCF.W_SPAN * spans, HB = SCF.H_BASE, HS = SCF.H_STEP, hw = widthM / 2;
+    const cols = [];
+    for (let c = 0; c < spans; c++) {
+      const iv = [];
+      for (let r = 0; r < steps; r++) {
+        if (open.has(r + ',' + c)) continue;
+        const y0 = r === 0 ? 0 : HB + HS * r, y1 = HB + HS * (r + 1);
+        if (iv.length && Math.abs(iv[iv.length - 1][1] - y0) < 1e-9) iv[iv.length - 1][1] = y1; else iv.push([y0, y1]);
+      }
+      cols.push(iv);
+    }
+    const parts = [];
+    let c = 0;
+    while (c < spans) {
+      const key = JSON.stringify(cols[c]);
+      let e = c + 1; while (e < spans && JSON.stringify(cols[e]) === key) e++;   // c..e-1 が同じ区間の連続した列
+      for (const [y0, y1] of cols[c]) parts.push({ x0: -L / 2 + SCF.W_SPAN * c, x1: -L / 2 + SCF.W_SPAN * e, y0, y1, hw });
+      c = e;
+    }
+    return parts;
+  }
+
   // ==========================================
   // ★ 足場の上の作業員 (45回目 r133・マスター要望「足場の2段目・3段目にも作業員(のみ)を配置したい」)
   //   ・足場の床板(isScfDeck)は「作業員だけが載れる面」。通常の着地面(_getFloorMeshes=地形+構台)には入れない(他のオブジェクトは今までどおり地面へ)。
@@ -2049,14 +2079,39 @@ window.addEventListener('message', function(ev) {
     return box;
   }
 
+  // r141: 当たり判定の箱の配列。足場以外・開口の無い足場は getBoundingBox の1つの箱だけ(従来と同じ)。
+  //   開口のある足場は、_scfSolidParts の小箱をワールドAABBに直し、従来の(各辺35%縮めた)全体の箱でクリップしたもの。
+  //   (縮めた全体の箱でクリップするので、開口の無い部分の余裕は従来と同じ。開口の天井・柱の列の内側の面は縮めない)
+  //   足場は15°刻みの回転で、回した小箱はワールドAABBに直すため近似(回転した足場の開口は、実際より少し狭く判定される)。
+  function getCollisionBoxes(obj) {
+    const ud = obj.userData;
+    if (!ud || ud.type !== 'scaffold') return [getBoundingBox(obj)];
+    const parts = _scfSolidParts(ud.scfSteps, ud.scfSpans, ud.scfWidth, ud.scfOpen);
+    if (!parts) return [getBoundingBox(obj)];
+    obj.updateMatrixWorld(true);
+    const full = getBoundingBox(obj);
+    if (full.isEmpty()) return [full];
+    const out = [];
+    for (const p of parts) {
+      const b = new THREE.Box3(new THREE.Vector3(p.x0, p.y0, -p.hw), new THREE.Vector3(p.x1, p.y1, p.hw));
+      b.applyMatrix4(obj.matrixWorld);
+      b.intersect(full);
+      if (!b.isEmpty()) out.push(b);
+    }
+    return out;
+  }
+  function _overlapPair(boxesA, boxesB) { // 重なった箱の組 [a,b](なければnull)
+    for (const a of boxesA) for (const b of boxesB) if (a.intersectsBox(b)) return [a, b];
+    return null;
+  }
+
   function checkOverlapSimple(obj) {
     if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow') return false; 
-    const objBox = getBoundingBox(obj);
+    const objBoxes = getCollisionBoxes(obj); // r141: 足場の開口は箱の集合
     for (const other of placedObjects) {
       // r065: 構台は「載る面」であって障害物ではないため、通常の衝突判定からは除外する
       if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai' || _noCollidePair(obj, other)) continue;
-      const otherBox = getBoundingBox(other);
-      if (objBox.intersectsBox(otherBox)) {
+      if (_overlapPair(objBoxes, getCollisionBoxes(other))) {
         return true;
       }
     }
@@ -2100,19 +2155,19 @@ window.addEventListener('message', function(ev) {
     while (overlap && attempts < 30) {
       overlap = false;
       obj.updateMatrixWorld(true);
-      const objBox = getBoundingBox(obj);
+      const objBoxes = getCollisionBoxes(obj); // r141: 足場の開口は箱の集合(開口が無ければ従来の1つの箱=押し出しの向きも従来と同じ)
       
       for (const other of placedObjects) {
         if (other === obj || !other.userData.isPlaced || other.userData.type === 'text_balloon' || other.userData.type === 'arrow' || other.userData.type === 'kotai' || _noCollidePair(obj, other)) continue;
         other.updateMatrixWorld(true);
-        const otherBox = getBoundingBox(other);
+        const pair = _overlapPair(objBoxes, getCollisionBoxes(other)); // 重なった箱の組
         
-        if (objBox.intersectsBox(otherBox)) {
+        if (pair) {
           overlap = true;
           const c1 = new THREE.Vector3();
-          objBox.getCenter(c1);
+          pair[0].getCenter(c1);
           const c2 = new THREE.Vector3();
-          otherBox.getCenter(c2);
+          pair[1].getCenter(c2);
           
           let dx = c1.x - c2.x;
           let dz = c1.z - c2.z;

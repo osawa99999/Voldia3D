@@ -930,6 +930,9 @@ D&D or クリックでロードしてください</p>
               style="border-color:#888;color:#ccc;">📷 スクショ</button>
             <!-- r070: エビル統合。「データ出力」は通常計算の結果画面では躯体解析、土量計算の結果画面では掘削土量解析を呼ぶ
                  (どちらを出すかはrunCalcがmodeで切替え済み=従来どおり。ボタンは同時に1つしか出ない) -->
+            <!-- 47回目: 3D_DXF出力(データ出力ボタンの上)。通常計算=外向きの3DFACE / 土量計算=Land Logic(上面が表・原点=測点)。表示とグレーアウトは updateOutputButtons()が制御 -->
+            <button class="btn-glb" id="btn-dxf3d" onclick="exportDxf3dClick()" data-gmtip="out-dxf3d"
+              style="border-color:#80cbc4;color:#80cbc4;">🧊 3D_DXF出力</button>
             <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')" data-gmtip="out-data"
               style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
             <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')" data-gmtip="out-data"
@@ -1124,6 +1127,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0154(47回目): ①2D平面の選択表示をAreCal方式に変更(自分の色のまま、選択は太い輪郭を重ねる)。②ホバー(塗りが濃く・輪郭が0.5秒周期で点滅)。③複数選択中の色変更を選択中の全図形に適用。ロジックは voldia_main.js(SHAPE_COLORSのselなど)。HTMLの構造は変更なし(v0153=3D_DXF出力ボタン)。 -->
 <!-- v0145(41回目): ①測点ダイアログのタイトル(#sv-title)出し分け・解説文・設置ボタンの初期グレーアウト ②左UIのオブジェクト一覧の上に解説(#list-hint)。ロジックは voldia_main.js r053。 -->
 <!-- v0144(41回目): 3Dスクショボタンで背景色(黒/白/透明)の選択ダイアログ(#ss-overlay)を出すようにした(voldia3d.js r116)。 -->
 <!-- v0143(41回目): ヘルプ吹き出し(#gm-tip)に white-space:pre-line を追加(ヘルプ文中の\nで改行できるように。文言の改行位置はvoldia_main.js r052)。 -->

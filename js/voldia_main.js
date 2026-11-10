@@ -99,14 +99,17 @@ function getSlopeRatio(){ return 1 / Math.tan(slopeAngleDeg * Math.PI / 180); }
 
 // ─── 色定義 ───
 const SHAPE_COLORS={
-  blue:  {fill:'rgba(0,200,255,.38)',  stroke:'rgba(0,200,255,.9)',   badge:'#0080c0', label:'青'},
-  green: {fill:'rgba(0,220,100,.38)',  stroke:'rgba(0,220,100,.9)',   badge:'#00a040', label:'緑'},
-  yellow:{fill:'rgba(220,200,0,.38)',  stroke:'rgba(220,200,0,.9)',   badge:'#c0a000', label:'黄'},
-  purple:{fill:'rgba(180,60,255,.38)', stroke:'rgba(180,60,255,.9)',  badge:'#9030c0', label:'紫'},
-  gray:  {fill:'rgba(150,150,150,.38)',stroke:'rgba(150,150,150,.9)', badge:'#707070', label:'グレー'},
+  // 47回目: sel=選択中の太い輪郭(自分の色の明るい同系色。暗い背景で見える色)。ホバーの輪郭は stroke のアルファを1にして作る(別表は持たない)。色を足す時はこの1行だけ直せばよい
+  blue:  {fill:'rgba(0,200,255,.38)',  stroke:'rgba(0,200,255,.9)',   badge:'#0080c0', sel:'#6EE6FF', label:'青'},
+  green: {fill:'rgba(0,220,100,.38)',  stroke:'rgba(0,220,100,.9)',   badge:'#00a040', sel:'#5CFF9D', label:'緑'},
+  yellow:{fill:'rgba(220,200,0,.38)',  stroke:'rgba(220,200,0,.9)',   badge:'#c0a000', sel:'#FFE94A', label:'黄'},
+  purple:{fill:'rgba(180,60,255,.38)', stroke:'rgba(180,60,255,.9)',  badge:'#9030c0', sel:'#D08CFF', label:'紫'},
+  gray:  {fill:'rgba(150,150,150,.38)',stroke:'rgba(150,150,150,.9)', badge:'#707070', sel:'#E0E0E0', label:'グレー'},
 }; // 6A(2026-08-28 引継ぎ18回目): 土量計算での垂直面(山留)指定用にグレーを再追加
 // ─── 追加ステート ───
 const selectedSet = new Set(); // これを他の let 宣言が集まっている場所の一番上に置いて。
+// 47回目(AreCal方式): ホバー。何のツールも使っていない時に図形の上にマウスがあると、塗りが濃くなり輪郭が0.5秒周期で点滅する(点滅用のrAFループはホバー中だけ回す)
+let hoverShapeIdx=-1,_hoverRaf=0,_hoverLastPhase=-1;
 let currentToolColor='blue';  // 現在の描画色
 let snapRound=5;               // デフォルト5mm スナップグリッド
 let distMode=false;            // 距離測定モード
@@ -1179,6 +1182,7 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
 
   drawCv.addEventListener('mousedown',onMouseDown,false);
   drawCv.addEventListener('mousemove',onMouseMove,false);
+  drawCv.addEventListener('mouseleave',()=>_setHover(-1),false); // 47回目: 図形の外へ出たらホバー解除(rAFループも止める)
 });
 
 // ================================================================
@@ -1478,6 +1482,7 @@ const _GM_TIPS={
   'out-shot':'表示されている３Dを単一画像として保存します',
   'out-data':'体積の計算表を出力します',
   'out-glb':'PowerPointなどで使用できる\n３Dデータを出力します',
+  'out-dxf3d':'AutoCADで使用できる\n３D面(3DFACE)のDXFを出力します',
   'out-xml':'MG重機で使用するデータを出力します',
   'out-off':'測点（0，0）が無ければ使用できません'
 };
@@ -1540,18 +1545,20 @@ function _gmInit(){
 //   グレーアウトは disabled ではなく .is-off + aria-disabled(disabledだと一部ブラウザでマウスオーバーのヘルプが出ないため)。
 //   土量計算の出力は確認ダイアログ(#lx-overlay)を出し、原点測点(複数ある時は選択)と北の向きを見せてから出力する。
 // ================================================================
-const _OUT_TIP_IDS=['btn-placement','btn-calc-screenshot','btn-analyze-structure','btn-analyze-earthwork','btn-glb','btn-landxml'];
+const _OUT_TIP_IDS=['btn-placement','btn-calc-screenshot','btn-dxf3d','btn-analyze-structure','btn-analyze-earthwork','btn-glb','btn-landxml'];
 let _outTipInited=false;
 function _outIsOff(btn){return !!(btn&&btn.classList.contains('is-off'));}
 function updateOutputButtons(){
-  const g=document.getElementById('btn-glb'),x=document.getElementById('btn-landxml');
+  const g=document.getElementById('btn-glb'),x=document.getElementById('btn-landxml'),dx=document.getElementById('btn-dxf3d');
   if(!g||!x)return;
   const mode=window._lastCalcModeForPlacement; // 'normal' | 'doboku' | null(計算前)
   g.classList.toggle('show',mode==='normal'||mode==='doboku');
   x.classList.toggle('show',mode==='doboku');
+  if(dx)dx.classList.toggle('show',mode==='normal'||mode==='doboku'); // 47回目: 3D_DXF出力(通常計算・土量計算とも表示)
   const off=(mode==='doboku')&&!(typeof surveyPts!=='undefined'&&surveyPts.length>0); // 土量計算は測点(原点)が必須
   g.classList.toggle('is-off',off);x.classList.toggle('is-off',off);
   g.setAttribute('aria-disabled',off?'true':'false');x.setAttribute('aria-disabled',off?'true':'false');
+  if(dx){dx.classList.toggle('is-off',off);dx.setAttribute('aria-disabled',off?'true':'false');dx.setAttribute('data-gmtip',off?'out-off':'out-dxf3d');}
   g.setAttribute('data-gmtip',off?'out-off':'out-glb');
   x.setAttribute('data-gmtip',off?'out-off':'out-xml');
   _outTipInit();
@@ -1583,6 +1590,16 @@ function exportGlbClick(){
     showExportDialog('glb');
   }
 }
+// 47回目: 3D_DXF出力。通常計算=確認だけ(外向きの3DFACE) / 土量計算=GLB出力と同じ確認ダイアログ(原点測点・北の向き)を出してから出力(上面が表)
+function exportDxf3dClick(){
+  const mode=window._lastCalcModeForPlacement;
+  if(mode==='normal'){
+    customConfirm('3D_DXF出力を行いますか？\n（AutoCADで使用できる３D面のデータを保存します）').then(ok=>{if(ok&&typeof exportDxf3DNormal==='function')exportDxf3DNormal();});
+  }else if(mode==='doboku'){
+    if(_outIsOff(document.getElementById('btn-dxf3d')))return;
+    showExportDialog('dxf');
+  }
+}
 function exportLandXmlClick(){
   if(window._lastCalcModeForPlacement!=='doboku')return;
   if(_outIsOff(document.getElementById('btn-landxml')))return;
@@ -1602,8 +1619,9 @@ function _lxInit(){
 function showExportDialog(kind){
   _lxInit();_lxKind=kind;
   const isXml=(kind==='xml');
-  _lxEl('lx-title').textContent=isXml?'LANDXML出力':'GLB出力';
-  _lxEl('lx-q').textContent=isXml?'LANDXML出力を行いますか？':'GLB出力を行いますか？';
+  const _lxName={xml:'LANDXML出力',glb:'GLB出力',dxf:'3D_DXF出力'}[kind]||'GLB出力';
+  _lxEl('lx-title').textContent=_lxName;
+  _lxEl('lx-q').textContent=_lxName+'を行いますか？';
   const sel=_lxEl('lx-origin');sel.innerHTML='';
   surveyPts.forEach((p,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent='測点 No.'+(i+1);sel.appendChild(o);});
   const def=(typeof originSurveyIdx==='number'&&surveyPts[originSurveyIdx])?originSurveyIdx:0; // 既定は測点1(ノースアロー設定で選択済みならそれ)
@@ -1622,7 +1640,7 @@ async function _lxYes(){
   const idx=parseInt(sel.value);
   if(!isNaN(idx)&&surveyPts[idx]){originSurveyIdx=idx;updateNorthArrowUI();} // ここで選んだ原点測点は、ノースアロー設定の原点にも反映(.vold保存にも入る)
   _lxClose();
-  const fn=(kind==='xml')?window._buildAndDownloadLandXML:window._buildAndDownloadLandLogicGLB;
+  const fn=(kind==='xml')?window._buildAndDownloadLandXML:(kind==='dxf')?window._buildAndDownloadLandLogicDXF:window._buildAndDownloadLandLogicGLB;
   if(typeof fn!=='function'){toast('⚠ 出力モジュール(voldia_landlogic.js)が読み込まれていません',4000);return;}
   _showCalcProgress();
   await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); // 「計算中」表示を先に描画してから重い処理に入る
@@ -2371,6 +2389,7 @@ function onMouseDown(e){
 function onMouseMove(e){
   const{x:lx,y:ly}=getLogi(e);
   window.lastMx=lx; window.lastMy=ly; // ArrowKey時プレビュー更新用
+  _updateHover(lx,ly); // 47回目: ホバー(ツール使用中は解除)
   if(editMode){ editMouseMove(e,lx,ly); return; } // r037: ✏修正モード
   // 新1(2026-08-28 引継ぎ18回目): 他モードに切り替わった際にグレーホバー表示が
   // 残らないよう、まず非表示にしてからアイドル時のみ再表示する
@@ -2750,7 +2769,11 @@ function updSidebar(){
     badge.title='色を変更';
     badge.addEventListener('click',()=>{
       const keys=Object.keys(SHAPE_COLORS);
-      sh.color=keys[(keys.indexOf(sh.color||'blue')+1)%keys.length];
+      // 47回目: 選択中の図形のバッジを押したら、選択中の全図形を同じ色にする(押した図形の次の色)。選択外の図形なら従来どおりその1個だけ
+      const _targets=(selectedSet.size>1&&selectedSet.has(idx))?[...selectedSet].map(i=>shapes[i]).filter(Boolean):[sh];
+      const _newColor=keys[(keys.indexOf(sh.color||'blue')+1)%keys.length];
+      _targets.forEach(t=>{t.color=_newColor;t._voldiaGeoError=false;});
+      sh.color=_newColor;
       // 6B(2026-08-28 引継ぎ18回目→26回目セッションで紫に移設): 紫に変更するたびに
       // 毎回、土量計算時の挙動(垂直面になること)をtoastで案内する
       if(sh.color==='purple') toast('🟪 紫色に設定したオブジェクトは、土量計算時に法面角度を無視して"垂直"となります', 3200, 'large');
@@ -3873,6 +3896,7 @@ function redraw(mx,my){
   // 全てこの平行移動を基準に積み重なるので、個々の描画コードはlx,lyを
   // そのまま使えばよい)。
   drawCtx.setTransform(1, 0, 0, 1, window._dcOffX||0, window._dcOffY||0);
+  const _selOutlineList=[];
   shapes.forEach((sh,idx)=>{
     if(sh.enabled===false)return;
     // 色別フィルター
@@ -3884,8 +3908,12 @@ function redraw(mx,my){
     const isSubBase = subMode && idx === subBase;
     const isSubTarget = subMode && subTargets.has(idx);
     
-    drawShape(sh, isSelected || isUnionTarget, isSubBase, isSubTarget);
+    // 47回目: 通常の選択は塗りも輪郭も自分の色のまま描く(オレンジ固定をやめた)。選択の太い輪郭は全図形を描いた後に重ねる。
+    //   結合の対象(isUnionTarget)・引き算の基準/対象・形状エラーは従来どおりの色(それぞれのモード用の表示)
+    drawShape(sh, isUnionTarget, isSubBase, isSubTarget, idx===hoverShapeIdx && _hoverEligible());
+    if(isSelected) _selOutlineList.push(sh);
   });
+  _selOutlineList.forEach(drawSelOutline);
   
   // 距離測定の点を描画（v0.0013: 全線残存）
   if(distPts.length>0){
@@ -3981,7 +4009,8 @@ function redraw(mx,my){
     drawCtx.restore();
   }
 }
-function drawShape(sh, selected, subBaseHl, subTgtHl){
+// 47回目: selected は「結合の対象」のオレンジ表示専用(通常の選択は drawSelOutline で輪郭だけ重ねる)。hover=ホバー中(塗りを濃く・輪郭を点滅)
+function drawShape(sh, selected, subBaseHl, subTgtHl, hover){
   const outer = getOuter(sh);
   const holes = getHoles(sh);
   if(!outer || outer.length < 2) return;
@@ -3998,6 +4027,14 @@ function drawShape(sh, selected, subBaseHl, subTgtHl){
   else if(selected) { fill = 'rgba(255,138,24,.25)'; stroke = 'rgba(255,138,24,.95)'; } // r067(マスター指摘): 薄緑→オレンジ(#FF8A18)
   else if(subBaseHl) { fill = 'rgba(239,83,80,.2)'; stroke = 'rgba(239,83,80,.9)'; }
   else if(subTgtHl) { fill = 'rgba(255,167,38,.15)'; stroke = 'rgba(255,167,38,.9)'; }
+
+  // 47回目: ホバー(自分の色のまま)。塗りは不透明度0.45(固定・点滅しない。垂直のように元がそれ以上なら元のまま)。輪郭は500ms周期の矩形波:
+  //   ON=自分の輪郭色のアルファ1・4/zoom / OFF=通常の輪郭・1.5/zoom。ホバー輪郭色は通常の輪郭(stroke)のアルファを1にして作る。他のハイライト状態(エラー/結合/引き算)の時は何もしない
+  let lineW = ((selected || subBaseHl || subTgtHl) ? 2.5 : 1.5) / zoom;
+  if(hover && !(sh._voldiaGeoError || selected || subBaseHl || subTgtHl)){
+    fill = cl.fill.replace(/[\d.]+\)$/, Math.max(0.45, sh.noSlope ? 0.52 : 0.38) + ')');
+    if(Math.floor(performance.now()/500) % 2 === 0){ stroke = cl.stroke.replace(/[\d.]+\)$/, '1)'); lineW = 4 / zoom; }
+  }
 
   drawCtx.save();
   drawCtx.beginPath();
@@ -4020,7 +4057,7 @@ function drawShape(sh, selected, subBaseHl, subTgtHl){
   drawCtx.fill('evenodd'); 
 
   drawCtx.strokeStyle = stroke;
-  drawCtx.lineWidth = ((selected || subBaseHl || subTgtHl) ? 2.5 : 1.5) / zoom;
+  drawCtx.lineWidth = lineW;
   if(subTgtHl) drawCtx.setLineDash([6/zoom, 4/zoom]);
   drawCtx.stroke();
 
@@ -4032,6 +4069,62 @@ function drawShape(sh, selected, subBaseHl, subTgtHl){
   });
   
   drawCtx.restore();
+}
+// 47回目: 選択中の図形に、自分の色(SHAPE_COLORS[色].sel)の太い輪郭(4/zoom=ズームによらず画面上で一定)だけを重ねる。塗り・ハッチは変えない
+function drawSelOutline(sh){
+  const outer = getOuter(sh);
+  if(!outer || outer.length < 2) return;
+  const cl = SHAPE_COLORS[sh.color||'blue'] || SHAPE_COLORS.blue;
+  drawCtx.save();
+  drawCtx.beginPath();
+  drawCtx.moveTo(outer[0].x, outer[0].y);
+  for(let i=1; i<outer.length; i++) drawCtx.lineTo(outer[i].x, outer[i].y);
+  drawCtx.closePath();
+  getHoles(sh).forEach(h => {
+    if(!h || h.length < 2) return;
+    drawCtx.moveTo(h[0].x, h[0].y);
+    for(let i=1; i<h.length; i++) drawCtx.lineTo(h[i].x, h[i].y);
+    drawCtx.closePath();
+  });
+  drawCtx.strokeStyle = cl.sel;
+  drawCtx.lineWidth = 4 / zoom;
+  drawCtx.lineJoin = 'round';
+  drawCtx.stroke();
+  drawCtx.restore();
+}
+// 47回目: ホバー判定。何のツールも使っていない(作図・距離測定・選択合成・部分削除・測点・修正・山留編集・パン中でない)時だけ有効
+function _hoverEligible(){
+  return !editMode && !drawing && tool===null && !distMode && !selUnionMode && !subMode && !surveyMode && !yamadomeEditMode && !panning;
+}
+// 一番上(配列の後ろ=後から描いた方)の、表示中の図形を返す(非表示・色フィルターで隠れた図形は対象外。Voldiaは穴あき図形を許容しないので外周だけで判定)
+function _hoverHit(lx,ly){
+  for(let i=shapes.length-1;i>=0;i--){
+    const sh=shapes[i];
+    if(sh.enabled===false) continue;
+    if(colorFilter[sh.color||'blue']===false) continue;
+    if(pointInPoly(lx,ly,sh.pts)) return i;
+  }
+  return -1;
+}
+function _setHover(idx){
+  if(idx===hoverShapeIdx) return;
+  hoverShapeIdx=idx;
+  if(idx>=0){
+    if(!_hoverRaf){ _hoverLastPhase=Math.floor(performance.now()/500)%2; _hoverRaf=requestAnimationFrame(_hoverTick); } // 二重起動しない
+  }else if(_hoverRaf){ cancelAnimationFrame(_hoverRaf); _hoverRaf=0; }
+  if(animId) cancelAnimationFrame(animId);
+  animId=requestAnimationFrame(()=>redraw()); // 変わった時とやめる時に1回描き直す
+}
+function _hoverTick(){
+  _hoverRaf=0;
+  if(hoverShapeIdx<0) return;
+  if(hoverShapeIdx>=shapes.length || !_hoverEligible()){ hoverShapeIdx=-1; redraw(); return; } // ツールを使い始めた/図形が減った → 止めて最後に1回描き直す
+  const ph=Math.floor(performance.now()/500)%2;
+  if(ph!==_hoverLastPhase){ _hoverLastPhase=ph; redraw(); } // 点滅の位相が変わった時だけ描き直す(それ以外はrAFを回すだけ)
+  _hoverRaf=requestAnimationFrame(_hoverTick);
+}
+function _updateHover(lx,ly){
+  _setHover(_hoverEligible() ? _hoverHit(lx,ly) : -1);
 }
 function drawPolyPrev(mx,my){
   const pts=cur.pts;if(!pts.length)return;

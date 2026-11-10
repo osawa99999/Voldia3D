@@ -414,6 +414,23 @@
     return true;
   }
 
+  // 47回目: 3D_DXF出力(土量計算)。GLB出力と同じ北上げ済みメッシュ・同じ向き(_llOrientUp=上面が表)を3DFACEで保存する。
+  //   座標=原点が選んだ測点(0,0)・GL=0・北上げ済み。X=E, Y=N, Z=標高(単位は DXF3D_UNIT_SCALE: 既定m)。書き出しは voldia_export.js の buildDxf3DFaceText。
+  async function buildAndDownloadLandLogicDXF(){
+    if(typeof buildDxf3DFaceText !== 'function'){ if(typeof toast === 'function') toast('⚠ 出力モジュール(voldia_export.js)が読み込まれていません', 4000); return false; }
+    const m = await _llBuildNorthUpMesh();
+    if(!m) return false;
+    const up = _llOrientUp(m.positions, m.indices);
+    console.log('[LAND-LOGIC] 3D_DXF: 三角形の向きを上向きにそろえました (反転=' + up.flipped + ' / 垂直面でそのまま=' + up.vertical + ')');
+    const r = buildDxf3DFaceText([{ layer: '3D_Earthwork', aci: 5, positions: m.positions, indices: up.indices }]);
+    if(!r.faces){ if(typeof toast === 'function') toast('⚠ 出力できる面がありません', 4000); return false; }
+    const fname = 'Voldia3D_' + _llTs() + '.DXF';
+    _llDownload(new Blob([r.text], {type:'application/dxf'}), fname);
+    console.log('[LAND-LOGIC] ' + fname + ' をダウンロードしました (3DFACE ' + r.faces + '面)');
+    if(typeof toast === 'function') toast('🧊 3D_DXFを出力しました: ' + fname + '（' + r.faces + '面・単位m・原点=測点）', 4000);
+    return true;
+  }
+
   // ── LANDXML出力 ───────────────────────────────────────
   // 書式・頂点/三角形の整理は csv_to_landxml v2.5.11(マスターの実績ツール)と同じ:
   //   LandXML 1.2 / 単位=メートル / Surface(TIN) / P=「北(Northing) 東(Easting) 標高」(小数4桁) / F=頂点番号3つ
@@ -517,6 +534,7 @@
 
   // コンソールから手動でも呼べるようにしておく(Shift+L無しでのデバッグ用)
   window._buildAndDownloadLandLogicGLB = buildAndDownloadLandLogicGLB;
+  window._buildAndDownloadLandLogicDXF = buildAndDownloadLandLogicDXF;   // 47回目: 3D_DXF出力ボタン(voldia_main.js)から呼ぶ
   window._buildAndDownloadLandXML = buildAndDownloadLandXML;   // r015: LANDXML出力ボタン(voldia_main.js)から呼ぶ
   window._llMeshToLandXML = _llMeshToLandXML;                  // 検証用
   window._llOrientUp = _llOrientUp;                            // 検証用

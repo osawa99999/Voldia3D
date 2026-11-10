@@ -401,6 +401,136 @@ function exportDXF3D(){
   if(typeof closeIoPanel==='function') closeIoPanel();
 }
 
+// ================================================================
+// 47回目: 3D_DXF出力(3D結果画面の右UI「3D_DXF出力」。3DFACEで保存。AutoCADで読み込む想定)
+//   通常計算 = exportDxf3DNormal(GLB出力と同じメッシュ=buildVoldiaGLBBytesのmeshes。向きは外向きにそろえる)
+//   土量計算 = voldia_landlogic.js の _buildAndDownloadLandLogicDXF(Land Logicの北上げ済みメッシュ。向きはGLB・LANDXMLと同じ上向き)
+//   書き出し本体は buildDxf3DFaceText(共通)。形式はR12(AC1009)のASCII。3DFACEの4点目は3点目と同じ(三角形)。
+//   座標: 入力メッシュは three座標[m](x=東, y=高さ, z=-北)。DXFは X=x, Y=-z, Z=y(回転だけ=向きが保たれる。単純なy/z入れ替えは鏡像になる)。
+//   通常計算はこの変換で既存の2D DXF(exportDXF3D)と同じ座標系・同じ原点になり、重ねられる。
+//   単位: DXF3D_UNIT_SCALE=1 でm(既存の2D DXF・LANDXMLと同じ)。mmにしたい時は 1000 にするだけ。
+// ================================================================
+const DXF3D_UNIT_SCALE = 1;
+function _dxfOrientOutward(positions, indices){
+  const nT = Math.floor(indices.length / 3), out = new Uint32Array(indices.length); out.set(indices);
+  const nV = positions.length / 3, Q = 1e4; // 位置の統合: 0.1mm(メートル単位の座標を想定)
+  const vmap = new Map(), vid = new Int32Array(nV);
+  for(let i = 0; i < nV; i++){
+    const k = Math.round(positions[i*3]*Q) + ',' + Math.round(positions[i*3+1]*Q) + ',' + Math.round(positions[i*3+2]*Q);
+    let id = vmap.get(k); if(id === undefined){ id = vmap.size; vmap.set(k, id); } vid[i] = id;
+  }
+  const edges = new Map(); // 辺(小,大) → [三角形*2+向き(1=小→大の順)] を並べたもの
+  const valid = new Uint8Array(nT);
+  for(let t = 0; t < nT; t++){
+    const a = vid[indices[t*3]], b = vid[indices[t*3+1]], c = vid[indices[t*3+2]];
+    if(a === b || b === c || a === c) continue;
+    valid[t] = 1;
+    const ev = [[a,b],[b,c],[c,a]];
+    for(const [u,v] of ev){
+      const key = u < v ? u + '_' + v : v + '_' + u;
+      let l = edges.get(key); if(!l){ l = []; edges.set(key, l); }
+      l.push(t*2 + (u < v ? 1 : 0));
+    }
+  }
+  const adj = new Array(nT); let nonManifold = 0;
+  for(const l of edges.values()){
+    if(l.length === 2){
+      const t1 = l[0] >> 1, d1 = l[0] & 1, t2 = l[1] >> 1, d2 = l[1] & 1;
+      if(t1 === t2) continue;
+      const rel = d1 ^ d2 ^ 1; // 1=向きを逆にする必要あり(2枚の辺が同じ向きに走っている時)
+      (adj[t1] = adj[t1] || []).push([t2, rel]); (adj[t2] = adj[t2] || []).push([t1, rel]);
+    } else if(l.length > 2) nonManifold++;
+  }
+  const flip = new Uint8Array(nT), seen = new Uint8Array(nT);
+  let comps = 0, flipped = 0;
+  for(let s = 0; s < nT; s++){
+    if(!valid[s] || seen[s]) continue;
+    comps++; const members = [s]; seen[s] = 1; flip[s] = 0;
+    for(let q = 0; q < members.length; q++){
+      const t = members[q]; if(!adj[t]) continue;
+      for(const [u, rel] of adj[t]){ if(seen[u]) continue; seen[u] = 1; flip[u] = flip[t] ^ rel; members.push(u); }
+    }
+    let vol = 0;
+    for(const t of members){
+      const a = indices[t*3]*3, b = indices[t*3+1]*3, c = indices[t*3+2]*3;
+      const x0=positions[a],y0=positions[a+1],z0=positions[a+2], x1=positions[b],y1=positions[b+1],z1=positions[b+2], x2=positions[c],y2=positions[c+1],z2=positions[c+2];
+      const v = (x0*(y1*z2-z1*y2) - y0*(x1*z2-z1*x2) + z0*(x1*y2-y1*x2)) / 6;
+      vol += flip[t] ? -v : v;
+    }
+    if(vol < 0) for(const t of members) flip[t] ^= 1;
+  }
+  for(let t = 0; t < nT; t++) if(flip[t]){ const b = out[t*3+1]; out[t*3+1] = out[t*3+2]; out[t*3+2] = b; flipped++; }
+  return { indices: out, flipped, components: comps, nonManifold };
+}
+
+// parts=[{layer:'ASCII名', aci:色番号, positions:Float32Array[m, three座標], indices:Uint32Array}]
+function buildDxf3DFaceText(parts, unitScale){
+  const k = unitScale || DXF3D_UNIT_SCALE;
+  const fmt = v => { const t = (v * k).toFixed(6); return t === '-0.000000' ? '0.000000' : t; };
+  const L = (c, v) => c + '\r\n' + v + '\r\n';
+  let d = L(0,'SECTION') + L(2,'HEADER') + L(9,'$ACADVER') + L(1,'AC1009') + L(0,'ENDSEC');
+  d += L(0,'SECTION') + L(2,'TABLES') + L(0,'TABLE') + L(2,'LAYER') + L(70, String(parts.length));
+  parts.forEach(pt => { d += L(0,'LAYER') + L(2,pt.layer) + L(70,'64') + L(62,String(pt.aci)) + L(6,'CONTINUOUS'); });
+  d += L(0,'ENDTAB');
+  d += L(0,'TABLE') + L(2,'LTYPE') + L(70,'1') + L(0,'LTYPE') + L(2,'CONTINUOUS') + L(70,'64') + L(3,'Solid line') + L(72,'65') + L(73,'0') + L(40,'0.0') + L(0,'ENDTAB');
+  d += L(0,'ENDSEC') + L(0,'SECTION') + L(2,'BLOCKS') + L(0,'ENDSEC') + L(0,'SECTION') + L(2,'ENTITIES');
+  let faces = 0;
+  const chunks = [d];
+  for(const pt of parts){
+    const P = pt.positions, I = pt.indices;
+    let buf = '';
+    for(let t = 0; t + 2 < I.length; t += 3){
+      const a = I[t]*3, b = I[t+1]*3, c = I[t+2]*3;
+      const ux = P[b]-P[a], uy = P[b+1]-P[a+1], uz = P[b+2]-P[a+2], vx = P[c]-P[a], vy = P[c+1]-P[a+1], vz = P[c+2]-P[a+2];
+      const nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+      if(Math.sqrt(nx*nx+ny*ny+nz*nz) / 2 < 1e-10) continue; // 面積ほぼ0(縮退)は出さない
+      buf += L(0,'3DFACE') + L(8,pt.layer) + L(62,String(pt.aci));
+      [a, b, c, c].forEach((o, n) => { buf += L(10+n, fmt(P[o])) + L(20+n, fmt(-P[o+2])) + L(30+n, fmt(P[o+1])); });
+      faces++;
+    }
+    chunks.push(buf);
+  }
+  chunks.push(L(0,'ENDSEC') + L(0,'EOF'));
+  return { text: chunks.join(''), faces };
+}
+function _dxf3dDownload(text, filename){
+  const url = URL.createObjectURL(new Blob([text], {type:'application/dxf'}));
+  const a = Object.assign(document.createElement('a'), {href:url, download:filename});
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function exportDxf3DNormal(){
+  const btn = document.getElementById('btn-dxf3d'); if(btn) btn.disabled = true;
+  const prog = document.getElementById('exp-prog'), titleEl = prog && prog.querySelector('.ep-title');
+  if(titleEl) titleEl.textContent = '⚙ 3D_DXF 生成中...';
+  prog.classList.add('show');
+  epSet(0,'3Dメッシュを準備中...');
+  await new Promise(r => setTimeout(r, 20));
+  try{
+    const {meshes} = await buildVoldiaGLBBytes(epSet);
+    epSet(85,'面の向きをそろえてDXFを生成中...');
+    await new Promise(r => setTimeout(r, 20));
+    const parts = meshes.map(m => ({
+      layer: m.name === 'Voldia_ExistingStructure' ? '3D_Existing' : '3D_Union',
+      aci: m.name === 'Voldia_ExistingStructure' ? 8 : 5,
+      positions: m.positions,
+      indices: _dxfOrientOutward(m.positions, m.indices).indices   // 通常計算: 外向き
+    })).filter(pt => pt.indices.length);
+    const {text, faces} = buildDxf3DFaceText(parts);
+    if(!faces) throw new Error('出力できる面がありません');
+    epSet(100,'完了！');
+    _dxf3dDownload(text, 'Voldia3D_' + getVoldiaTimestamp() + '.DXF');
+    toast('🧊 3D_DXF出力完了（3DFACE ' + faces + '面・単位m・外向き）');
+  }catch(e){
+    console.error('[3D_DXF]', e);
+    toast('⚠ 3D_DXFを出力できませんでした（コンソールを確認してください）', 4000);
+  }finally{
+    prog.classList.remove('show');
+    if(titleEl) titleEl.textContent = '⚙ GLB 生成中...';
+    if(btn) btn.disabled = false;
+  }
+}
+
 // GLB（ポリゴン実形状フラスタム）
 function encodeMultiGLB(meshes){ // r048(41回目): 材質色を濃いグレーに変更(全GLB出力に共通: 通常計算/土量計算/データ出力ZIP)。下の GLB_BASE_COLOR 参照
   const enc=new TextEncoder();
