@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 47回目(r143): HTML書き出しの修正(実機の指摘)=①材質の変換(Lambert/Phong等はglTFの既定で「金属」扱いになり真っ暗になっていたため、書き出し用にMeshStandard(金属0)へ変換) ②地形のエッジ線(細い線で)を追加 ③吹き出しの大きさは吹き出し本体(ビルボード)の倍率から取る。
 // 47回目(r142): 「HTML書き出し」ボタン(左パネル)。配置の現状をViewer一体型HTML(three等も埋め込み・GLBはbase64で内蔵)にして、ZIPで保存する。ひな形=data/voldia_viewer_template.js。GLB化はGLTFExporter(配置HTML v0089で追加)。確認ダイアログは新設(vhtml-confirm-overlay)。エッジ線(太い輪郭線のInstancedMesh)・UI用マーカー・非表示の影用の柱は含めない。吹き出し(text_balloon)はGLBに入れず、ビューア側の注釈データ(INLINE_ANNOTATIONS)で再現する。
 // 47回目(r141): 足場の開口の「当たり判定」を本当に抜いた。開口のある足場だけ、当たり判定を小箱の集合にする(開口のない列=全高・開口の列=開けた段より上だけ)。getCollisionBoxes(obj)=当たり判定の箱の配列(足場以外・開口なしは従来の1つの箱=挙動不変)。checkOverlapSimple/resolveOverlapが使う(足場を動かす側・動かされる側の両方)。前版=backup/voldia_placement_r140.js。※配置モードHTMLは変更なし(v0088のまま)
 // 46回目(r140): エッジ線(addEdgeLines)をメッシュごとに調整できるようにした。mesh.userData.noEdges=true=線を付けない / mesh.userData.edgeAngle=その面の折れ角しきい値(度。省略=30)。カラーコーンは「底の四角(90°)の線だけ残す」ため、赤の本体=edgeAngle:85・黒/黄/白=noEdges(data/voldia_models.js の createConeBar で指定)。他の種類(重機など)は従来どおり。
@@ -1116,42 +1117,78 @@ window.addEventListener('message', function(ev) {
   // ==========================================
   // 書き出し用の複製。Object3D.clone()は userData をJSONで複製するため、循環参照があると例外になる → 自前で複製する(userDataは持たない)。
   //   含めないもの: 非表示・影用の見えない柱(colorWrite=false)・エッジ線(InstancedMesh=太い輪郭線)・ライト/カメラ/スプライト/点群
-  function _viewerClone(src) {
+  // 材質: Lambert/Phongなどをそのまま書き出すと、glTFの既定(金属=1・粗さ=1)になり、ビューアで真っ黒(光の当たる一部だけ光る)になる。
+  //   → MeshStandard(金属0・粗さ0.9)に置き換える。色・テクスチャ・透明(alphaTest)・両面は引き継ぐ。Standard/Basic(光の影響なし)/線の材質はそのまま。
+  function _viewerMaterial(m, cache) {
+    if (!m) return m;
+    if (cache.has(m)) return cache.get(m);
+    let out = m;
+    if (!(m.isMeshStandardMaterial || m.isMeshBasicMaterial || m.isLineBasicMaterial)) {
+      out = new THREE.MeshStandardMaterial({
+        color: m.color ? m.color.clone() : new THREE.Color(0xcccccc), map: m.map || null,
+        transparent: !!m.transparent, opacity: m.opacity === undefined ? 1 : m.opacity, alphaTest: m.alphaTest || 0,
+        side: m.side, vertexColors: !!m.vertexColors, depthWrite: m.depthWrite !== false, metalness: 0, roughness: 0.9
+      });
+      if (m.emissive && out.emissive) out.emissive.copy(m.emissive);
+      out.name = m.name || '';
+    }
+    cache.set(m, out);
+    return out;
+  }
+  // opt={matCache:Map, edgeFn:(geometry,角度)=>BufferGeometry} edgeFnがあれば、メッシュごとに折れ角25°以上の辺を細い線(Voldia_Edges)で付ける(地形用。三角形8000超は付けない=配置モードと同じ上限)
+  function _viewerClone(src, opt) {
+    opt = opt || {}; if (!opt.matCache) opt.matCache = new Map();
     if (!src || src.visible === false || src.isLight || src.isCamera || src.isSprite || src.isPoints || src.isInstancedMesh) return null;
     if (src.userData && src.userData.isScfShadowPost) return null;
     const mats = src.material ? (Array.isArray(src.material) ? src.material : [src.material]) : [];
     if (mats.length && mats.every(m => m.colorWrite === false)) return null;
     let n;
-    if (src.isMesh) n = new THREE.Mesh(src.geometry, src.material);
-    else if (src.isLineSegments) n = new THREE.LineSegments(src.geometry, src.material);
-    else if (src.isLine) n = new THREE.Line(src.geometry, src.material);
+    const mat = Array.isArray(src.material) ? src.material.map(x => _viewerMaterial(x, opt.matCache)) : _viewerMaterial(src.material, opt.matCache);
+    if (src.isMesh) n = new THREE.Mesh(src.geometry, mat);
+    else if (src.isLineSegments) n = new THREE.LineSegments(src.geometry, mat);
+    else if (src.isLine) n = new THREE.Line(src.geometry, mat);
     else n = src.isGroup ? new THREE.Group() : new THREE.Object3D();
     n.name = src.name || '';
     n.position.copy(src.position); n.quaternion.copy(src.quaternion); n.scale.copy(src.scale);
-    for (const c of src.children) { const k = _viewerClone(c); if (k) n.add(k); }
+    if (src.isMesh && opt.edgeFn && src.geometry && src.geometry.attributes && src.geometry.attributes.position) {
+      const tri = src.geometry.index ? src.geometry.index.count / 3 : src.geometry.attributes.position.count / 3;
+      if (tri <= 8000) {
+        try {
+          const eg = opt.edgeFn(src.geometry, 25);
+          if (eg && eg.attributes.position.count > 0) {
+            const ln = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x0a1a3a, transparent: true, opacity: 0.75 }));
+            ln.name = 'Voldia_Edges'; n.add(ln);
+          }
+        } catch (e) { /* エッジ線は無くても書き出せる */ }
+      }
+    }
+    for (const c of src.children) { const k = _viewerClone(c, opt); if (k) n.add(k); }
     return n;
   }
   // 書き出す物を集める。ctx = {scene, terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible}
   //   地形=読み込んだ地形のルート+scene直下の追加床(customGround等)。配置物=名前を「Placement_種類_連番」にする(ビューアは名前に Fixed/Existing/Placement を含むメッシュを「物体」として扱う)。
-  //   吹き出し(text_balloon)はGLBに入れず注釈データにする。戻り値 {root, annotations, objects, meshes}
+  //   吹き出し(text_balloon)はGLBに入れず注釈データにする(大きさ1〜3倍は吹き出し本体=ビルボードのscaleから)。ctx.edgeFnがあれば地形にエッジ線を付ける。戻り値 {root, annotations, objects, meshes}
   function _viewerCollect(ctx) {
     const root = new THREE.Group(); root.name = 'VoldiaViewerRoot';
     const annotations = []; let objects = 0, seq = 0;
-    if (ctx.terrainRoot) { const t = _viewerClone(ctx.terrainRoot); if (t) root.add(t); }
+    const matCache = new Map();
+    if (ctx.terrainRoot) { const t = _viewerClone(ctx.terrainRoot, { matCache, edgeFn: ctx.edgeFn }); if (t) root.add(t); }
     for (const m of (ctx.terrainMeshes || [])) {
       if (m === ctx.defaultGround || m.parent !== ctx.scene || m === ctx.terrainRoot) continue; // scene直下の追加床だけ(terrain配下はterrainRootに含まれる)
-      const k = _viewerClone(m); if (k) root.add(k);
+      const k = _viewerClone(m, { matCache }); if (k) root.add(k);
     }
     const kotaiHidden = ctx.kotaiVisible === false ? new Set(ctx.kotaiMeshes || []) : null;
     for (const o of (ctx.placedObjects || [])) {
       if (!o || !o.parent || o.visible === false) continue;
       const u = o.userData || {};
       if (u.type === 'text_balloon') {
-        annotations.push({ text: u.text || '', scaleMultiplier: u.scaleMultiplier || 1, x: +o.position.x.toFixed(4), y: +o.position.y.toFixed(4), z: +o.position.z.toFixed(4) });
+        const bill = o.children.find(c => c.userData && c.userData.isBillboard);
+        const sm = Math.max(1, Math.min(3, Math.round(bill ? (bill.scale.x || 1) : (u.scaleMultiplier || 1))));
+        annotations.push({ text: u.text || '', scaleMultiplier: sm, x: +o.position.x.toFixed(4), y: +o.position.y.toFixed(4), z: +o.position.z.toFixed(4) });
         continue;
       }
       if (kotaiHidden && kotaiHidden.has(o)) continue;
-      const c = _viewerClone(o); if (!c) continue;
+      const c = _viewerClone(o, { matCache }); if (!c) continue;
       const base = 'Placement_' + String(u.type || 'obj').replace(/[^A-Za-z0-9_]/g, '') + '_' + (++seq);
       c.name = base;
       let k = 0; c.traverse(n => { if (n.isMesh || n.isLine) n.name = base + '_' + (++k); });
@@ -1242,7 +1279,7 @@ window.addEventListener('message', function(ev) {
         if (!window.VOLDIA_VIEWER_TEMPLATE) throw new Error('ビューアのひな形(data/voldia_viewer_template.js)が読み込まれていません');
         if (!_terrainRoot) throw new Error('地形が読み込まれていません');
         renderer.render(scene, camera);
-        const col = _viewerCollect({ scene, terrainRoot: _terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible });
+        const col = _viewerCollect({ scene, terrainRoot: _terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible, edgeFn: computeEdgesGeometrySafe });
         const libs = [];
         for (const [name, key] of LIBS) {
           const el = document.querySelector('script[src*="' + key + '"]');

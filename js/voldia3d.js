@@ -1339,6 +1339,34 @@ function _mergeTouchingSameDepthFrustums(frustums){
 //         個別オブジェクトのままなら壊れない形でも壊れるので、合体は『安全と確認できた時だけ』使う。
 //   方法: 合体した1図形を実際に3D化し、独立した数値積分(_calcVolumeFallback)の体積と0.5%以内で一致するかを見る。合わない/例外なら、その合体は取りやめて元のオブジェクトに戻す(＝従来と同じ)。
 //   同じ入力なら必ず同じ判定(体積側・3D側で結果が食い違わないよう、判定はキャッシュ)。
+// r127(47回目): 合体した1図形の3Dに「あってはいけない面」が無いかを見る(偽の床・逆勾配)。
+//   背景: 合体で凹形になった輪郭が法面オフセットの途中でトポロジー変化(スリット閉塞など)を起こすと、深さ方向のloftが破綻して
+//         ①途中の高さに水平な薄い面(偽の床) ②法面が張り出す向きの面(逆勾配=オーバーハング) が出る。どちらも体積にはほぼ出ないため、
+//         体積の一致(_MERGE_VALID_TOL)だけでは検出できない。同じ深さの1図形(合体図形)の掘削形状には、本来どちらも出ない。
+//   判定(掘削空間の外向きの法線。床ny=-1・法面ny<0): ①|ny|>0.99で、最低点+5mm〜最高点-5mmの間にある水平面 ②ny>0.05で|ny|≤0.99の斜面(逆勾配)。
+//   法線の向きは符号付き体積の符号でそろえる(向きが逆のメッシュでも同じ判定)。面積0に近い縮退(1e-7㎡未満)は数えない。
+function _cavityMeshDefects(res){
+  const P = res && res.positions, lists = [res && res.cyanIndices, res && res.redIndices].filter(a => a && a.length);
+  const out = {fake:0, rev:0, fakeA:0, revA:0};
+  if(!P || !lists.length) return out;
+  let yMin = Infinity, yMax = -Infinity; for(let i=1;i<P.length;i+=3){ if(P[i] < yMin) yMin = P[i]; if(P[i] > yMax) yMax = P[i]; }
+  const faces = []; let vol = 0;
+  lists.forEach(I => { for(let t=0;t+2<I.length;t+=3){
+    const a=I[t]*3, b=I[t+1]*3, c=I[t+2]*3;
+    const ux=P[b]-P[a], uy=P[b+1]-P[a+1], uz=P[b+2]-P[a+2], vx=P[c]-P[a], vy=P[c+1]-P[a+1], vz=P[c+2]-P[a+2];
+    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx, L=Math.sqrt(nx*nx+ny*ny+nz*nz);
+    const y0=P[a+1]-yMax; vol += (P[a]*nx + y0*ny + P[a+2]*nz) / 6; // 天端基準(開いたすり鉢でも符号が決まる)
+    if(L/2 < 1e-7) continue;
+    faces.push({ny: ny/L, A: L/2, ym: (P[a+1]+P[b+1]+P[c+1])/3});
+  }});
+  const sgn = vol < 0 ? -1 : 1;
+  for(const f of faces){
+    const ny = f.ny * sgn;
+    if(Math.abs(ny) > 0.99){ if(f.ym > yMin + 0.005 && f.ym < yMax - 0.005){ out.fake++; out.fakeA += f.A; } }
+    else if(ny > 0.05){ out.rev++; out.revA += f.A; }
+  }
+  return out;
+}
 function _openTopMeshVolumeMm3(res){
   const P = res.positions, idxLists = [res.cyanIndices, res.redIndices].filter(a => a && a.length);
   if(!P || !idxLists.length) return 0;
@@ -1365,12 +1393,25 @@ async function _mergeSameDepthFrustumsValidated(frustums, offsetXmm, offsetYmm, 
       ok = false; let cacheIt = true;
       try{
         const probe = Object.assign({}, f, {ptsMm: f.ptsMm.map(p => ({x:p.x, y:p.y})), holesMm: []}); // buildManifoldUnionGeomは入力を量子化で書き換えるのでコピーで試す
-        const num = _calcVolumeFallback([probe], offsetXmm, offsetYmm);
-        const res = await buildManifoldUnionGeom([probe], isDoboku !== false, offsetXmm, offsetYmm, {_noMerge:true});
-        if(res && res.positions && num > 0){
-          const vol = _openTopMeshVolumeMm3(res);
-          ok = Math.abs(vol - num) / num <= _MERGE_VALID_TOL;
-          if(!ok) console.warn(`[MERGE-SAME-DEPTH] 合体した輪郭の3Dが数値積分と合わない(メッシュ ${(vol/1e9).toFixed(3)}m3 / 数値 ${(num/1e9).toFixed(3)}m3)ため、この合体は取りやめて個別のまま処理します`);
+        // r127(47回目) 事前: 合体した輪郭の層分けが安定して作れない形(r121b _frustumLayerStable)は、3Dを作る前に合体を取りやめる
+        if(!_frustumLayerStable(probe)){
+          console.warn('[MERGE-SAME-DEPTH] 合体した輪郭は深さ方向の層分けが安定して作れない形のため、この合体は取りやめて個別のまま処理します');
+        }else{
+          const num = _calcVolumeFallback([probe], offsetXmm, offsetYmm);
+          const res = await buildManifoldUnionGeom([probe], isDoboku !== false, offsetXmm, offsetYmm, {_noMerge:true});
+          if(res && res.positions && num > 0){
+            const vol = _openTopMeshVolumeMm3(res);
+            ok = Math.abs(vol - num) / num <= _MERGE_VALID_TOL;
+            if(!ok) console.warn(`[MERGE-SAME-DEPTH] 合体した輪郭の3Dが数値積分と合わない(メッシュ ${(vol/1e9).toFixed(3)}m3 / 数値 ${(num/1e9).toFixed(3)}m3)ため、この合体は取りやめて個別のまま処理します`);
+            // r127(47回目) 事後: 体積が合っても、偽の床(途中の水平面)や逆勾配(張り出す法面)があれば取りやめる(体積には出ない欠陥)
+            if(ok){
+              const dfx = _cavityMeshDefects(res);
+              if(dfx.fake > 0 || dfx.rev > 0){
+                ok = false;
+                console.warn(`[MERGE-SAME-DEPTH] 合体した輪郭の3Dに 偽の床${dfx.fake}枚(${dfx.fakeA.toFixed(3)}㎡)・逆勾配${dfx.rev}枚(${dfx.revA.toFixed(3)}㎡) があるため、この合体は取りやめて個別のまま処理します`);
+              }
+            }
+          }
         }
       }catch(e){ ok = false; cacheIt = false; } // 例外(Manifold未ロード等)は一時的な失敗かもしれないのでキャッシュしない
       if(cacheIt) window._mergeValidCache.set(key, ok);
@@ -5050,7 +5091,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r126(base:VoldiaM r069)"; // r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r127(base:VoldiaM r069)"; // r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目

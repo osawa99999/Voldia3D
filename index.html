@@ -550,14 +550,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
       <ul id="sh-list"></ul>
     </div>
     <div id="tot-wrap">
-      <!-- ソート -->
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:5px;font-size:.7em;color:#888;">
-        <span>並び:</span>
-        <button id="sort-no"   style="padding:1px 5px;font-size:.72em;background:var(--accent);border:1px solid var(--accent);border-radius:3px;color:#000;cursor:pointer;">No.</button>
-        <button id="sort-asc"  style="padding:1px 5px;font-size:.72em;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:3px;color:#aaa;cursor:pointer;">面積↑</button>
-        <button id="sort-desc" style="padding:1px 5px;font-size:.72em;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:3px;color:#aaa;cursor:pointer;">面積↓</button>
-        <button id="sort-clr"  style="padding:1px 5px;font-size:.72em;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:3px;color:#aaa;cursor:pointer;">色</button>
-      </div>
+      <!-- 47回目: 「並び」(ソート)ボタンは廃止。一覧の並び替えは各行のつまみ(⠿)をドラッグ -->
       <!-- 色別フィルター -->
       <div style="display:flex;align-items:center;gap:4px;margin-bottom:5px;flex-wrap:wrap;">
         <span style="font-size:.68em;color:#888;">色別:</span>
@@ -930,13 +923,13 @@ D&D or クリックでロードしてください</p>
               style="border-color:#888;color:#ccc;">📷 スクショ</button>
             <!-- r070: エビル統合。「データ出力」は通常計算の結果画面では躯体解析、土量計算の結果画面では掘削土量解析を呼ぶ
                  (どちらを出すかはrunCalcがmodeで切替え済み=従来どおり。ボタンは同時に1つしか出ない) -->
-            <!-- 47回目: 3D_DXF出力(データ出力ボタンの上)。通常計算=外向きの3DFACE / 土量計算=Land Logic(上面が表・原点=測点)。表示とグレーアウトは updateOutputButtons()が制御 -->
-            <button class="btn-glb" id="btn-dxf3d" onclick="exportDxf3dClick()" data-gmtip="out-dxf3d"
-              style="border-color:#80cbc4;color:#80cbc4;">🧊 3D_DXF出力</button>
             <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')" data-gmtip="out-data"
               style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
             <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')" data-gmtip="out-data"
               style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
+            <!-- 47回目: 3D_DXF出力(データ出力ボタンの下=47回目に入れ替え)。通常計算=外向きの3DFACE / 土量計算=Land Logic(上面が表・原点=測点)。表示とグレーアウトは updateOutputButtons()が制御 -->
+            <button class="btn-glb" id="btn-dxf3d" onclick="exportDxf3dClick()" data-gmtip="out-dxf3d"
+              style="border-color:#80cbc4;color:#80cbc4;">🧊 3D_DXF出力</button>
             <!-- v0141(41回目): GLB出力(通常計算=従来のGLB保存 / 土量計算=Land Logic)とLANDXML出力(土量計算のみ)。表示とグレーアウトは updateOutputButtons()(voldia_main.js)が制御 -->
             <button class="btn-glb" id="btn-glb" onclick="exportGlbClick()" data-gmtip="out-glb">📦 GLB出力</button>
             <button class="btn-glb" id="btn-landxml" onclick="exportLandXmlClick()" data-gmtip="out-xml"
@@ -1127,6 +1120,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0156(47回目): ①左UIの「並び」ソートを廃止(A3) ②オブジェクトをつまみ(⠿)のドラッグで並び替え(A1) ③名前のダブルクリック編集に重複チェック(A2) ④3D結果画面: グレーアウト時の説明をボタン別の2行に(B1)・3D_DXF出力ボタンをデータ出力の下へ(B2) ⑤voldia3d.js r127: 偽の床・逆勾配の修正(合体の安全チェック強化)。 -->
 <!-- v0155(47回目): ①ホバーの塗りを「元+0.27」に変更(0.45では元の.38と差が小さく濃くならなかった=実機指摘)。②配置モードのHTMLを v0089 に更新(「HTML書き出し」ボタン追加)。 -->
 <!-- v0154(47回目): ①2D平面の選択表示をAreCal方式に変更(自分の色のまま、選択は太い輪郭を重ねる)。②ホバー(塗りが濃く・輪郭が0.5秒周期で点滅)。③複数選択中の色変更を選択中の全図形に適用。ロジックは voldia_main.js(SHAPE_COLORSのselなど)。HTMLの構造は変更なし(v0153=3D_DXF出力ボタン)。 -->
 <!-- v0145(41回目): ①測点ダイアログのタイトル(#sv-title)出し分け・解説文・設置ボタンの初期グレーアウト ②左UIのオブジェクト一覧の上に解説(#list-hint)。ロジックは voldia_main.js r053。 -->

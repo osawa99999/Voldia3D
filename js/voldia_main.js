@@ -19,7 +19,7 @@
 //  ※ HTML側の削除(pg-modal / rot-modal / sc-modalの方眼紙ボタンと空の用紙サイズ欄)は Voldia_v0131.html の冒頭付近コメント参照
 // ============================================================
 
-let sortMode = 'no';
+// 47回目: 並び(ソート)機能は廃止(一覧の順=shapes配列の順。ドラッグで並び替え)
 let roundMode = 0; // 0=整数, 1〜4=小数桁数
 
 // ████████████████████████████████████████████████████████████████
@@ -861,19 +861,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       toast(`📐 スナップ: ${snapRound===0?'OFF':snapRound+'mm'}`);
     });
   });
-  ['no','asc','desc','clr'].forEach(s=>{
-    document.getElementById('sort-'+s).addEventListener('click',()=>{
-      sortMode=s==='no'?'no':s==='asc'?'area_asc':s==='desc'?'area_desc':'color';
-      ['no','asc','desc','clr'].forEach(x=>{
-        const b=document.getElementById('sort-'+x);
-        const on=x===s;
-        b.style.background=on?'var(--accent)':'#2a2a2a';
-        b.style.borderColor=on?'var(--accent)':'#3a3a3a';
-        b.style.color=on?'#000':'#aaa';
-      });
-      updSidebar();
-    });
-  });
+  // 47回目: 並び(ソート)ボタンの処理を削除(A3: 機能なし)
 
   // 色別フィルター
   document.querySelectorAll('.cf-btn').forEach(btn=>{
@@ -1484,7 +1472,11 @@ const _GM_TIPS={
   'out-glb':'PowerPointなどで使用できる\n３Dデータを出力します',
   'out-dxf3d':'AutoCADで使用できる\n３D面(3DFACE)のDXFを出力します',
   'out-xml':'MG重機で使用するデータを出力します',
-  'out-off':'測点（0，0）が無ければ使用できません'
+  'out-off':'測点（0，0）が無ければ使用できません',
+  // 47回目: グレーアウト(測点が無い)時の説明をボタンごとに変更(2行・横幅は文字が入る幅まで広げる=_gmShowTip)
+  'out-off-dxf3d':'AUTOCADなどで使用する３D面を出力します。\n測点を設定しなければ使用できません',
+  'out-off-glb':'一部の３DCADで使用できる３Dオブジェクトを出力します。\n測点を設定しなければ使用できません',
+  'out-off-xml':'マシンガイダンス用データを出力します。\n測点を設定しなければ使用できません'
 };
 let _gmInited=false,_gmTipTimer=null;
 function _gmEl(id){return document.getElementById(id);}
@@ -1504,7 +1496,9 @@ function _gmShowTip(el,key){
   const tip=_gmEl('gm-tip');
   const txt=_GM_TIPS[key];
   if(!tip||!txt)return;
-  tip.textContent=txt;tip.style.display='block';
+  tip.textContent=txt;
+  tip.style.maxWidth=/^out-off-/.test(key)?'min(520px,94vw)':''; // 47回目: 2行の長い説明は1行が折り返されない幅まで広げる(他の説明は従来の幅)
+  tip.style.display='block';
   const r=el.getBoundingClientRect();
   const tw=tip.offsetWidth;
   let left=r.left+r.width/2-tw/2;
@@ -1558,9 +1552,9 @@ function updateOutputButtons(){
   const off=(mode==='doboku')&&!(typeof surveyPts!=='undefined'&&surveyPts.length>0); // 土量計算は測点(原点)が必須
   g.classList.toggle('is-off',off);x.classList.toggle('is-off',off);
   g.setAttribute('aria-disabled',off?'true':'false');x.setAttribute('aria-disabled',off?'true':'false');
-  if(dx){dx.classList.toggle('is-off',off);dx.setAttribute('aria-disabled',off?'true':'false');dx.setAttribute('data-gmtip',off?'out-off':'out-dxf3d');}
-  g.setAttribute('data-gmtip',off?'out-off':'out-glb');
-  x.setAttribute('data-gmtip',off?'out-off':'out-xml');
+  if(dx){dx.classList.toggle('is-off',off);dx.setAttribute('aria-disabled',off?'true':'false');dx.setAttribute('data-gmtip',off?'out-off-dxf3d':'out-dxf3d');}
+  g.setAttribute('data-gmtip',off?'out-off-glb':'out-glb');
+  x.setAttribute('data-gmtip',off?'out-off-xml':'out-xml');
   _outTipInit();
 }
 function _outTipInit(){
@@ -1715,6 +1709,53 @@ function showStartupDialog(pdf,grid){
 // r047(40回目): 新しい四角形/多角形の連番。従来は shapes.length+1 で採番していたため、途中の図形を削除して欠番ができると
 // (例: 四角形1〜5のうち3を削除→次が「四角形5」)既存と重複していた。既存の「四角形N」「多角形N」の最大Nに+1する。
 // 名前が未設定の古い図形は、一覧表示のフォールバック(getAutoTypeName: 種別+位置番号)と同じ名前として数える。
+// 47回目: 一覧に表示する名前(名前が未設定の図形は種別+位置番号)。getAutoTypeNameと同じ規則。名前の重複チェック・並び替え時の名前固定で使う
+function _shapeDisplayName(s,i){
+  if(s.name) return s.name;
+  const hasHoles=(s.holes&&s.holes.length>0)||(s.holesMm&&s.holesMm.length>0);
+  if(hasHoles) return `中空${i+1}`;
+  if(s.type==='rect') return `四角形${i+1}`;
+  if(s.type==='poly') return `多角形${i+1}`;
+  if(s.type==='merged'||(s.name&&s.name.startsWith('合成'))) return `合成${i+1}`;
+  return `その他${i+1}`;
+}
+// 47回目(A1): 図形の並び替え(一覧のドラッグ)。shapes配列そのものを入れ替える(描画の重なり順・保存順も同じ)。
+//   番号が位置で決まる名前(四角形3など)が並び替えで変わらないよう、名前の無い図形は今の表示名を名前として固定してから動かす。選択は図形そのもので引き継ぐ。
+function _reorderShape(from,to){
+  if(from===to||from<0||to<0||from>=shapes.length||to>=shapes.length) return false;
+  pushUndo();
+  shapes.forEach((s,i)=>{ if(!s.name) s.name=_shapeDisplayName(s,i); });
+  const selObjs=[...selectedSet].map(i=>shapes[i]);
+  const [m]=shapes.splice(from,1); shapes.splice(to,0,m);
+  selectedSet.clear(); selObjs.forEach(o=>{ const k=shapes.indexOf(o); if(k>=0) selectedSet.add(k); });
+  if(typeof hoverShapeIdx!=='undefined') hoverShapeIdx=-1;
+  if(typeof _invalidateRepeat==='function') _invalidateRepeat();
+  return true;
+}
+// 一覧のつまみ(⠿)のドラッグ。マウスもタッチも動くようpointerイベントで作る。挿入位置に青い線を出し、離した所へ移す。
+function _startShapeDrag(e,fromIdx,li){
+  if(subMode||selUnionMode||editMode||drawing||(e.button!==undefined&&e.button!==0)) return;
+  e.preventDefault(); e.stopPropagation();
+  const list=document.getElementById('sh-list'); const items=[...list.children];
+  const ind=document.createElement('li'); ind.style.cssText='list-style:none;height:3px;background:#4fc3f7;border-radius:2px;margin:1px 0;pointer-events:none;padding:0;';
+  let pos=fromIdx; li.style.opacity='.45';
+  const scroller=(()=>{ let n=list; while(n&&n!==document.body){ const o=getComputedStyle(n).overflowY; if((o==='auto'||o==='scroll')&&n.scrollHeight>n.clientHeight) return n; n=n.parentElement; } return null; })();
+  const move=ev=>{
+    pos=items.length;
+    for(let k=0;k<items.length;k++){ const r=items[k].getBoundingClientRect(); if(ev.clientY<r.top+r.height/2){ pos=k; break; } }
+    ind.remove(); if(pos<items.length) list.insertBefore(ind,items[pos]); else list.appendChild(ind);
+    if(scroller){ const r=scroller.getBoundingClientRect(); if(ev.clientY<r.top+28) scroller.scrollTop-=12; else if(ev.clientY>r.bottom-28) scroller.scrollTop+=12; }
+  };
+  const end=ev=>{
+    window.removeEventListener('pointermove',move); window.removeEventListener('pointerup',end); window.removeEventListener('pointercancel',cancel);
+    ind.remove(); li.style.opacity='';
+    const to=pos>fromIdx?pos-1:pos; // 挿入位置(その前に入れる)→移動後の番号
+    if(_reorderShape(fromIdx,to)){ updSidebar(); redraw(); toast('↕ オブジェクトの順番を入れ替えました'); }
+  };
+  const cancel=()=>{ window.removeEventListener('pointermove',move); window.removeEventListener('pointerup',end); window.removeEventListener('pointercancel',cancel); ind.remove(); li.style.opacity=''; };
+  window.addEventListener('pointermove',move); window.addEventListener('pointerup',end); window.addEventListener('pointercancel',cancel);
+  move(e);
+}
 function _nextShapeNumber(){
   let mx=0;
   shapes.forEach((s,i)=>{
@@ -2722,10 +2763,7 @@ function updSidebar(){
   //  方式別の有効/無効は _gmApplyMode() が一括で管理するので、ここでの強制は不要になった。
   const list=document.getElementById('sh-list');
   list.innerHTML='';
-  let idxOrder=[...shapes.keys()];
-  if(sortMode==='area_asc')  idxOrder.sort((a,b)=>shapes[a].area-shapes[b].area);
-  if(sortMode==='area_desc') idxOrder.sort((a,b)=>shapes[b].area-shapes[a].area);
-  if(sortMode==='color')     idxOrder.sort((a,b)=>Object.keys(SHAPE_COLORS).indexOf(shapes[a].color||'blue')-Object.keys(SHAPE_COLORS).indexOf(shapes[b].color||'blue'));
+  const idxOrder=[...shapes.keys()]; // 47回目: 一覧の順=shapes配列の順(ソート廃止)
 
   idxOrder.forEach((idx)=>{
     const sh=shapes[idx];
@@ -2791,15 +2829,7 @@ function updSidebar(){
     const nm=document.createElement('span');
     nm.className='sh-name';
     // 5種類の名称判定
-    function getAutoTypeName(s,i){
-      if(s.name) return s.name;
-      const hasHoles=(s.holes&&s.holes.length>0)||(s.holesMm&&s.holesMm.length>0);
-      if(hasHoles) return `中空${i+1}`;
-      if(s.type==='rect') return `四角形${i+1}`;
-      if(s.type==='poly') return `多角形${i+1}`;
-      if(s.type==='merged'||s.name?.startsWith('合成')) return `合成${i+1}`;
-      return `その他${i+1}`;
-    }
+    const getAutoTypeName=(s,i)=>_shapeDisplayName(s,i); // 47回目: 共通関数(_shapeDisplayName)へ
     nm.textContent=getAutoTypeName(sh,idx);
     // 6B(2026-08-28 引継ぎ18回目→26回目セッションで紫に移設): 紫(垂直面)設定の
     // オブジェクトは名称テキストも専用の色にして一覧上で見分けやすくする
@@ -2823,24 +2853,30 @@ function updSidebar(){
       }
       toggleSelected(idx,e.shiftKey);
     });
-    // Fix11: ダブルクリックで名前編集
+    // Fix11: ダブルクリックで名前編集 / 47回目(A2): 他のオブジェクトと同じ名前は不可。警告ダイアログを出して元の名前に戻す。空欄・変更なしは何もしない
     nm.addEventListener('dblclick',(e)=>{
       e.stopPropagation();
+      if(subMode||selUnionMode) return;
+      const orig=nm.textContent;
       const input=document.createElement('input');
       input.type='text';
-      input.value=sh.name||nm.textContent;
+      input.value=orig;
       input.style.cssText='width:100%;background:#1a2a3a;color:#e0e0e0;border:1px solid #4fc3f7;border-radius:3px;padding:1px 3px;font-size:inherit;';
       nm.replaceWith(input);
       input.focus();input.select();
-      const save=()=>{
-        if(!sh.name)sh.name=nm.textContent;
-        sh.name=input.value.trim()||sh.name;
-        updSidebar();
+      let done=false;
+      const finish=(commit)=>{
+        if(done) return; done=true;
+        const v=input.value.trim();
+        if(!commit||!v||v===orig){ updSidebar(); return; }
+        const dup=shapes.some((s2,j)=>j!==idx&&_shapeDisplayName(s2,j)===v);
+        if(dup){ updSidebar(); customAlert(`「${v}」は他のオブジェクトで使われている名前です。\n名前は重複できないため、元の名前「${orig}」に戻しました。`); return; }
+        pushUndo(); sh.name=v; updSidebar();
       };
-      input.addEventListener('blur',save);
+      input.addEventListener('blur',()=>finish(true));
       input.addEventListener('keydown',ev=>{
-        if(ev.key==='Enter'){ev.preventDefault();save();}
-        if(ev.key==='Escape'){updSidebar();}
+        if(ev.key==='Enter'){ev.preventDefault();finish(true);}
+        if(ev.key==='Escape'){ev.preventDefault();finish(false);}
       });
     });
 
@@ -2864,7 +2900,13 @@ function updSidebar(){
     noslopeBtn.textContent=noslopeLabel;
     noslopeBtn.style.cssText='flex-shrink:0;padding:2px 8px;font-size:.68em;border-radius:3px;cursor:pointer;white-space:nowrap;';
     // Voldia版: 個別「垂直/法面」切替は廃止（計算モードで全オブジェクト共通処理）。ボタンは非表示のまま保持のみ
-    header.append(visCb,badge,nm,areaSpan,delBtn);
+    // 47回目(A1): ドラッグで並び替えるつまみ(⠿)。つまみ以外(名前・数値欄)のドラッグは従来どおり何も起きない
+    const grip=document.createElement('span');
+    grip.textContent='⠿'; grip.title='ドラッグして並び替え';
+    grip.style.cssText='cursor:grab;color:#8a8a8a;font-size:15px;line-height:1;padding:0 3px 0 0;touch-action:none;user-select:none;flex-shrink:0;';
+    grip.addEventListener('pointerdown',ev=>_startShapeDrag(ev,idx,li));
+    grip.addEventListener('click',ev=>ev.stopPropagation());
+    header.append(grip,visCb,badge,nm,areaSpan,delBtn);
 
     // 新UI: 天端・下端・余掘・垂直↔法面トグル
     const topVal = (sh.topLevel!==undefined&&sh.topLevel!=='')?sh.topLevel:0;
