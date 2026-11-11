@@ -4028,11 +4028,12 @@ function drawShape(sh, selected, subBaseHl, subTgtHl, hover){
   else if(subBaseHl) { fill = 'rgba(239,83,80,.2)'; stroke = 'rgba(239,83,80,.9)'; }
   else if(subTgtHl) { fill = 'rgba(255,167,38,.15)'; stroke = 'rgba(255,167,38,.9)'; }
 
-  // 47回目: ホバー(自分の色のまま)。塗りは不透明度0.45(固定・点滅しない。垂直のように元がそれ以上なら元のまま)。輪郭は500ms周期の矩形波:
+  // 47回目: ホバー(自分の色のまま)。塗りは元の不透明度+0.27(固定・点滅しない。上限0.8)。輪郭は500ms周期の矩形波:
   //   ON=自分の輪郭色のアルファ1・4/zoom / OFF=通常の輪郭・1.5/zoom。ホバー輪郭色は通常の輪郭(stroke)のアルファを1にして作る。他のハイライト状態(エラー/結合/引き算)の時は何もしない
   let lineW = ((selected || subBaseHl || subTgtHl) ? 2.5 : 1.5) / zoom;
   if(hover && !(sh._voldiaGeoError || selected || subBaseHl || subTgtHl)){
-    fill = cl.fill.replace(/[\d.]+\)$/, Math.max(0.45, sh.noSlope ? 0.52 : 0.38) + ')');
+    // 実機で「濃くならない」と指摘(47回目): 指示書の0.45はAreCal(元の塗りが薄い)の値。Voldiaは元が.38(垂直は.52)で差が小さすぎたため、元の値に+0.27(上限0.8)で「はっきり濃く」する
+    fill = cl.fill.replace(/[\d.]+\)$/, Math.min(0.8, (sh.noSlope ? 0.52 : 0.38) + 0.27).toFixed(2) + ')');
     if(Math.floor(performance.now()/500) % 2 === 0){ stroke = cl.stroke.replace(/[\d.]+\)$/, '1)'); lineW = 4 / zoom; }
   }
 
