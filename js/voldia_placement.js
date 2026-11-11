@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 47回目(r142): 「HTML書き出し」ボタン(左パネル)。配置の現状をViewer一体型HTML(three等も埋め込み・GLBはbase64で内蔵)にして、ZIPで保存する。ひな形=data/voldia_viewer_template.js。GLB化はGLTFExporter(配置HTML v0089で追加)。確認ダイアログは新設(vhtml-confirm-overlay)。エッジ線(太い輪郭線のInstancedMesh)・UI用マーカー・非表示の影用の柱は含めない。吹き出し(text_balloon)はGLBに入れず、ビューア側の注釈データ(INLINE_ANNOTATIONS)で再現する。
 // 47回目(r141): 足場の開口の「当たり判定」を本当に抜いた。開口のある足場だけ、当たり判定を小箱の集合にする(開口のない列=全高・開口の列=開けた段より上だけ)。getCollisionBoxes(obj)=当たり判定の箱の配列(足場以外・開口なしは従来の1つの箱=挙動不変)。checkOverlapSimple/resolveOverlapが使う(足場を動かす側・動かされる側の両方)。前版=backup/voldia_placement_r140.js。※配置モードHTMLは変更なし(v0088のまま)
 // 46回目(r140): エッジ線(addEdgeLines)をメッシュごとに調整できるようにした。mesh.userData.noEdges=true=線を付けない / mesh.userData.edgeAngle=その面の折れ角しきい値(度。省略=30)。カラーコーンは「底の四角(90°)の線だけ残す」ため、赤の本体=edgeAngle:85・黒/黄/白=noEdges(data/voldia_models.js の createConeBar で指定)。他の種類(重機など)は従来どおり。
 // 46回目(r139): ホイールクリックで移動できない所(掴めるオブジェクトの上・地面が無い所)を指した時は、トーストで「そこには移動できません」と出す。画面下の説明は「指定位置に移動」・「ホイールドラッグ:回転」の表記は削除(機能は残す=ホイールドラッグでも回転する)。※配置モードHTMLは voldia_placement_v0088.html。前版=backup/voldia_placement_r138.js
@@ -1108,6 +1109,173 @@ window.addEventListener('message', function(ev) {
       setTimeout(()=>{ btn.textContent = '🖨 印刷(A3 PDF)'; }, 1800);
     }
   });
+
+  // ==========================================
+  // ★ HTML書き出し 開始 (47回目 r142)
+  //   純粋な部品(下の_viewer*/_zip*)はテスト(node_repro/viewer_export_test.js)がここから切り出して検証する。
+  // ==========================================
+  // 書き出し用の複製。Object3D.clone()は userData をJSONで複製するため、循環参照があると例外になる → 自前で複製する(userDataは持たない)。
+  //   含めないもの: 非表示・影用の見えない柱(colorWrite=false)・エッジ線(InstancedMesh=太い輪郭線)・ライト/カメラ/スプライト/点群
+  function _viewerClone(src) {
+    if (!src || src.visible === false || src.isLight || src.isCamera || src.isSprite || src.isPoints || src.isInstancedMesh) return null;
+    if (src.userData && src.userData.isScfShadowPost) return null;
+    const mats = src.material ? (Array.isArray(src.material) ? src.material : [src.material]) : [];
+    if (mats.length && mats.every(m => m.colorWrite === false)) return null;
+    let n;
+    if (src.isMesh) n = new THREE.Mesh(src.geometry, src.material);
+    else if (src.isLineSegments) n = new THREE.LineSegments(src.geometry, src.material);
+    else if (src.isLine) n = new THREE.Line(src.geometry, src.material);
+    else n = src.isGroup ? new THREE.Group() : new THREE.Object3D();
+    n.name = src.name || '';
+    n.position.copy(src.position); n.quaternion.copy(src.quaternion); n.scale.copy(src.scale);
+    for (const c of src.children) { const k = _viewerClone(c); if (k) n.add(k); }
+    return n;
+  }
+  // 書き出す物を集める。ctx = {scene, terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible}
+  //   地形=読み込んだ地形のルート+scene直下の追加床(customGround等)。配置物=名前を「Placement_種類_連番」にする(ビューアは名前に Fixed/Existing/Placement を含むメッシュを「物体」として扱う)。
+  //   吹き出し(text_balloon)はGLBに入れず注釈データにする。戻り値 {root, annotations, objects, meshes}
+  function _viewerCollect(ctx) {
+    const root = new THREE.Group(); root.name = 'VoldiaViewerRoot';
+    const annotations = []; let objects = 0, seq = 0;
+    if (ctx.terrainRoot) { const t = _viewerClone(ctx.terrainRoot); if (t) root.add(t); }
+    for (const m of (ctx.terrainMeshes || [])) {
+      if (m === ctx.defaultGround || m.parent !== ctx.scene || m === ctx.terrainRoot) continue; // scene直下の追加床だけ(terrain配下はterrainRootに含まれる)
+      const k = _viewerClone(m); if (k) root.add(k);
+    }
+    const kotaiHidden = ctx.kotaiVisible === false ? new Set(ctx.kotaiMeshes || []) : null;
+    for (const o of (ctx.placedObjects || [])) {
+      if (!o || !o.parent || o.visible === false) continue;
+      const u = o.userData || {};
+      if (u.type === 'text_balloon') {
+        annotations.push({ text: u.text || '', scaleMultiplier: u.scaleMultiplier || 1, x: +o.position.x.toFixed(4), y: +o.position.y.toFixed(4), z: +o.position.z.toFixed(4) });
+        continue;
+      }
+      if (kotaiHidden && kotaiHidden.has(o)) continue;
+      const c = _viewerClone(o); if (!c) continue;
+      const base = 'Placement_' + String(u.type || 'obj').replace(/[^A-Za-z0-9_]/g, '') + '_' + (++seq);
+      c.name = base;
+      let k = 0; c.traverse(n => { if (n.isMesh || n.isLine) n.name = base + '_' + (++k); });
+      root.add(c); objects++;
+    }
+    let meshes = 0; root.traverse(n => { if (n.isMesh) meshes++; });
+    return { root, annotations, objects, meshes };
+  }
+  function _viewerGlb(root) { // GLTFExporter(three r128)でバイナリGLBにする → ArrayBuffer
+    return new Promise((resolve, reject) => {
+      try { new THREE.GLTFExporter().parse(root, res => resolve(res), { binary: true, onlyVisible: true }); }
+      catch (e) { reject(e); }
+    });
+  }
+  function _abToBase64(ab) {
+    const u = new Uint8Array(ab); let s = ''; const C = 0x8000;
+    for (let i = 0; i < u.length; i += C) s += String.fromCharCode.apply(null, u.subarray(i, i + C));
+    return btoa(s);
+  }
+  // ひな形に差し込む。libs=[{name,text}](three等のソース)。'</script'は<\/scriptにして、埋め込みscriptタグが途中で閉じないようにする
+  function _viewerHtml(template, libs, glbBase64, annotations, title) {
+    const libHtml = libs.map(l => '<script>/* ' + l.name + ' */\n' + l.text.split('</script').join('<\\/script') + '\n</script>').join('\n');
+    const rep = (t, key, val) => t.split(key).join(val); // 置換文字列中の$を特別扱いさせない
+    let h = template;
+    h = rep(h, '<!--VOLDIA_LIBS-->', libHtml);
+    h = rep(h, '%%VOLDIA_GLB_BASE64%%', glbBase64);
+    h = rep(h, '%%VOLDIA_ANNOTATIONS%%', JSON.stringify(annotations).split('<').join('\\u003c'));
+    h = rep(h, '%%VOLDIA_TITLE%%', String(title).replace(/[<>&]/g, ''));
+    return h;
+  }
+  // ZIP(依存なし)。ファイル名はUTF-8(フラグbit11)。CompressionStream('deflate-raw')があれば圧縮、なければ無圧縮(store)
+  let _crcTable = null;
+  function _crc32(u8) {
+    if (!_crcTable) { _crcTable = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); _crcTable[n] = c >>> 0; } }
+    let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = _crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  async function _deflateRaw(u8) {
+    if (typeof CompressionStream === 'undefined') return null;
+    try {
+      const cs = new CompressionStream('deflate-raw'); const w = cs.writable.getWriter(); w.write(u8); w.close();
+      return new Uint8Array(await new Response(cs.readable).arrayBuffer());
+    } catch (e) { return null; }
+  }
+  async function _zipFiles(files, date) { // files=[{name:string,data:Uint8Array}] → Uint8Array
+    const d = date || new Date(), enc = new TextEncoder();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const locals = [], centrals = []; let offset = 0;
+    for (const f of files) {
+      const nameB = enc.encode(f.name), crc = _crc32(f.data);
+      let body = await _deflateRaw(f.data), method = 8;
+      if (!body || body.length >= f.data.length) { body = f.data; method = 0; }
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, method, true);
+      lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true); lh.setUint32(14, crc, true); lh.setUint32(18, body.length, true); lh.setUint32(22, f.data.length, true); lh.setUint16(26, nameB.length, true); lh.setUint16(28, 0, true);
+      locals.push(new Uint8Array(lh.buffer), nameB, body);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, method, true);
+      ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true); ch.setUint32(20, body.length, true); ch.setUint32(24, f.data.length, true); ch.setUint16(28, nameB.length, true); ch.setUint32(42, offset, true);
+      centrals.push(new Uint8Array(ch.buffer), nameB);
+      offset += 30 + nameB.length + body.length;
+    }
+    const cdSize = centrals.reduce((a, b) => a + b.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    const parts = [...locals, ...centrals, new Uint8Array(end.buffer)];
+    const out = new Uint8Array(parts.reduce((a, b) => a + b.length, 0)); let pos = 0;
+    for (const p of parts) { out.set(p, pos); pos += p.length; }
+    return out;
+  }
+  // ==========================================
+  // ★ HTML書き出し 終了(部品)
+  // ==========================================
+
+  // ボタン→確認ダイアログ→書き出し。three等のソースは、このページが読み込んでいるscriptタグと同じURLから取得する(取得元を1か所に保つ。このページ自体がオンラインで動いている前提)
+  (function () {
+    const btn = document.getElementById('voldia-html-btn');
+    const ov = document.getElementById('vhtml-confirm-overlay');
+    if (!btn || !ov) return;
+    let busy = false;
+    const LIBS = [['three.min.js', 'three.min.js'], ['OrbitControls.js', 'OrbitControls.js'], ['GLTFLoader.js', 'GLTFLoader.js']];
+    function openConfirm() { ov.style.display = 'flex'; controls.enabled = false; }
+    function closeConfirm() { ov.style.display = 'none'; controls.enabled = true; }
+    async function run() {
+      if (busy) return; busy = true;
+      const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ 書き出し中...';
+      try {
+        if (!window.VOLDIA_VIEWER_TEMPLATE) throw new Error('ビューアのひな形(data/voldia_viewer_template.js)が読み込まれていません');
+        if (!_terrainRoot) throw new Error('地形が読み込まれていません');
+        renderer.render(scene, camera);
+        const col = _viewerCollect({ scene, terrainRoot: _terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible });
+        const libs = [];
+        for (const [name, key] of LIBS) {
+          const el = document.querySelector('script[src*="' + key + '"]');
+          if (!el) throw new Error(name + ' の取得元が見つかりません');
+          const r = await fetch(el.src, { cache: 'force-cache' });
+          if (!r.ok) throw new Error(name + ' を取得できませんでした(' + r.status + ')');
+          libs.push({ name, text: await r.text() });
+        }
+        const glb = await _viewerGlb(col.root);
+        const stamp = _fileStamp();
+        const html = _viewerHtml(window.VOLDIA_VIEWER_TEMPLATE, libs, _abToBase64(glb), col.annotations, 'Voldia 3D Viewer ' + stamp);
+        const htmlName = 'Voldia_Viewer_' + stamp + '.html';
+        const zip = await _zipFiles([{ name: htmlName, data: new TextEncoder().encode(html) }]);
+        const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+        const a = Object.assign(document.createElement('a'), { href: url, download: 'Voldia_Viewer_' + stamp + '.zip' });
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        showToast('🌐 Viewer一体型HTMLをZIPで出力しました（' + (zip.length / 1048576).toFixed(1) + 'MB・物体' + col.objects + '個・吹き出し' + col.annotations.length + '個）', 5000);
+      } catch (e) {
+        console.error('[HTML書き出し]', e);
+        showToast('⚠ HTML書き出しに失敗しました: ' + (e && e.message ? e.message : e), 6000);
+      } finally { busy = false; btn.disabled = false; btn.textContent = label; }
+    }
+    btn.addEventListener('click', () => { if (!busy) openConfirm(); });
+    document.getElementById('vhtml-confirm-yes').addEventListener('click', () => { closeConfirm(); run(); });
+    document.getElementById('vhtml-confirm-no').addEventListener('click', closeConfirm);
+    window.addEventListener('keydown', e => { // ダイアログ表示中: Y/Enter=はい・N/Esc=いいえ(他のキー操作には渡さない)
+      if (ov.style.display !== 'flex') return;
+      e.stopPropagation(); e.preventDefault();
+      if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') { closeConfirm(); run(); }
+      else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') closeConfirm();
+    }, true);
+  })();
 
   // ==========================================
 
