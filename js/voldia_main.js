@@ -1710,6 +1710,33 @@ function showStartupDialog(pdf,grid){
 // (例: 四角形1〜5のうち3を削除→次が「四角形5」)既存と重複していた。既存の「四角形N」「多角形N」の最大Nに+1する。
 // 名前が未設定の古い図形は、一覧表示のフォールバック(getAutoTypeName: 種別+位置番号)と同じ名前として数える。
 // 47回目: 一覧に表示する名前(名前が未設定の図形は種別+位置番号)。getAutoTypeNameと同じ規則。名前の重複チェック・並び替え時の名前固定で使う
+let _nameClickLast={idx:-1,t:0};
+// 47回目(A2): 一覧の名前の編集。他のオブジェクトと同じ名前は不可(警告ダイアログ→元の名前に戻す)。空欄・変更なしは何もしない。
+function _startNameEdit(idx){
+  if(subMode||selUnionMode) return;
+  const sh=shapes[idx]; const li=document.querySelector('#sh-list li[data-idx="'+idx+'"]');
+  const nm=li&&li.querySelector('.sh-name'); if(!sh||!nm) return;
+  const orig=nm.textContent;
+  const input=document.createElement('input');
+  input.type='text'; input.value=orig;
+  input.style.cssText='width:100%;background:#1a2a3a;color:#e0e0e0;border:1px solid #4fc3f7;border-radius:3px;padding:1px 3px;font-size:inherit;';
+  nm.replaceWith(input);
+  input.focus(); input.select();
+  let done=false;
+  const finish=(commit)=>{
+    if(done) return; done=true;
+    const v=input.value.trim();
+    if(!commit||!v||v===orig){ updSidebar(); return; }
+    const dup=shapes.some((s2,j)=>j!==idx&&_shapeDisplayName(s2,j)===v);
+    if(dup){ updSidebar(); customAlert(`「${v}」は他のオブジェクトで使われている名前です。\n名前は重複できないため、元の名前「${orig}」に戻しました。`); return; }
+    pushUndo(); sh.name=v; updSidebar();
+  };
+  input.addEventListener('blur',()=>finish(true));
+  input.addEventListener('keydown',ev=>{
+    if(ev.key==='Enter'){ev.preventDefault();finish(true);}
+    if(ev.key==='Escape'){ev.preventDefault();finish(false);}
+  });
+}
 function _shapeDisplayName(s,i){
   if(s.name) return s.name;
   const hasHoles=(s.holes&&s.holes.length>0)||(s.holesMm&&s.holesMm.length>0);
@@ -2851,34 +2878,15 @@ function updSidebar(){
         if(selUnionSet.has(idx))selUnionSet.delete(idx);else selUnionSet.add(idx);
         updSelUnionToolbar();updSidebar();redraw();return;
       }
+      // 47回目(A2・実機で「ダブルクリックしても何も起きない」): 1回目のクリックの toggleSelected が一覧を作り直す(updSidebar)ため、
+      //   2回目のクリックでも一覧が作り直されて、dblclickイベントの届き先(nm)が画面から外れた要素になり、編集欄を出す処理(replaceWith)が空振りしていた。
+      //   → dblclickに頼らず、クリックの2回目(e.detail>=2 または 同じ行を400ms以内に再クリック)を検出し、一覧を作り直した後の要素に対して編集を始める。
+      const _now=Date.now(); const _dbl=(e.detail>=2)||(_nameClickLast.idx===idx&&_now-_nameClickLast.t<400);
+      _nameClickLast={idx:_dbl?-1:idx,t:_now};
       toggleSelected(idx,e.shiftKey);
+      if(_dbl) _startNameEdit(idx);
     });
-    // Fix11: ダブルクリックで名前編集 / 47回目(A2): 他のオブジェクトと同じ名前は不可。警告ダイアログを出して元の名前に戻す。空欄・変更なしは何もしない
-    nm.addEventListener('dblclick',(e)=>{
-      e.stopPropagation();
-      if(subMode||selUnionMode) return;
-      const orig=nm.textContent;
-      const input=document.createElement('input');
-      input.type='text';
-      input.value=orig;
-      input.style.cssText='width:100%;background:#1a2a3a;color:#e0e0e0;border:1px solid #4fc3f7;border-radius:3px;padding:1px 3px;font-size:inherit;';
-      nm.replaceWith(input);
-      input.focus();input.select();
-      let done=false;
-      const finish=(commit)=>{
-        if(done) return; done=true;
-        const v=input.value.trim();
-        if(!commit||!v||v===orig){ updSidebar(); return; }
-        const dup=shapes.some((s2,j)=>j!==idx&&_shapeDisplayName(s2,j)===v);
-        if(dup){ updSidebar(); customAlert(`「${v}」は他のオブジェクトで使われている名前です。\n名前は重複できないため、元の名前「${orig}」に戻しました。`); return; }
-        pushUndo(); sh.name=v; updSidebar();
-      };
-      input.addEventListener('blur',()=>finish(true));
-      input.addEventListener('keydown',ev=>{
-        if(ev.key==='Enter'){ev.preventDefault();finish(true);}
-        if(ev.key==='Escape'){ev.preventDefault();finish(false);}
-      });
-    });
+    // 名前の編集は nm のclickハンドラ内で2回目のクリックを見て開始する(_startNameEdit)。47回目: dblclickイベントは効かなかった(下記)
 
     const areaSpan=document.createElement('span');
     areaSpan.className='sh-area';areaSpan.textContent=areaStr+' m²';

@@ -131,7 +131,7 @@
     position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(231, 76, 60, 0.9); border: 2px solid #c0392b; border-radius: 8px;
     padding: 10px 20px; color: #fff; font-weight: bold; font-size: 1em;
-    pointer-events: none; z-index: 1000; opacity: 0; transition: opacity 0.3s;
+    pointer-events: none; z-index: 30000; opacity: 0; transition: opacity 0.3s; /* v0091(47回目): 足場の編集窓(z-index 1100)の下に隠れていたため、最前面へ */
   }
 
   /* 配置モード案内メッセージ */
@@ -586,7 +586,7 @@
 
 <script src="data/voldia_models.js"></script>
 <script src="data/voldia_scaffold_tex.js"></script>
-<script src="data/voldia_viewer_template.js"></script> <!-- v0089(47回目): HTML書き出しのViewer一体型HTMLのひな形 --> <!-- v0082(45回目): 足場のテクスチャ画像 -->
+<script src="data/voldia_viewer_template.js?v=r2"></script> <!-- v0089(47回目): HTML書き出しのViewer一体型HTMLのひな形 --> <!-- v0082(45回目): 足場のテクスチャ画像 -->
 <!-- v0080(41回目): 左パネルの「印刷」の上に「📷 範囲スクショ」を追加(#voldia-shot-btn)。押すと画面全体が範囲選択モードになり(#shot-select-overlay)、ドラッグした範囲をそのままPNG保存する。背景色の変更は無し。ロジックは voldia_placement.js の「範囲スクショ」ブロック。 -->
 <div id="shot-select-overlay"><div id="shot-select-box"></div></div>
 <!-- v0079(40回目): 【削除】data/LOW_1TOKO_geo.js と data/voldia_worker_toko.js を読み込んでいたscriptタグ2行。

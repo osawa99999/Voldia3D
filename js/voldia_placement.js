@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 47回目(r144): ①足場の編集窓を開いた時、一番下の段が見える位置までスクロール ②HTML書き出しから各オブジェクトの回転グリップ(水色●=isDragMarker)等の操作用の部品を除く ③ひな形が古い版のままなら書き出さずに知らせる(VIEWER_TEMPLATE_VER_NEED)。
 // 47回目(r143): HTML書き出しの修正(実機の指摘)=①材質の変換(Lambert/Phong等はglTFの既定で「金属」扱いになり真っ暗になっていたため、書き出し用にMeshStandard(金属0)へ変換) ②地形のエッジ線(細い線で)を追加 ③吹き出しの大きさは吹き出し本体(ビルボード)の倍率から取る。
 // 47回目(r142): 「HTML書き出し」ボタン(左パネル)。配置の現状をViewer一体型HTML(three等も埋め込み・GLBはbase64で内蔵)にして、ZIPで保存する。ひな形=data/voldia_viewer_template.js。GLB化はGLTFExporter(配置HTML v0089で追加)。確認ダイアログは新設(vhtml-confirm-overlay)。エッジ線(太い輪郭線のInstancedMesh)・UI用マーカー・非表示の影用の柱は含めない。吹き出し(text_balloon)はGLBに入れず、ビューア側の注釈データ(INLINE_ANNOTATIONS)で再現する。
 // 47回目(r141): 足場の開口の「当たり判定」を本当に抜いた。開口のある足場だけ、当たり判定を小箱の集合にする(開口のない列=全高・開口の列=開けた段より上だけ)。getCollisionBoxes(obj)=当たり判定の箱の配列(足場以外・開口なしは従来の1つの箱=挙動不変)。checkOverlapSimple/resolveOverlapが使う(足場を動かす側・動かされる側の両方)。前版=backup/voldia_placement_r140.js。※配置モードHTMLは変更なし(v0088のまま)
@@ -1139,7 +1140,7 @@ window.addEventListener('message', function(ev) {
   function _viewerClone(src, opt) {
     opt = opt || {}; if (!opt.matCache) opt.matCache = new Map();
     if (!src || src.visible === false || src.isLight || src.isCamera || src.isSprite || src.isPoints || src.isInstancedMesh) return null;
-    if (src.userData && src.userData.isScfShadowPost) return null;
+    if (src.userData && (src.userData.isScfShadowPost || src.userData.isDragMarker || src.userData.isDragHitbox)) return null; // 影用の柱・回転グリップ(水色●)・操作用の当たり箱は書き出さない
     const mats = src.material ? (Array.isArray(src.material) ? src.material : [src.material]) : [];
     if (mats.length && mats.every(m => m.colorWrite === false)) return null;
     let n;
@@ -1269,6 +1270,7 @@ window.addEventListener('message', function(ev) {
     const ov = document.getElementById('vhtml-confirm-overlay');
     if (!btn || !ov) return;
     let busy = false;
+    const VIEWER_TEMPLATE_VER_NEED = 'r2'; // data/voldia_viewer_template.js の版(tools/make_viewer_template.py の VER と同じ)
     const LIBS = [['three.min.js', 'three.min.js'], ['OrbitControls.js', 'OrbitControls.js'], ['GLTFLoader.js', 'GLTFLoader.js']];
     function openConfirm() { ov.style.display = 'flex'; controls.enabled = false; }
     function closeConfirm() { ov.style.display = 'none'; controls.enabled = true; }
@@ -1277,6 +1279,7 @@ window.addEventListener('message', function(ev) {
       const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ 書き出し中...';
       try {
         if (!window.VOLDIA_VIEWER_TEMPLATE) throw new Error('ビューアのひな形(data/voldia_viewer_template.js)が読み込まれていません');
+        if (window.VOLDIA_VIEWER_TEMPLATE_VER !== VIEWER_TEMPLATE_VER_NEED) throw new Error('ビューアのひな形(data/voldia_viewer_template.js)が古い版です(必要:' + VIEWER_TEMPLATE_VER_NEED + ' / 今:' + (window.VOLDIA_VIEWER_TEMPLATE_VER || '版なし') + ')。新しいファイルに入れ替えて、ブラウザのキャッシュも更新してください');
         if (!_terrainRoot) throw new Error('地形が読み込まれていません');
         renderer.render(scene, camera);
         const col = _viewerCollect({ scene, terrainRoot: _terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible, edgeFn: computeEdgesGeometrySafe });
@@ -1880,10 +1883,13 @@ window.addEventListener('message', function(ev) {
     if (!(n >= 1 && n <= SCF.MAX_SPANS)) { showToast(`⚠ 列数は1〜${SCF.MAX_SPANS}で入力してください`); _scfSelectParam('spans'); return; }
     scaffoldParams.open = [..._scfOpenSet(s, n, scaffoldParams.open)];
     _scfEdit = { steps: s, spans: n, img: null };
-    if (window.SCAFFOLD_TEX && window.SCAFFOLD_TEX.side) { const im = new Image(); im.onload = () => { if (_scfEdit) { _scfEdit.img = im; _scfEditDraw(); } }; im.src = window.SCAFFOLD_TEX.side; }
+    if (window.SCAFFOLD_TEX && window.SCAFFOLD_TEX.side) { const im = new Image(); im.onload = () => { if (_scfEdit) { _scfEdit.img = im; _scfEditDraw(); _scfEditScrollToBottom(); } }; im.src = window.SCAFFOLD_TEX.side; }
     document.getElementById('scaffold-edit-ui').style.display = 'block';
     _scfEditDraw();
+    _scfEditScrollToBottom();
   }
+  // 編集できるのは一番下の段(とその上)だけなので、開いた時は一番下が見える位置から始める(8段以上だと下の段がスクロールの外に隠れていた)
+  function _scfEditScrollToBottom() { const sc = document.getElementById('scf-edit-scroll'); if (sc) sc.scrollTop = sc.scrollHeight; }
   function _scfEditToggle(r, c) { // (r,c)=下からr段目・左からc列目
     const { steps, spans } = _scfEdit; if (r >= 2 || r >= steps) { showToast('編集できるのは「最下段とその上の段」だけです'); return; }
     const set = _scfOpenSet(steps, spans, scaffoldParams.open), key = (rr) => rr + ',' + c;
