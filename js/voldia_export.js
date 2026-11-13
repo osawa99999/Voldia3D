@@ -1,4 +1,5 @@
 // ============================================================
+// r146(47回目): 配置モードのiframe参照を voldia_placement_v0092.html に変更(HTML書き出しに線と作業半径)。法面ボタンの点灯判定(P1)も修正。
 // r145(47回目): 配置モードのiframe参照を voldia_placement_v0091.html に変更(足場編集のトースト最前面・ひな形のキャッシュ回避)。
 // r144(47回目): 配置モードのiframe参照を voldia_placement_v0090.html に変更(HTML書き出しの確認ダイアログにiOS注意を追加)。
 // r143(47回目): 配置モードのiframe参照を voldia_placement_v0089.html に変更(「HTML書き出し」ボタン追加。GLTFExporter・ひな形data/voldia_viewer_template.jsを読み込む版)。
@@ -168,7 +169,7 @@ async function applyVoldData(data, opts){
   if(typeof data.slopeAngleDeg==='number' && !isNaN(data.slopeAngleDeg)){
     slopeAngleDeg = data.slopeAngleDeg;
     document.querySelectorAll('.slope-ang-btn').forEach(b=>{
-      const on = parseInt(b.dataset.ang)===slopeAngleDeg;
+      const on = Math.abs(parseFloat(b.dataset.ang)-slopeAngleDeg)<1e-6; // 47回目(P1): parseIntだと小数の角度(1:0.8=51.34°など)が読込後に点灯しなかった
       b.style.background = on ? 'var(--accent)' : '#2a2a2a';
       b.style.color = on ? '#000' : '#aaa';
       b.style.borderColor = on ? 'var(--accent)' : '#3a3a3a';
@@ -954,7 +955,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0091.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
+      iframe.src='voldia_placement_v0092.html'; // r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);

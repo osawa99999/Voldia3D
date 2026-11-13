@@ -1783,6 +1783,26 @@ function _startShapeDrag(e,fromIdx,li){
   window.addEventListener('pointermove',move); window.addEventListener('pointerup',end); window.addEventListener('pointercancel',cancel);
   move(e);
 }
+// 47回目(M3): 同一形状の判定。頂点の並び順(どの頂点から始めるか)・回り方(時計/反時計)は無視して、座標(0.001px単位)だけで見る。
+//   建設の作図は頂点スナップが前提なので、意図せず「ほぼ同じ」形ができることはなく、同じ形は完全に同じ座標になる(マスター)。
+//   判定: 最小座標の頂点から両方向に並べた文字列のうち小さい方を鍵にする(= 並び順・回り方に依らない)。頂点数が違えば鍵を作らず除外(速い)。
+function _ringKey(pts){
+  const q=pts.map(p=>[Math.round(p.x*1000),Math.round(p.y*1000)]), n=q.length; if(!n) return '';
+  let m=0; for(let i=1;i<n;i++) if(q[i][0]<q[m][0]||(q[i][0]===q[m][0]&&q[i][1]<q[m][1])) m=i;
+  const a=[],b=[]; for(let k=0;k<n;k++){ a.push(q[(m+k)%n].join(',')); b.push(q[(m-k+n)%n].join(',')); }
+  const sa=a.join(';'), sb=b.join(';'); return sa<sb?sa:sb;
+}
+// 同じ形状・同じ色の既存オブジェクトの番号(なければ-1)。色が違うものは別物(既存躯体=グレーが同じ範囲に重なるのは正当)なので対象外。
+function _findDuplicateShape(pts,color){
+  if(!pts||pts.length<3) return -1;
+  const col=color||'blue'; let key=null;
+  const bx=(a)=>{ let x1=Infinity,x2=-Infinity,y1=Infinity,y2=-Infinity; for(const p of a){ if(p.x<x1)x1=p.x; if(p.x>x2)x2=p.x; if(p.y<y1)y1=p.y; if(p.y>y2)y2=p.y; } return [x1,x2,y1,y2]; };
+  const qb=bx(pts);
+  for(let i=0;i<shapes.length;i++){ const s=shapes[i]; if((s.color||'blue')!==col||!s.pts||s.pts.length!==pts.length) continue;
+    const sb=bx(s.pts); if(Math.abs(sb[0]-qb[0])>0.002||Math.abs(sb[1]-qb[1])>0.002||Math.abs(sb[2]-qb[2])>0.002||Math.abs(sb[3]-qb[3])>0.002) continue; // 外接が違えば同一ではない(鍵を作らず先に除外=多数でも速い)
+    if(key===null) key=_ringKey(pts); if(_ringKey(s.pts)===key) return i; }
+  return -1;
+}
 function _nextShapeNumber(){
   let mx=0;
   shapes.forEach((s,i)=>{
@@ -2639,12 +2659,13 @@ function finishShape(){
     } else {
       // 自己交差あり → 複数ポリゴンに分割して全部追加
       pushUndo();
-      let addedCount = 0, skippedCount = 0;
+      let addedCount = 0, skippedCount = 0, dupCount = 0;
       simplified.forEach((poly, idx) => {
         // Clipper整数→元座標に逆変換
         const newPts = poly.map(p=>roundPt({x:p.X/SF_SI, y:p.Y/SF_SI}));
         const area = calcArea(newPts);
         if(area < MIN_AREA_M2){ skippedCount++; return; }
+        if(_findDuplicateShape(newPts,currentToolColor)>=0){ dupCount++; return; } // 47回目(M3): 同じ形状・同じ色が既にある
         const shIdx2 = _nextShapeNumber(); // r047: shapes.length+1だと欠番で重複していた
         shapes.push({
           type: tool,
@@ -2661,6 +2682,7 @@ function finishShape(){
       updSidebar();
       let msg = `⚠️ 自己交差を検出。${addedCount}個に分割しました`;
       if(skippedCount > 0) msg += `（${skippedCount}個は面積が小さすぎるため除外）`;
+      if(dupCount > 0) msg += `（${dupCount}個は同じ形状・同じ色が既にあるため除外）`;
       toast(msg);
       if(rectLoop && prevTool2==='rect'){cur={pts:[]};redraw();return;}
       if(polyLoop && prevTool2==='poly'){cur={pts:[]};redraw();return;}
@@ -2681,6 +2703,15 @@ function finishShape(){
     }
   }
 
+  // 47回目(M3): 同じ形状(頂点の並び順・回り方は無視)・同じ色のオブジェクトが既にあれば、追加しない
+  {
+    const dupIdx=_findDuplicateShape(cur.pts,currentToolColor);
+    if(dupIdx>=0){
+      cancelDraw();
+      toast(`⚠️ 「${_shapeDisplayName(shapes[dupIdx],dupIdx)}」と同じ形状・同じ色のため、追加しませんでした`);
+      return;
+    }
+  }
   const shIdx=_nextShapeNumber(); // r047: shapes.length+1だと欠番で重複していた
   const sh={type:tool,pts:cur.pts,area:calcArea(cur.pts),
             depthBeam:'-1800',overdig:'0',noSlope:true,

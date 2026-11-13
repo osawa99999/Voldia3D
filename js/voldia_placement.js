@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 47回目(r145): HTML書き出しに「線(仮囲い・計画線)」と「クレーンの作業半径リング」を追加(実機で出ていなかった=これらはplacedObjectsではなくscene直下に置かれているため集め漏れていた)。
 // 47回目(r144): ①足場の編集窓を開いた時、一番下の段が見える位置までスクロール ②HTML書き出しから各オブジェクトの回転グリップ(水色●=isDragMarker)等の操作用の部品を除く ③ひな形が古い版のままなら書き出さずに知らせる(VIEWER_TEMPLATE_VER_NEED)。
 // 47回目(r143): HTML書き出しの修正(実機の指摘)=①材質の変換(Lambert/Phong等はglTFの既定で「金属」扱いになり真っ暗になっていたため、書き出し用にMeshStandard(金属0)へ変換) ②地形のエッジ線(細い線で)を追加 ③吹き出しの大きさは吹き出し本体(ビルボード)の倍率から取る。
 // 47回目(r142): 「HTML書き出し」ボタン(左パネル)。配置の現状をViewer一体型HTML(three等も埋め込み・GLBはbase64で内蔵)にして、ZIPで保存する。ひな形=data/voldia_viewer_template.js。GLB化はGLTFExporter(配置HTML v0089で追加)。確認ダイアログは新設(vhtml-confirm-overlay)。エッジ線(太い輪郭線のInstancedMesh)・UI用マーカー・非表示の影用の柱は含めない。吹き出し(text_balloon)はGLBに入れず、ビューア側の注釈データ(INLINE_ANNOTATIONS)で再現する。
@@ -1168,7 +1169,7 @@ window.addEventListener('message', function(ev) {
   }
   // 書き出す物を集める。ctx = {scene, terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible}
   //   地形=読み込んだ地形のルート+scene直下の追加床(customGround等)。配置物=名前を「Placement_種類_連番」にする(ビューアは名前に Fixed/Existing/Placement を含むメッシュを「物体」として扱う)。
-  //   吹き出し(text_balloon)はGLBに入れず注釈データにする(大きさ1〜3倍は吹き出し本体=ビルボードのscaleから)。ctx.edgeFnがあれば地形にエッジ線を付ける。戻り値 {root, annotations, objects, meshes}
+  //   吹き出し(text_balloon)はGLBに入れず注釈データにする(大きさ1〜3倍は吹き出し本体=ビルボードのscaleから)。ctx.edgeFnがあれば地形にエッジ線を付ける。戻り値 {root, annotations, objects, meshes, lines, rings}
   function _viewerCollect(ctx) {
     const root = new THREE.Group(); root.name = 'VoldiaViewerRoot';
     const annotations = []; let objects = 0, seq = 0;
@@ -1195,8 +1196,25 @@ window.addEventListener('message', function(ev) {
       let k = 0; c.traverse(n => { if (n.isMesh || n.isLine) n.name = base + '_' + (++k); });
       root.add(c); objects++;
     }
+    // 線(計画ツールのLine=仮囲いなど): sceneの直下にGroupで置かれていて placedObjects には入っていない → fenceLines から集める
+    let lines = 0;
+    (ctx.fenceLines || []).forEach(g => {
+      if (!g || !g.parent || g.visible === false) return;
+      const c = _viewerClone(g, { matCache }); if (!c) return;
+      const base = 'Voldia_FenceLine_' + (++lines); c.name = base;
+      let k = 0; c.traverse(n => { if (n.isMesh || n.isLine) n.name = base + '_' + (++k); });
+      root.add(c);
+    });
+    // クレーンの作業半径リング: これもscene直下(各クレーンの userData.radiusMesh)。表示中のものだけ
+    let rings = 0;
+    for (const o of (ctx.placedObjects || [])) {
+      const rm = o && o.userData && o.userData.radiusMesh;
+      if (!rm || !rm.parent || rm.visible === false) continue;
+      const c = _viewerClone(rm, { matCache }); if (!c) continue;
+      c.name = 'Voldia_RadiusRing_' + (++rings); root.add(c);
+    }
     let meshes = 0; root.traverse(n => { if (n.isMesh) meshes++; });
-    return { root, annotations, objects, meshes };
+    return { root, annotations, objects, meshes, lines, rings };
   }
   function _viewerGlb(root) { // GLTFExporter(three r128)でバイナリGLBにする → ArrayBuffer
     return new Promise((resolve, reject) => {
@@ -1282,7 +1300,7 @@ window.addEventListener('message', function(ev) {
         if (window.VOLDIA_VIEWER_TEMPLATE_VER !== VIEWER_TEMPLATE_VER_NEED) throw new Error('ビューアのひな形(data/voldia_viewer_template.js)が古い版です(必要:' + VIEWER_TEMPLATE_VER_NEED + ' / 今:' + (window.VOLDIA_VIEWER_TEMPLATE_VER || '版なし') + ')。新しいファイルに入れ替えて、ブラウザのキャッシュも更新してください');
         if (!_terrainRoot) throw new Error('地形が読み込まれていません');
         renderer.render(scene, camera);
-        const col = _viewerCollect({ scene, terrainRoot: _terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible, edgeFn: computeEdgesGeometrySafe });
+        const col = _viewerCollect({ scene, terrainRoot: _terrainRoot, terrainMeshes, defaultGround, placedObjects, kotaiMeshes, kotaiVisible, edgeFn: computeEdgesGeometrySafe, fenceLines });
         const libs = [];
         for (const [name, key] of LIBS) {
           const el = document.querySelector('script[src*="' + key + '"]');
@@ -1300,7 +1318,7 @@ window.addEventListener('message', function(ev) {
         const a = Object.assign(document.createElement('a'), { href: url, download: 'Voldia_Viewer_' + stamp + '.zip' });
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 2000);
-        showToast('🌐 Viewer一体型HTMLをZIPで出力しました（' + (zip.length / 1048576).toFixed(1) + 'MB・物体' + col.objects + '個・吹き出し' + col.annotations.length + '個）', 5000);
+        showToast('🌐 Viewer一体型HTMLをZIPで出力しました（' + (zip.length / 1048576).toFixed(1) + 'MB・物体' + col.objects + '個・線' + col.lines + '本・作業半径' + col.rings + '個・吹き出し' + col.annotations.length + '個）', 5000);
       } catch (e) {
         console.error('[HTML書き出し]', e);
         showToast('⚠ HTML書き出しに失敗しました: ' + (e && e.message ? e.message : e), 6000);

@@ -1312,7 +1312,8 @@ function _mergeTouchingSameDepthFrustums(frustums){
         if(mem.length < 2) return;
         const pa = single(unionOf(mem.map(i => paths.get(i))));
         if(!pa) return; // 全体でも1輪郭にならなければ従来どおり
-        const pts = pa.map(q => ({x:q.X/SF, y:q.Y/SF}));
+        let pts = pa.map(q => ({x:q.X/SF, y:q.Y/SF}));
+        pts = _cleanOutlineMm(pts, _cleanTol()); // r128(47回目): 合体した直後の輪郭にも同じクリーニング(結合部にできた一直線の点・近接点を除く)
         let ar = 0; for(let i=0;i<pts.length;i++){ const j=(i+1)%pts.length; ar += pts[i].x*pts[j].y - pts[j].x*pts[i].y; }
         const base = frustums[mem[0]];
         const mf = Object.assign({}, base, {
@@ -1367,6 +1368,19 @@ function _cavityMeshDefects(res){
   }
   return out;
 }
+// r128(47回目): 全体の3Dの欠陥点数(提案書P2)。非多様体の辺(3枚以上の面が1辺を共有=穴あきや重なり)・逆勾配・偽の床(同じ深さの時だけ)。メッシュが作れない時は大きな点数。
+function _sceneDefects(res, sameDepth){
+  const o = {nm:0, fake:0, rev:0, fakeA:0, revA:0, score:0};
+  if(!res || !res.positions){ o.score = 1e6; return o; }
+  const lists = [res.cyanIndices, res.redIndices].filter(a => a && a.length), E = new Map();
+  lists.forEach(I => { for(let t=0;t+2<I.length;t+=3){ const a=I[t], b=I[t+1], c=I[t+2];
+    [[a,b],[b,c],[c,a]].forEach(([u,v]) => { if(u===v) return; const k = u<v ? u+'_'+v : v+'_'+u; E.set(k, (E.get(k)||0)+1); }); } });
+  for(const c of E.values()) if(c > 2) o.nm++;
+  const d = _cavityMeshDefects(res); o.rev = d.rev; o.revA = d.revA;
+  if(sameDepth){ o.fake = d.fake; o.fakeA = d.fakeA; }
+  o.score = o.nm*1000 + (o.revA + o.fakeA)*10 + (o.rev + o.fake)*0.01;
+  return o;
+}
 function _openTopMeshVolumeMm3(res){
   const P = res.positions, idxLists = [res.cyanIndices, res.redIndices].filter(a => a && a.length);
   if(!P || !idxLists.length) return 0;
@@ -1420,6 +1434,26 @@ async function _mergeSameDepthFrustumsValidated(frustums, offsetXmm, offsetYmm, 
   }
   if(!kept) return frustums;
   if(frustums._offsetX !== undefined){ out._offsetX = frustums._offsetX; out._offsetY = frustums._offsetY; }
+  // r128(47回目) 全体チェック(提案書P2): 個々の合体は安全でも、全体を組み立てると偽の床・逆勾配・非多様体の辺が出ることがある。
+  //   合体した全体と、合体しない全体の両方を3D化して欠陥点数を比べ、合体の方が悪ければ合体を全部取りやめる(3D側・体積側とも、この関数の結果を共有するので食い違わない)。
+  const sceneKey = 'S|' + JSON.stringify([frustums.filter(f => f && f.color !== 'gray').map(f => [f.ptsMm.map(p => [Math.round(p.x*100), Math.round(p.y*100)]), f.D, f.tl||0, f.OD||0, f.noSlope?1:0, f.color==='purple'?1:0]), offsetXmm||0, offsetYmm||0, isDoboku !== false, window._vertexQuantMm||0]);
+  let sceneOk = window._mergeValidCache.get(sceneKey);
+  if(sceneOk === undefined){
+    sceneOk = true; let cacheScene = true;
+    try{
+      const cp = list => { const a = list.map(f => Object.assign({}, f, {ptsMm: f.ptsMm.map(p => ({x:p.x, y:p.y})), holesMm: (f.holesMm||[]).map(h => h.map(p => ({x:p.x, y:p.y})))}));
+        if(frustums._offsetX !== undefined){ a._offsetX = frustums._offsetX; a._offsetY = frustums._offsetY; } return a; };
+      const sameDepth = new Set(frustums.filter(f => f && f.color !== 'gray' && !f.noSlope).map(f => f.D + '|' + (f.tl||0))).size === 1;
+      const dM = _sceneDefects(await buildManifoldUnionGeom(cp(out), isDoboku !== false, offsetXmm, offsetYmm, {_noMerge:true}), sameDepth);
+      if(dM.score > 0){
+        const dU = _sceneDefects(await buildManifoldUnionGeom(cp(frustums), isDoboku !== false, offsetXmm, offsetYmm, {_noMerge:true}), sameDepth);
+        sceneOk = dM.score <= dU.score;
+        if(!sceneOk) console.warn(`[MERGE-SAME-DEPTH] 合体した全体の3Dに欠陥(非多様体${dM.nm}・逆勾配${dM.rev}・偽の床${dM.fake} / 点数${dM.score.toFixed(2)})があり、合体しない方(点数${dU.score.toFixed(2)})が良いため、合体は全部取りやめて個別のまま処理します`);
+      }
+    }catch(e){ sceneOk = true; cacheScene = false; }
+    if(cacheScene) window._mergeValidCache.set(sceneKey, sceneOk);
+  }
+  if(!sceneOk) return frustums;
   return out;
 }
 async function buildUnionFrustumGeometry(frustums, offsetXmm, offsetYmm){
@@ -2808,9 +2842,122 @@ function getAllFrustums(){
   // 作られている。測点フラグなど、絶対mm座標(pxToMm)で計算した別の値をこの地形と
   // 突き合わせるには、同じだけシフトしてやる必要がある。呼び出し元がその差分を
   // 参照できるよう、戻り値の配列にオフセット値を生やしておく。
+  _cleanFrustumsMm(result); // r128(47回目): 3D・体積・各種出力の共通の入口でクリーニング(2D上の図形は変えない)
   result._offsetX=minX;
   result._offsetY=minY;
   return result;
+}
+
+// ============================================================
+// r128(47回目): 3D化の前の「形状のクリーニング」(提案書P3 + マスターM1・M2)
+//   背景: 2Dで頂点をスナップしても、回転・丸めで「ほぼ一直線の点」「数mmしか離れていない近接頂点」「隣の図形とわずかにずれた頂点」ができる。
+//         これらは肉眼ではほぼ区別できないが、法面オフセット(Clipper)や層分け(loft)で細い面・逆勾配・偽の床の原因になる(提案書の乱数テストで確認)。
+//   方針(マスター): 2D上の図形はそのまま。3D化・体積・各種出力の入口(getAllFrustums)と、合体した輪郭(_mergeTouchingSameDepthFrustums)にだけ通す。
+//         許容差は5mm(土工事では5mm以下は意味を持たない=マスター)。window._cleanTolMm で変更でき、0にすると無効。
+//   1) 同じ図形の隣り合う近接頂点(許容差未満)を1点に統合 2) ほぼ一直線の頂点を除去(Douglas-Peucker。元の輪郭から許容差を超えて外れない保証付き)
+//   3) 図形どうしの近接頂点を1点に合わせる(既存躯体=グレーは描いた形状そのままなので動かさず、他をグレーに合わせる) 4) 頂点が他の図形の辺の近く(許容差未満)なら、その辺の上へ寄せる
+//   安全装置: 面積が1%以上変わる・向きが変わる・新しい自己交差ができる場合は、その図形だけ元に戻す。穴あきの図形は触らない。
+// ============================================================
+let _cleanTolMmDefault = 5;
+function _cleanTol(){ const v = (typeof window !== 'undefined' && typeof window._cleanTolMm === 'number') ? window._cleanTolMm : _cleanTolMmDefault; return v > 0 ? v : 0; }
+function _ringSignedAreaMm2(p){ let a = 0; for(let i=0;i<p.length;i++){ const j=(i+1)%p.length; a += p[i].x*p[j].y - p[j].x*p[i].y; } return a/2; }
+function _segDistMm(px,py,ax,ay,bx,by){
+  const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy; let t = L2>0 ? ((px-ax)*dx+(py-ay)*dy)/L2 : 0; t = Math.max(0, Math.min(1, t));
+  const qx=ax+t*dx, qy=ay+t*dy; return {d: Math.hypot(px-qx, py-qy), t, qx, qy, len: Math.sqrt(L2)};
+}
+function _ringSelfIntersects(p){ // 隣り合わない辺どうしの交差(端点だけの接触は数えない)
+  const n=p.length, cr=(ax,ay,bx,by,cx,cy)=>(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+  for(let i=0;i<n;i++){ const a=p[i], b=p[(i+1)%n];
+    for(let j=i+2;j<n;j++){ if(i===0 && j===n-1) continue; const c=p[j], d=p[(j+1)%n];
+      const d1=cr(a.x,a.y,b.x,b.y,c.x,c.y), d2=cr(a.x,a.y,b.x,b.y,d.x,d.y), d3=cr(c.x,c.y,d.x,d.y,a.x,a.y), d4=cr(c.x,c.y,d.x,d.y,b.x,b.y);
+      if(((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0))) return true; } }
+  return false;
+}
+function _dpRing(p, tol){ // 輪のDouglas-Peucker: 除いた点は、残った線から許容差以内
+  const n=p.length; if(n<=3) return p;
+  let i0=0; for(let i=1;i<n;i++) if(p[i].x<p[i0].x || (p[i].x===p[i0].x && p[i].y<p[i0].y)) i0=i;
+  let i1=i0, best=-1; for(let i=0;i<n;i++){ const d=Math.hypot(p[i].x-p[i0].x, p[i].y-p[i0].y); if(d>best){ best=d; i1=i; } }
+  const keep=new Uint8Array(n); keep[i0]=1; keep[i1]=1;
+  const chain=(s,e)=>{ const st=[[s,e]];
+    while(st.length){ const [a,b]=st.pop(); const len=((b-a)+n)%n; if(len<2) continue; let idx=-1, maxd=tol;
+      for(let k=1;k<len;k++){ const m=(a+k)%n; const r=_segDistMm(p[m].x,p[m].y,p[a].x,p[a].y,p[b].x,p[b].y); if(r.d>maxd){ maxd=r.d; idx=m; } }
+      if(idx>=0){ keep[idx]=1; st.push([a,idx],[idx,b]); } } };
+  chain(i0,i1); chain(i1,i0);
+  return p.filter((_,i)=>keep[i]);
+}
+// 1個の輪郭(mm, [{x,y}])をクリーニングして返す(変化なし/やめた時は同じ配列を返す)
+function _cleanOutlineMm(pts, tol){
+  if(!(tol>0) || !pts || pts.length<4) return pts;
+  let p = pts.map(q=>({x:q.x, y:q.y}));
+  for(let guard=0; guard<p.length*3 && p.length>3; guard++){ // 隣り合う近接頂点を中点に統合
+    let hit=-1; for(let i=0;i<p.length;i++){ const j=(i+1)%p.length; if(Math.hypot(p[i].x-p[j].x, p[i].y-p[j].y) < tol){ hit=i; break; } }
+    if(hit<0) break; const j=(hit+1)%p.length; const m={x:(p[hit].x+p[j].x)/2, y:(p[hit].y+p[j].y)/2};
+    if(j===0){ p[0]=m; p.pop(); } else p.splice(hit,2,m);
+  }
+  p = _dpRing(p, tol);
+  if(p.length<3) return pts;
+  const a0=_ringSignedAreaMm2(pts), a1=_ringSignedAreaMm2(p);
+  if(Math.sign(a0)!==Math.sign(a1) || Math.abs(a1-a0) > Math.abs(a0)*0.01) return pts; // 形が1%以上変わる/向きが変わる → やめる
+  if(p.length!==pts.length && _ringSelfIntersects(p) && !_ringSelfIntersects(pts)) return pts;
+  return p.length===pts.length && p.every((q,i)=>q.x===pts[i].x && q.y===pts[i].y) ? pts : p;
+}
+function _setFrustumPtsMm(f, pts){ // 輪郭を差し替え、外接(x1,x2,y1,y2=OD等を含む既存の値)を同じだけずらす
+  const mn=(a,k)=>Math.min(...a.map(q=>q[k])), mx=(a,k)=>Math.max(...a.map(q=>q[k]));
+  f.x1 += mn(pts,'x')-mn(f.ptsMm,'x'); f.x2 += mx(pts,'x')-mx(f.ptsMm,'x'); f.y1 += mn(pts,'y')-mn(f.ptsMm,'y'); f.y2 += mx(pts,'y')-mx(f.ptsMm,'y');
+  f.ptsMm = pts;
+}
+// 図形どうしの頂点合わせ。frs=getAllFrustums()の配列(ptsMmを直接書き換える)。戻り値={welded,projected,reverted}
+function _weldFrustumsMm(frs, tol){
+  const st={welded:0, projected:0, reverted:0};
+  const ok = f => f && f.ptsMm && f.ptsMm.length>=3 && !(f.holesMm && f.holesMm.length);
+  const backup = new Map(); frs.forEach((f,i)=>{ if(ok(f)) backup.set(i, f.ptsMm.map(q=>({x:q.x,y:q.y}))); });
+  const items=[]; frs.forEach((f,fi)=>{ if(ok(f)) f.ptsMm.forEach((q,vi)=>items.push({fi,vi,x:q.x,y:q.y,gray:f.color==='gray'})); });
+  if(items.length<2) return st;
+  const key=(a,b)=>a+','+b, grid=new Map();
+  items.forEach((it,k)=>{ it.kx=Math.floor(it.x/tol); it.ky=Math.floor(it.y/tol); const kk=key(it.kx,it.ky); if(!grid.has(kk)) grid.set(kk,[]); grid.get(kk).push(k); });
+  const par=items.map((_,i)=>i), find=i=>{ while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; };
+  items.forEach((it,k)=>{ for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){ const l=grid.get(key(it.kx+dx,it.ky+dy)); if(!l) continue;
+    for(const m of l){ if(m<=k) continue; const o=items[m]; if(o.fi===it.fi) continue; if(Math.hypot(o.x-it.x,o.y-it.y)<tol) par[find(m)]=find(k); } } });
+  const cl=new Map(); items.forEach((it,k)=>{ const r=find(k); if(!cl.has(r)) cl.set(r,[]); cl.get(r).push(k); });
+  cl.forEach(mem=>{
+    if(mem.length<2 || new Set(mem.map(k=>items[k].fi)).size<2) return;
+    const an=mem.find(k=>items[k].gray); let cx,cy;
+    if(an!==undefined){ cx=items[an].x; cy=items[an].y; } else { cx=mem.reduce((s,k)=>s+items[k].x,0)/mem.length; cy=mem.reduce((s,k)=>s+items[k].y,0)/mem.length; }
+    if(mem.some(k=>Math.hypot(items[k].x-cx, items[k].y-cy) >= tol)) return; // 連鎖で大きく広がる群は触らない
+    mem.forEach(k=>{ const it=items[k]; if(it.gray) return; if(it.x!==cx || it.y!==cy){ frs[it.fi].ptsMm[it.vi]={x:cx,y:cy}; st.welded++; } });
+  });
+  // 頂点が他の図形の辺の近く(許容差未満)なら、その辺の上へ寄せる(端点のごく近くは頂点合わせで済んでいる)
+  const bb = frs.map(f=>ok(f)?{x1:Math.min(...f.ptsMm.map(q=>q.x))-tol, x2:Math.max(...f.ptsMm.map(q=>q.x))+tol, y1:Math.min(...f.ptsMm.map(q=>q.y))-tol, y2:Math.max(...f.ptsMm.map(q=>q.y))+tol}:null);
+  frs.forEach((fa,ia)=>{ if(!ok(fa) || fa.color==='gray') return;
+    fa.ptsMm.forEach((q,vi)=>{ let bestD=tol, bestQ=null;
+      frs.forEach((fb,ib)=>{ if(ib===ia || !bb[ib] || q.x<bb[ib].x1 || q.x>bb[ib].x2 || q.y<bb[ib].y1 || q.y>bb[ib].y2) return;
+        const m=fb.ptsMm.length; for(let e=0;e<m;e++){ const a=fb.ptsMm[e], b=fb.ptsMm[(e+1)%m]; const r=_segDistMm(q.x,q.y,a.x,a.y,b.x,b.y);
+          if(r.d<bestD && r.d>1e-6 && r.t*r.len>1e-3 && (1-r.t)*r.len>1e-3){ bestD=r.d; bestQ={x:r.qx,y:r.qy}; } } });
+      if(bestQ){ fa.ptsMm[vi]=bestQ; st.projected++; } });
+  });
+  // 安全装置: 面積が1%以上変わる・向きが変わる・新しい自己交差ができた図形は元に戻す
+  frs.forEach((f,i)=>{ if(!backup.has(i)) return; const b=backup.get(i);
+    const changed = f.ptsMm.some((q,k)=>q.x!==b[k].x || q.y!==b[k].y); if(!changed) return;
+    const a0=_ringSignedAreaMm2(b), a1=_ringSignedAreaMm2(f.ptsMm);
+    if(Math.sign(a0)!==Math.sign(a1) || Math.abs(a1-a0)>Math.abs(a0)*0.01 || (_ringSelfIntersects(f.ptsMm) && !_ringSelfIntersects(b))){ f.ptsMm=b; st.reverted++; }
+  });
+  return st;
+}
+// getAllFrustums()の結果(frs)に、クリーニング一式を通す。_setFrustumPtsMmで外接も更新する
+function _cleanFrustumsMm(frs, tol){
+  tol = (tol===undefined) ? _cleanTol() : tol;
+  if(!(tol>0) || !frs || !frs.length) return frs;
+  let removed=0;
+  const cleanEach = () => frs.forEach(f=>{ if(!f || f.color==='gray' || !f.ptsMm || (f.holesMm && f.holesMm.length)) return;
+    const c=_cleanOutlineMm(f.ptsMm, tol); if(c!==f.ptsMm){ removed += f.ptsMm.length-c.length; _setFrustumPtsMm(f, c); } });
+  cleanEach();
+  // 頂点合わせの結果(_weldFrustumsMmはptsMmを直接書き換える)に合わせて外接を更新するため、前後のptsMmを比べる
+  const before = frs.map(f=>f && f.ptsMm ? f.ptsMm.map(q=>({x:q.x,y:q.y})) : null);
+  const w = _weldFrustumsMm(frs, tol);
+  frs.forEach((f,i)=>{ if(!before[i] || f.ptsMm.every((q,k)=>q.x===before[i][k].x && q.y===before[i][k].y)) return; const np=f.ptsMm; f.ptsMm=before[i]; _setFrustumPtsMm(f, np); });
+  cleanEach(); // 頂点を合わせた結果できた一直線の点も除く
+  if(removed || w.welded || w.projected || w.reverted) console.log(`[CLEAN] 形状のクリーニング(許容差${tol}mm): 一直線/近接の頂点を${removed}個除去・図形どうしの頂点を${w.welded}個合わせ・辺へ${w.projected}個寄せ・やめた図形${w.reverted}個`);
+  return frs;
 }
 // ============================================================
 // r100(36回目): 既存躯体(グレー)「底面∞」の共通関数群
@@ -5091,7 +5238,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r127(base:VoldiaM r069)"; // r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r128(base:VoldiaM r069)"; // r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。 r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
