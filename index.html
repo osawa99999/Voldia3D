@@ -1133,6 +1133,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0160(48回目): 問題7=3Dイメージの三角形の間引きを「許容5mm」つきに(js/voldia3d.js r130: _guardedDecimateMesh)。形が元から最大5mmまで動く代わりに三角形が減る(R1〜R8で約−21%・乱数60セットで約−10%)。Land Logic(LandXML)・欠陥スキャンは従来どおり誤差0。コンソールで window._planarDecimateTolMm=0 にすると誤差0(r129)に戻る(次の3D生成から有効)。 -->
 <!-- v0159(47回目): ①3D生成方法ダイアログに断面イラスト(左)を追加・設定項目に①〜④の番号・入力中は該当部分が光る・通常計算ではイラストが左へ収納(css/voldia_gm_intro.css・data/voldia_intro_img.js・js/voldia_gm_intro.js) ②右クリックで戻る/キャンセル(3D生成方法ダイアログ・測点設置) ③データ出力で掘削深さ10m超の警告 ④robots noindex ⑤voldia3d.js r129=形状クリーニング(許容差5mm)・合体の全体チェック・同一平面の三角形を形を変えずに間引き ⑥同一形状(同じ座標・同じ色)は作図時に除外・法面ボタンの点灯修正。配置モードは voldia_placement_v0093.html。 -->
 <!-- v0158(47回目): ①形状破綻の対策 voldia3d.js r128=3D化の入口と合体した輪郭に「形状のクリーニング」(許容差5mm)・合体した全体の3Dを合体なしと比べて悪ければ合体を取りやめ ②同一形状(同じ座標・同じ色)は作図の時点で除外(M3) ③法面ボタンの点灯判定を小数の角度でも効くよう修正(P1)。配置モードは voldia_placement_v0092.html(HTML書き出しに線と作業半径を追加)。 -->
 <!-- v0157(47回目): 名前のダブルクリック編集が効かなかった不具合を修正(1回目のクリックで一覧が作り直され、dblclickの届き先が消えていた→クリックの2回目を検出して編集)。配置モードは voldia_placement_v0091.html(足場編集のトースト最前面・初期スクロール・HTML書き出しの修正)。 -->
