@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 47回目(r146): ①左パネルのボタンにマウスオーバーの解説(Vold出力/範囲スクショ/印刷/HTML書き出し) ②オブジェクト配置のマウス位置の丸を全種類「白」に統一 ③ボックス・足場の設定画面で右クリック=キャンセル ④ひな形の版をr3へ(robots noindex)。
 // 47回目(r145): HTML書き出しに「線(仮囲い・計画線)」と「クレーンの作業半径リング」を追加(実機で出ていなかった=これらはplacedObjectsではなくscene直下に置かれているため集め漏れていた)。
 // 47回目(r144): ①足場の編集窓を開いた時、一番下の段が見える位置までスクロール ②HTML書き出しから各オブジェクトの回転グリップ(水色●=isDragMarker)等の操作用の部品を除く ③ひな形が古い版のままなら書き出さずに知らせる(VIEWER_TEMPLATE_VER_NEED)。
 // 47回目(r143): HTML書き出しの修正(実機の指摘)=①材質の変換(Lambert/Phong等はglTFの既定で「金属」扱いになり真っ暗になっていたため、書き出し用にMeshStandard(金属0)へ変換) ②地形のエッジ線(細い線で)を追加 ③吹き出しの大きさは吹き出し本体(ビルボード)の倍率から取る。
@@ -1282,13 +1283,42 @@ window.addEventListener('message', function(ev) {
   // ★ HTML書き出し 終了(部品)
   // ==========================================
 
+  // 47回目: 左パネルのボタンの解説(マウスオーバー)。文中の「/」は改行。マウスのときだけ出す(タッチでは出さない)。
+  (function () {
+    const TIPS = {
+      'voldia-save-btn': 'Voldiaのデータを保存します',
+      'voldia-shot-btn': '表示画面の範囲を選択して/スクリーンショットを保存します',
+      'voldia-print-btn': '表示画面をPDFで出力します',
+      'voldia-html-btn': '現在の３Dイメージを配布用の/編集不可状態で書き出します'
+    };
+    const tip = document.getElementById('btn-help-tip'); if (!tip) return;
+    const hide = () => { tip.style.display = 'none'; };
+    Object.keys(TIPS).forEach(id => {
+      const b = document.getElementById(id); if (!b) return;
+      b.addEventListener('pointerenter', e => {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        tip.innerHTML = TIPS[id].split('/').map(t => t.replace(/[<>&]/g, '')).join('<br>');
+        tip.style.display = 'block';
+        const r = b.getBoundingClientRect();
+        tip.style.left = (r.right + 10) + 'px';
+        tip.style.top = (r.top + r.height / 2 - tip.offsetHeight / 2) + 'px';
+      });
+      b.addEventListener('pointerleave', hide); b.addEventListener('pointerdown', hide); b.addEventListener('blur', hide);
+    });
+  })();
+  // 47回目: ボックス・足場の設定画面で右クリック=キャンセル(その画面の上で右クリックした時。3D画面の右ドラッグ(パン)には影響しない)
+  [['box-input-ui', 'box-btn-cancel'], ['scaffold-input-ui', 'scf-btn-cancel']].forEach(([ui, cancel]) => {
+    const el = document.getElementById(ui); if (!el) return;
+    el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); const c = document.getElementById(cancel); if (c) c.click(); });
+  });
+
   // ボタン→確認ダイアログ→書き出し。three等のソースは、このページが読み込んでいるscriptタグと同じURLから取得する(取得元を1か所に保つ。このページ自体がオンラインで動いている前提)
   (function () {
     const btn = document.getElementById('voldia-html-btn');
     const ov = document.getElementById('vhtml-confirm-overlay');
     if (!btn || !ov) return;
     let busy = false;
-    const VIEWER_TEMPLATE_VER_NEED = 'r2'; // data/voldia_viewer_template.js の版(tools/make_viewer_template.py の VER と同じ)
+    const VIEWER_TEMPLATE_VER_NEED = 'r3'; // data/voldia_viewer_template.js の版(tools/make_viewer_template.py の VER と同じ)
     const LIBS = [['three.min.js', 'three.min.js'], ['OrbitControls.js', 'OrbitControls.js'], ['GLTFLoader.js', 'GLTFLoader.js']];
     function openConfirm() { ov.style.display = 'flex'; controls.enabled = false; }
     function closeConfirm() { ov.style.display = 'none'; controls.enabled = true; }
@@ -3674,7 +3704,7 @@ window.addEventListener('message', function(ev) {
         const qNormal = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
         placementMarker.quaternion.copy(qNormal);
         
-        placementMarker.material.color.set(getTypeColor(currentType));
+        placementMarker.material.color.set(0xffffff); // 47回目: 種類(重機=橙・クレーン=青など)で色を変えず、白に統一
       } else {
         placementMarker.visible = false;
       }

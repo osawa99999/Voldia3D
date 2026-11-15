@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Voldia 3D Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: #1a1e24;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Meiryo, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #cv-wrap {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+    cursor: default;
+  }
+
+  /* ヘッダー・タイトル＋控えめな注意書き */
+  #header-bar {
+    position: absolute;
+    top: 14px;
+    left: 18px;
+    z-index: 100;
+    background: rgba(20, 24, 30, 0.85);
+    border: 1px solid #3a4450;
+    padding: 8px 16px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  #header-bar h1 {
+    font-size: 0.95em;
+    font-weight: 700;
+    color: #4fc3f7;
+    letter-spacing: 0.05em;
+  }
+  /* 追加: 控えめな注意文 */
+  #header-bar p.sub-notice {
+    font-size: 0.72em;
+    color: #90a4ae;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  /* 空の色調整パネル（右上） */
+  #sky-ctrl-panel {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    z-index: 100;
+    background: rgba(20, 24, 30, 0.85);
+    border: 1px solid #3a4450;
+    padding: 8px 14px;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.78em;
+  }
+  #sky-ctrl-panel span {
+    color: #b0bec5;
+    white-space: nowrap;
+  }
+  #sky-slider {
+    width: 90px;
+    height: 5px;
+    accent-color: #4fc3f7;
+    cursor: pointer;
+  }
+
+  /* 操作ガイド（画面下部） */
+  #controls-guide {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    background: rgba(15, 20, 26, 0.85);
+    border: 1px solid #3a4450;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    color: #b0bec5;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    line-height: 1.6;
+    text-align: center;
+  }
+  #controls-guide span.key {
+    color: #ffd54f;
+    font-weight: 700;
+  }
+
+  /* トースト通知 */
+  #toast {
+    position: absolute;
+    bottom: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(33, 40, 50, 0.95);
+    border: 1px solid #4fc3f7;
+    border-radius: 16px;
+    padding: 6px 18px;
+    color: #fff;
+    font-size: 0.82em;
+    pointer-events: none;
+    z-index: 200;
+    opacity: 0;
+    transition: opacity 0.25s;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.6);
+  }
+</style>
+
+<!-- 外部CDNライブラリ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+<div id="header-bar">
+  <h1>Voldia 3D Viewer</h1>
+  <p class="sub-notice">※ これはサンプルビューアーです。実際の配置などはVoldiaで確認してください。</p>
+</div>
+
+<!-- 空色スライダー -->
+<div id="sky-ctrl-panel">
+  <span>🌫️ 曇り</span>
+  <input type="range" id="sky-slider" min="0" max="100" value="0" title="空の色を調整">
+  <span>☀️ 青空</span>
+  <label style="margin-left:10px;cursor:pointer;" title="影の表示/非表示"><input type="checkbox" id="shadow-toggle" checked> 影</label>
+</div>
+
+<div id="cv-wrap"></div>
+
+<div id="controls-guide">
+  🖱 <span class="key">左ドラッグ</span>: 旋回 ｜ 🖱 <span class="key">右ドラッグ</span>: パン ｜ ⚙️ <span class="key">ホイール</span>: ズーム<br>
+  🖱 <span class="key">ホイールクリック</span>: 指定位置にフォーカス移動
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ============================================================
+// 1. 内部埋め込みデータ定義部
+// ============================================================
+const INLINE_GLB_BASE64 = "";
+const INLINE_ANNOTATIONS = [];
+
+// ============================================================
+// 2. Three.js 基本セットアップ
+// ============================================================
+const container = document.getElementById('cv-wrap');
+const scene = new THREE.Scene();
+
+// 47回目: 空色スライダーの色を薄く(マスター指定: 曇り=(149,163,189) 青空=(179,208,255))
+const COLOR_SKY_GRAY = new THREE.Color(149/255, 163/255, 189/255);
+const COLOR_SKY_BLUE = new THREE.Color(179/255, 208/255, 255/255);
+scene.background = COLOR_SKY_GRAY.clone();
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 25, 35);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// 47回目: 配置モードと同じ明るさにする(露出1.2・リニア)
+renderer.toneMapping = THREE.LinearToneMapping;
+renderer.toneMappingExposure = 1.2;
+container.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0);
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+controls.mouseButtons = {
+  LEFT: THREE.MOUSE.ROTATE,
+  MIDDLE: THREE.MOUSE.ROTATE,
+  RIGHT: THREE.MOUSE.PAN
+};
+controls.update();
+
+const ambLight = new THREE.AmbientLight(0xffffff, 0.55); // 47回目: 配置モードと同じ値(.55)
+scene.add(ambLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.75); // 47回目: 配置モードと同じ値(.75)
+dirLight.position.set(30, 60, -20);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.width = 2048;
+dirLight.shadow.mapSize.height = 2048;
+dirLight.shadow.bias = -0.0005;
+dirLight.shadow.radius = 2; // 影の縁をなめらかに(PCFSoft)
+scene.add(dirLight);
+scene.add(dirLight.target);
+
+// 47回目: 影の範囲(影用カメラ)を、読み込んだ敷地の大きさに合わせる。既定の±5mのままだと、敷地のごく一部にしか影が出ず、構台の角だけ三角形の影が出た。
+//   配置モードと同じ考え方(光は敷地の中心の斜め上から・影の範囲=敷地の半径+余裕・biasは影の1マスの実距離に比例)
+function fitLightToScene(box) {
+  const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
+  const range = Math.max(30, sz.x / 2, sz.z / 2) + 10;
+  // 太陽の向き: 斜め上(高さ約53°)から。真上に近いと重機の影が足元に隠れて見えない。向きは固定(このビューアでは動かせない)。
+  const dist = 300, dir = new THREE.Vector3(0.6, 0.8, -0.5).normalize();
+  dirLight.target.position.set(c.x, 0, c.z);
+  dirLight.target.updateMatrixWorld();
+  dirLight.position.set(c.x + dir.x * dist, dir.y * dist, c.z + dir.z * dist);
+  // 影の解像度: 敷地が広い時は大きい影マップ(4096。GPUが対応する範囲で)
+  const msz = Math.min(4096, renderer.capabilities.maxTextureSize || 2048);
+  if (dirLight.shadow.mapSize.width !== msz) { dirLight.shadow.mapSize.set(msz, msz); if (dirLight.shadow.map) { dirLight.shadow.map.dispose(); dirLight.shadow.map = null; } }
+  const sc = dirLight.shadow.camera;
+  sc.left = -range; sc.right = range; sc.top = range; sc.bottom = -range; sc.near = 1; sc.far = dist + range + 200;
+  sc.updateProjectionMatrix();
+  const texel = (sc.right - sc.left) / dirLight.shadow.mapSize.width;
+  dirLight.shadow.bias = -texel * (0.003 + Math.min(texel * 0.02, 0.012));
+  dirLight.shadow.normalBias = Math.max(0.02, texel * 0.5); // 斜面の縞(シャドウアクネ)対策: 面の法線方向に少しずらして影を判定する
+  // 物は動かず光も固定なので、影は読み込み後に1回だけ作る(毎フレーム作らない=タブレットでも軽い)
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
+}
+
+// 空色スライダー
+document.getElementById('shadow-toggle').addEventListener('change', function(e) {
+  dirLight.castShadow = e.target.checked;
+  renderer.shadowMap.needsUpdate = true;
+});
+document.getElementById('sky-slider').addEventListener('input', function(e) {
+  const t = parseInt(e.target.value, 10) / 100;
+  scene.background.lerpColors(COLOR_SKY_GRAY, COLOR_SKY_BLUE, t);
+  ambLight.intensity = 0.55 + t * 0.15;
+  dirLight.intensity = 0.75 + t * 0.15;
+});
+
+// ============================================================
+// 3. マウスポインターインジケーター（ちょい大きめ）
+// ============================================================
+const COLOR_GROUND = 0xffd54f;
+const COLOR_OBJECT = 0x4fc3f7;
+
+const pointerGroup = new THREE.Group();
+pointerGroup.visible = false;
+
+const ringGeo = new THREE.RingGeometry(0.85, 1.2, 32);
+ringGeo.rotateX(-Math.PI / 2);
+const dotGeo = new THREE.CircleGeometry(0.3, 20);
+dotGeo.rotateX(-Math.PI / 2);
+
+const pointerMats = [];
+[ringGeo, dotGeo].forEach(g => {
+  const mat = new THREE.MeshBasicMaterial({
+    color: COLOR_GROUND,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+    depthWrite: false
+  });
+  const m = new THREE.Mesh(g, mat);
+  m.renderOrder = 999;
+  m.raycast = function() {};
+  pointerGroup.add(m);
+  pointerMats.push(mat);
+});
+scene.add(pointerGroup);
+
+function setPointerColor(hex) {
+  pointerMats.forEach(m => m.color.setHex(hex));
+}
+
+// ============================================================
+// 4. トースト表示
+// ============================================================
+let tTimer = null;
+function showToast(msg, ms = 2000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(tTimer);
+  tTimer = setTimeout(() => { el.style.opacity = '0'; }, ms);
+}
+
+// ============================================================
+// 5. レイキャスト & フォーカス移動ロジック
+// ============================================================
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+const terrainMeshes = [];
+const placedObjects = [];
+const balloonBillboards = [];
+
+let pointerDownPos = { x: 0, y: 0 };
+let currentTargetHit = null;
+
+let moveAnim = null;
+const MOVE_MS = 450;
+const MOVE_DIST_K = 0.45;
+const MOVE_MIN_DIST = 3.5;
+
+function startFocusMove(targetPoint) {
+  const p0 = camera.position.clone();
+  const q0 = controls.target.clone();
+  const dist = p0.distanceTo(targetPoint);
+  const dir = p0.clone().sub(targetPoint);
+  
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0.6, 1);
+  dir.normalize();
+  if (dir.y < 0.08) { dir.y = 0.08; dir.normalize(); }
+
+  const newDist = Math.min(dist, Math.max(MOVE_MIN_DIST, dist * MOVE_DIST_K));
+  moveAnim = {
+    p0,
+    q0,
+    p1: targetPoint.clone().addScaledVector(dir, newDist),
+    q1: targetPoint.clone(),
+    t0: performance.now()
+  };
+  pointerGroup.visible = false;
+}
+
+function updateFocusMove() {
+  if (!moveAnim) return;
+  const t = Math.min(1, (performance.now() - moveAnim.t0) / MOVE_MS);
+  const k = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  
+  camera.position.lerpVectors(moveAnim.p0, moveAnim.p1, k);
+  controls.target.lerpVectors(moveAnim.q0, moveAnim.q1, k);
+  controls.update();
+
+  if (t >= 1) moveAnim = null;
+}
+
+function cancelFocusMove() { moveAnim = null; }
+container.addEventListener('pointerdown', cancelFocusMove);
+container.addEventListener('wheel', cancelFocusMove, { passive: true });
+
+// ============================================================
+// 6. コメント吹き出し（ビルボード）生成処理
+// ============================================================
+function createTextBalloon(text, scaleMultiplier = 1) {
+  // 47回目: 配置モードの吹き出し(createTextBalloonMesh)と同じ作りに変更。白地の箱+しっぽ・文字の大きさに合わせた寸法・赤い支柱と足元の点。
+  //   大きさ(1〜3倍)は配置モードと同じく、ビルボード(箱)全体の拡大で表す。ビルボードは足元(支柱の先)を基準に拡大する。
+  const group = new THREE.Group();
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const lines = String(text).split('\n');
+  const FONT = "bold 32px 'Segoe UI', Meiryo, sans-serif";
+  ctx.font = FONT;
+  let maxWidth = 0;
+  lines.forEach(line => { const w = ctx.measureText(line).width; if (w > maxWidth) maxWidth = w; });
+  const padding = 20, tailHeight = 30, tailWidth = 30, lineHeight = 40;
+  const boxWidth = Math.max(maxWidth, 40) + padding * 2;
+  const boxHeight = lines.length * lineHeight + padding * 2;
+  canvas.width = Math.ceil(boxWidth);
+  canvas.height = Math.ceil(boxHeight + tailHeight);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 4;
+  const r = 10;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(boxWidth - r, 0);
+  ctx.quadraticCurveTo(boxWidth, 0, boxWidth, r);
+  ctx.lineTo(boxWidth, boxHeight - r);
+  ctx.quadraticCurveTo(boxWidth, boxHeight, boxWidth - r, boxHeight);
+  ctx.lineTo(boxWidth / 2 + tailWidth / 2, boxHeight);
+  ctx.lineTo(boxWidth / 2, boxHeight + tailHeight);
+  ctx.lineTo(boxWidth / 2 - tailWidth / 2, boxHeight);
+  ctx.lineTo(r, boxHeight);
+  ctx.quadraticCurveTo(0, boxHeight, 0, boxHeight - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#111';
+  ctx.textBaseline = 'top';
+  ctx.font = FONT;
+  lines.forEach((line, i) => { ctx.fillText(line, padding, padding + i * lineHeight); });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const aspect = canvas.width / canvas.height;
+  const scaleY = (boxHeight + tailHeight) / 50;
+  const scaleX = scaleY * aspect;
+  const planeGeo = new THREE.PlaneGeometry(scaleX, scaleY);
+  planeGeo.translate(0, scaleY / 2, 0);
+  const material = new THREE.MeshLambertMaterial({ map: texture, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide });
+  const billboard = new THREE.Mesh(planeGeo, material);
+  billboard.castShadow = false; // 吹き出しは常にこちらを向くので、影は作らない(影を1回しか作らないため)
+  billboard.userData.isBillboard = true;
+  billboard.position.y = 0.5;
+  const m = Math.max(1, Math.min(3, scaleMultiplier || 1));
+  billboard.scale.set(m, m, 1);
+  group.add(billboard);
+  balloonBillboards.push(billboard);
+
+  const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 16), new THREE.MeshLambertMaterial({ color: 0xff0000 }));
+  dot.position.y = 0.025;
+  dot.castShadow = true;
+  group.add(dot);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5, 8), new THREE.MeshLambertMaterial({ color: 0xff0000 }));
+  pole.position.y = 0.25;
+  pole.castShadow = true;
+  group.add(pole);
+  return group;
+}
+
+// ============================================================
+// 7. マウスイベント
+// ============================================================
+window.addEventListener('contextmenu', e => e.preventDefault());
+
+container.addEventListener('pointerdown', e => {
+  pointerDownPos = { x: e.clientX, y: e.clientY };
+});
+
+container.addEventListener('pointermove', e => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  if (e.buttons !== 0 || moveAnim) {
+    pointerGroup.visible = false;
+    return;
+  }
+
+  raycaster.setFromCamera(mouse, camera);
+
+  const objHits = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh);
+  if (objHits.length > 0) {
+    const h = objHits[0];
+    currentTargetHit = { type: 'object', point: h.point, normal: h.face ? h.face.normal : new THREE.Vector3(0,1,0), obj: h.object };
+    updatePointer(h.point, currentTargetHit.normal, COLOR_OBJECT);
+    return;
+  }
+
+  const terrHits = raycaster.intersectObjects(terrainMeshes, true).filter(h => h.object.isMesh);
+  if (terrHits.length > 0) {
+    const h = terrHits[0];
+    const normal = h.face ? h.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize() : new THREE.Vector3(0,1,0);
+    currentTargetHit = { type: 'ground', point: h.point, normal: normal, obj: h.object };
+    updatePointer(h.point, normal, COLOR_GROUND);
+    return;
+  }
+
+  currentTargetHit = null;
+  pointerGroup.visible = false;
+});
+
+function updatePointer(point, normal, colorHex) {
+  setPointerColor(colorHex);
+  const n = normal.clone();
+  if (n.y < 0) n.negate();
+  
+  const dist = camera.position.distanceTo(point);
+  const scale = Math.max(0.2, dist * 0.026);
+  
+  pointerGroup.position.copy(point).addScaledVector(n, 0.05);
+  pointerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+  pointerGroup.scale.setScalar(scale);
+  pointerGroup.visible = true;
+}
+
+container.addEventListener('pointerup', e => {
+  if (e.button === 1) {
+    if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) >= 5) return;
+    
+    if (currentTargetHit) {
+      if (currentTargetHit.type === 'object') {
+        showToast('そこには移動できません');
+      } else {
+        startFocusMove(currentTargetHit.point);
+      }
+    } else {
+      showToast('そこには移動できません');
+    }
+  }
+});
+
+document.addEventListener('mouseleave', () => {
+  pointerGroup.visible = false;
+  currentTargetHit = null;
+});
+
+// ============================================================
+// 8. シーン構築
+// ============================================================
+function initScene() {
+  if (INLINE_GLB_BASE64 && INLINE_GLB_BASE64.length > 0) {
+    const binary = atob(INLINE_GLB_BASE64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    const loader = new THREE.GLTFLoader();
+    loader.parse(bytes.buffer, '', (gltf) => {
+      const root = gltf.scene;
+      root.traverse(child => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          // 47回目: 面をわずかに奥へ寄せて、同じ位置にあるエッジ線(細い線)が面に隠れないようにする
+          (Array.isArray(child.material) ? child.material : [child.material]).forEach(m => { if (m) { m.polygonOffset = true; m.polygonOffsetFactor = 1; m.polygonOffsetUnits = 1; } });
+          if (child.name.includes('Fixed') || child.name.includes('Existing') || child.name.includes('Placement')) {
+            placedObjects.push(child);
+          } else {
+            terrainMeshes.push(child);
+          }
+        }
+      });
+      scene.add(root);
+
+      if (Array.isArray(INLINE_ANNOTATIONS)) {
+        INLINE_ANNOTATIONS.forEach(ann => {
+          const balloon = createTextBalloon(ann.text || '', ann.scaleMultiplier || 1);
+          balloon.position.set(ann.x || 0, ann.y || 0, ann.z || 0);
+          scene.add(balloon);
+          balloon.traverse(c => { if (c.isMesh) placedObjects.push(c); });
+        });
+      }
+
+      const box = new THREE.Box3().setFromObject(root);
+      fitLightToScene(box); // 47回目
+      const center = box.getCenter(new THREE.Vector3());
+      controls.target.copy(center);
+      camera.position.set(center.x, center.y + 20, center.z + 30);
+      controls.update();
+    });
+  } else {
+    buildDemoScene();
+  }
+}
+
+function buildDemoScene() {
+  const groundGeo = new THREE.PlaneGeometry(60, 60);
+  groundGeo.rotateX(-Math.PI / 2);
+  const groundMat = new THREE.MeshLambertMaterial({ color: 0x3d352e });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.receiveShadow = true;
+  scene.add(ground);
+  terrainMeshes.push(ground);
+
+  const pitGeo = new THREE.CylinderGeometry(10, 7, 4, 32, 1, true);
+  const pitMat = new THREE.MeshLambertMaterial({ color: 0x5a4d41, side: THREE.DoubleSide });
+  const pit = new THREE.Mesh(pitGeo, pitMat);
+  pit.position.y = -2;
+  pit.receiveShadow = true;
+  scene.add(pit);
+  terrainMeshes.push(pit);
+
+  const bottomGeo = new THREE.CircleGeometry(7, 32);
+  bottomGeo.rotateX(-Math.PI / 2);
+  const bottomMat = new THREE.MeshLambertMaterial({ color: 0x332b24 });
+  const bottom = new THREE.Mesh(bottomGeo, bottomMat);
+  bottom.position.y = -4;
+  bottom.receiveShadow = true;
+  scene.add(bottom);
+  terrainMeshes.push(bottom);
+
+  const machGroup = new THREE.Group();
+  
+  const track = new THREE.Mesh(new THREE.BoxGeometry(3, 0.8, 4.2), new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  track.position.y = 0.4;
+  track.castShadow = true;
+  machGroup.add(track);
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.4, 2.8), new THREE.MeshLambertMaterial({ color: 0xffa000 }));
+  body.position.set(0, 1.5, -0.2);
+  body.castShadow = true;
+  machGroup.add(body);
+
+  const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.5, 0.5), new THREE.MeshLambertMaterial({ color: 0xffa000 }));
+  boom.position.set(0, 2.5, 1.8);
+  boom.rotation.x = Math.PI / 4;
+  boom.castShadow = true;
+  machGroup.add(boom);
+
+  machGroup.position.set(6, 0, 4);
+  scene.add(machGroup);
+  machGroup.traverse(c => { if (c.isMesh) placedObjects.push(c); });
+
+  const demoBalloon1 = createTextBalloon("0.7m³ バックホウ配置\n旋回注意！", 1);
+  demoBalloon1.position.set(6, 0, 4);
+  scene.add(demoBalloon1);
+  demoBalloon1.traverse(c => { if (c.isMesh) placedObjects.push(c); });
+
+  const demoBalloon2 = createTextBalloon("深さ GL-4.00m\n床付け面", 0.9);
+  demoBalloon2.position.set(0, -4, 0);
+  scene.add(demoBalloon2);
+  demoBalloon2.traverse(c => { if (c.isMesh) placedObjects.push(c); });
+}
+
+// ============================================================
+// 9. アニメーションループ & リサイズ
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+  updateFocusMove();
+
+  // コメント吹き出しのビルボード更新
+  balloonBillboards.forEach(b => {
+    b.quaternion.copy(camera.quaternion);
+  });
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+initScene();
+animate();
+</script>
+</body>
+</html>

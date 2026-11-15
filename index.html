@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow"> <!-- 47回目: 検索エンジンに載せないでほしいというお願い(守らないクローラーもいる。アクセス制限ではない) -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Voldia v0004</title>
 <!-- Voldia v0067系
@@ -505,6 +506,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 .btn-cls.btn-cls-main{padding:6px 16px;font-size:.88em;font-weight:700;background:#b71c1c;border-color:#e57373;color:#fff;}
 .btn-cls.btn-cls-main:hover{background:#d32f2f;border-color:#ef9a9a;color:#fff;}
 </style>
+<link rel="stylesheet" href="css/voldia_gm_intro.css"> <!-- 47回目: 3D生成方法ダイアログの2列レイアウト・イラスト連動(#gm-styleより後に読む) -->
 </head>
 <body>
 <div id="boot-loading" role="status" aria-live="polite"><div class="bl-spin"></div><div class="bl-text">読み込み中……</div></div>
@@ -1023,6 +1025,16 @@ D&D or クリックでロードしてください</p>
      設定値と作成方法は.voldに保存される(作成方法=calcMode)。 -->
 <div id="gm-overlay">
   <div id="gm-dlg" role="dialog" aria-modal="true">
+    <!-- 47回目: 左のイラスト(断面図)。データは data/voldia_intro_img.js、動きは js/voldia_gm_intro.js -->
+    <aside class="gm-intro" id="gm-intro" aria-hidden="true">
+      <div class="gm-intro-inner">
+        <div class="gm-intro-fig" id="gm-intro-fig">
+          <img id="gm-intro-img" alt="断面図: ①現状地盤GL ②捨てコン+砕石 ③余掘り ④法面角度" draggable="false">
+          <i class="gm-hl" id="gm-hl" aria-hidden="true"></i>
+        </div>
+      </div>
+    </aside>
+    <div class="gm-main"><!-- 既存の行・注記・フッタをここで包む(中身・id・クラスは従来のまま) -->
     <div class="gm-row">
       <div class="gm-lab">作成方法</div>
       <div class="gm-ctl">
@@ -1067,6 +1079,7 @@ D&D or クリックでロードしてください</p>
       <button type="button" id="gm-back">戻る</button>
       <button type="button" id="gm-start">作図開始</button>
     </div>
+    </div><!-- /.gm-main -->
   </div>
 </div><!-- v0141: #gm-overlay をここで閉じる。従来は#gm-tipの後ろまで開いたままで、#gm-tip・#lx-overlayが「非表示の#gm-overlayの子」になっていた -->
 <!-- v0141(41回目): GLB出力/LANDXML出力の確認ダイアログ。原点測点(複数ある時だけ選べる)と北の向きを見せてから出力する。 -->
@@ -1120,6 +1133,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0159(47回目): ①3D生成方法ダイアログに断面イラスト(左)を追加・設定項目に①〜④の番号・入力中は該当部分が光る・通常計算ではイラストが左へ収納(css/voldia_gm_intro.css・data/voldia_intro_img.js・js/voldia_gm_intro.js) ②右クリックで戻る/キャンセル(3D生成方法ダイアログ・測点設置) ③データ出力で掘削深さ10m超の警告 ④robots noindex ⑤voldia3d.js r129=形状クリーニング(許容差5mm)・合体の全体チェック・同一平面の三角形を形を変えずに間引き ⑥同一形状(同じ座標・同じ色)は作図時に除外・法面ボタンの点灯修正。配置モードは voldia_placement_v0093.html。 -->
 <!-- v0158(47回目): ①形状破綻の対策 voldia3d.js r128=3D化の入口と合体した輪郭に「形状のクリーニング」(許容差5mm)・合体した全体の3Dを合体なしと比べて悪ければ合体を取りやめ ②同一形状(同じ座標・同じ色)は作図の時点で除外(M3) ③法面ボタンの点灯判定を小数の角度でも効くよう修正(P1)。配置モードは voldia_placement_v0092.html(HTML書き出しに線と作業半径を追加)。 -->
 <!-- v0157(47回目): 名前のダブルクリック編集が効かなかった不具合を修正(1回目のクリックで一覧が作り直され、dblclickの届き先が消えていた→クリックの2回目を検出して編集)。配置モードは voldia_placement_v0091.html(足場編集のトースト最前面・初期スクロール・HTML書き出しの修正)。 -->
 <!-- v0156(47回目): ①左UIの「並び」ソートを廃止(A3) ②オブジェクトをつまみ(⠿)のドラッグで並び替え(A1) ③名前のダブルクリック編集に重複チェック(A2) ④3D結果画面: グレーアウト時の説明をボタン別の2行に(B1)・3D_DXF出力ボタンをデータ出力の下へ(B2) ⑤voldia3d.js r127: 偽の床・逆勾配の修正(合体の安全チェック強化)。 -->
@@ -1579,5 +1593,7 @@ window.HELPGUIDE_CFG = {
   });
 })();
 </script>
+<script src="data/voldia_intro_img.js"></script> <!-- 47回目: 断面イラスト(WebP/base64) -->
+<script src="js/voldia_gm_intro.js"></script> <!-- 47回目: 3D生成方法ダイアログのイラスト連動 -->
 </body>
 </html>

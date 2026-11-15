@@ -5238,7 +5238,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r128(base:VoldiaM r069)"; // r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。 r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r129(base:VoldiaM r069)"; // r129(47回目): 同一平面の三角形を形を変えずに減らす(_decimatePlanarMesh=誤差0のエッジ縮約)。 r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。 r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5889,7 +5889,79 @@ function _clipTriOutsideGrayPrisms(tri, prisms){
   polys.forEach(pg => { for(let i=1;i+1<pg.length;i++) out.push([pg[0], pg[i], pg[i+1]]); });
   return out;
 }
+
+// ============================================================
+// r129(47回目): 同一平面の三角形を、形を変えずに減らす「平面メッシュの間引き」(マスター指摘の問題7)
+//   背景: 3Dイメージ上で同一平面に見える法面が、必要以上に細かい三角形に分かれていた(層ごとの分割・隣の図形の頂点・合体の継ぎ目に残った頂点が原因)。
+//         本来、四角い法面は2枚の三角形で足りる。三角形が多いと、PDF・Excel・GLB・LandXMLの面が増え、検算もしにくい。
+//   方式: 誤差0のエッジ縮約。頂点vを、次の場合だけ隣の頂点uへ寄せる(vを消す)。形・体積・面の向きは変わらない。
+//     (a) vの周りが全部同じ平面(内部の頂点) → どの隣へ寄せてもよい
+//     (b) vが、2つの平面(または開いた縁)の境目の「一直線の途中」にある(共線) → 境目に沿った隣(2つの端)のどちらかへ寄せる
+//     3つ以上の面が集まる角・折れ曲がる所・曲がる境目は寄せない。
+//   安全条件: 寄せた後の三角形が裏返らない(法線の内積≈1)・つぶれない・非多様体(辺が3枚以上)を作らない(リンク条件)。1つでも破れる時はその頂点は寄せない。
+//   使う側: buildManifoldUnionGeom の結果(cyan/redの面リスト)。positionsは書き換えない(使われなくなった頂点が残るだけ。他の配列から番号で参照されても壊れない)。window._planarDecimate=false で無効。
+// ============================================================
+function _decimatePlanarMesh(positions, lists, opt){
+  const EPS = (opt && opt.eps) || 1e-4, NRM = 1 - 1e-6, K = 4294967296;
+  const P = positions, tri = [], lst = [];
+  lists.forEach((I, li) => { if(!I) return; for(let t=0;t+2<I.length;t+=3){ tri.push([I[t], I[t+1], I[t+2]]); lst.push(li); } });
+  const T = tri.length; if(T < 4) return {before:T, after:T, collapsed:0};
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]], len=a=>Math.sqrt(dot(a,a));
+  const pos = v => [P[v*3], P[v*3+1], P[v*3+2]];
+  const nrm = (a,b,c) => { const A=pos(a),B=pos(b),C=pos(c); const n=cross(sub(B,A),sub(C,A)); const L=len(n); return L>0 ? [n[0]/L,n[1]/L,n[2]/L,L/2] : [0,0,0,0]; };
+  // 領域: 辺を共有し、同じリスト・同じ平面(法線がほぼ同じ・頂点が平面上)の三角形をつなぐ
+  const alive = new Uint8Array(T).fill(1), tn = tri.map(t => nrm(t[0],t[1],t[2]));
+  const edges = new Map();
+  tri.forEach((t,i) => { for(let k=0;k<3;k++){ const a=t[k], b=t[(k+1)%3]; const key = a<b ? a*K+b : b*K+a; let l=edges.get(key); if(!l){ l=[]; edges.set(key,l); } l.push(i); } });
+  const par = tri.map((_,i)=>i), find = i => { while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; };
+  const planeDist = (t, n, p0) => Math.max(...tri[t].map(v => Math.abs(dot(sub(pos(v),p0), n))));
+  edges.forEach(l => { if(l.length !== 2) return; const [x,y]=l; if(lst[x]!==lst[y] || tn[x][3]===0 || tn[y][3]===0) return;
+    if(dot(tn[x],tn[y]) >= NRM && planeDist(y, tn[x], pos(tri[x][0])) < EPS) par[find(x)] = find(y); });
+  const reg = tri.map((_,i)=>find(i));
+  const vinc = new Map(); tri.forEach((t,i) => t.forEach(v => { if(!vinc.has(v)) vinc.set(v,new Set()); vinc.get(v).add(i); }));
+  let collapsed = 0;
+  const neighbors = v => { const nb = new Map(); for(const t of vinc.get(v)){ if(!alive[t]) continue; for(const u of tri[t]) if(u!==v){ if(!nb.has(u)) nb.set(u,[]); nb.get(u).push(t); } } return nb; };
+  const tryVertex = v => {
+    const inc = [...vinc.get(v)].filter(t => alive[t]); if(!inc.length) return false;
+    if(new Set(inc.map(t=>reg[t])).size > 2 || inc.some(t => tn[t][3]===0)) return false;
+    const nb = neighbors(v); const crease = [];
+    for(const [u,ts] of nb){ if(ts.length===1) crease.push(u); else if(ts.length===2){ if(reg[ts[0]]!==reg[ts[1]]) crease.push(u); } else return false; }
+    let cands;
+    if(crease.length===0) cands = [...nb.keys()];
+    else if(crease.length===2){ const A=pos(crease[0]), B=pos(crease[1]), V=pos(v), ab=sub(B,A), av=sub(V,A), L2=dot(ab,ab); if(L2<=0) return false;
+      const t=dot(av,ab)/L2; if(t<=1e-6 || t>=1-1e-6 || len(cross(av,ab))/Math.sqrt(L2) > EPS) return false; cands = crease.slice(); }
+    else return false;
+    for(const u of cands){
+      const S = nb.get(u), apex = new Set(S.map(t => tri[t].find(x => x!==v && x!==u)));
+      const Nu = new Set(); for(const t of vinc.get(u)){ if(!alive[t]) continue; for(const x of tri[t]) if(x!==u && x!==v) Nu.add(x); }
+      let common = 0; for(const x of nb.keys()) if(x!==u && Nu.has(x)) common++;
+      if(common !== apex.size) continue; // リンク条件(非多様体を作らない)
+      let good = true;
+      for(const t of inc){ if(S.includes(t)) continue; const nt = tri[t].map(x => x===v?u:x); const n2 = nrm(nt[0],nt[1],nt[2]); if(n2[3] < 1e-12 || dot(n2, tn[t]) < NRM){ good=false; break; } }
+      if(!good) continue;
+      for(const t of inc){ if(S.includes(t)){ alive[t]=0; tri[t].forEach(x => vinc.get(x).delete(t)); } else { tri[t] = tri[t].map(x => x===v?u:x); vinc.get(v).delete(t); vinc.get(u).add(t); } }
+      collapsed++; return true;
+    }
+    return false;
+  };
+  const verts = [...vinc.keys()];
+  for(let pass=0; pass<30; pass++){ let any=false; for(const v of verts){ if(vinc.get(v).size && tryVertex(v)) any=true; } if(!any) break; }
+  let after = 0; const out = lists.map(() => []);
+  for(let i=0;i<T;i++) if(alive[i]){ out[lst[i]].push(tri[i][0], tri[i][1], tri[i][2]); after++; }
+  return {before:T, after, collapsed, lists: out.map((a,li) => (lists[li] && lists[li].constructor !== Array) ? new lists[li].constructor(a) : a)};
+}
+// r129(47回目): 本体(_buildManifoldUnionGeomRaw)の結果に、平面メッシュの間引き(同一平面の余分な三角形を、形を変えずに減らす)を通す。
 async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
+  const r = await _buildManifoldUnionGeomRaw(frustums, isDoboku, yamadomeOffsetX, yamadomeOffsetY, opts);
+  if(r && r.positions && window._planarDecimate !== false){
+    try{
+      const d = _decimatePlanarMesh(r.positions, [r.cyanIndices, r.redIndices]);
+      if(d && d.collapsed > 0){ r.cyanIndices = d.lists[0]; r.redIndices = d.lists[1]; console.log(`[DECIMATE] 同一平面の三角形を間引き: ${d.before}→${d.after}面(形は変わりません)`); }
+    }catch(e){ console.warn('[DECIMATE] 間引きに失敗(そのまま使います)', e); }
+  }
+  return r;
+}
+async function _buildManifoldUnionGeomRaw(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
   if(!frustums || !frustums.length) return null;
   // r098(34回目セッション、Land Logic用): 通常はGL(y=0)の蓋を除去する(土量計算の
   // 「上から覗き込む」表示仕様)が、Land Logic側は既存躯体グループに対して

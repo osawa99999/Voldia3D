@@ -1,0 +1,68 @@
+/* ============================================================================
+   3D生成方法ダイアログ(#gm-dlg): 左=断面イラスト / 右=設定項目 の2列。
+   ・通常計算のときは、イラストが左へスライドして収納され、ダイアログが今の幅に縮む(土量計算に戻すと再び出る)。
+   ・入力欄/ボタンにフォーカス(またはマウスオーバー)すると、イラストの該当部分だけが明るくなり(スポットライト)、ほかは暗くなる。
+   既存の #gm-dlg 用CSS(本体HTMLのstyle内)より後に読み込むこと(幅や並びを上書きする)。
+   ============================================================================ */
+#gm-dlg{
+  --gm-intro-w:390px;                    /* イラストの表示幅。高さは 618:567 の比率で自動 */
+  --gm-ease:cubic-bezier(.32,.72,.2,1);
+  display:flex; align-items:center;
+  width:fit-content; max-width:100%;     /* 幅は中身で決まる(イラストが出入りすると連続的に変わる) */
+}
+#gm-dlg .gm-main{ flex:0 0 auto; width:448px; max-width:100%; min-width:0; }   /* 448px = 今のダイアログの内側の幅(500-枠2*2-余白24*2)。通常計算では今と同じ500pxになる */
+
+/* ---- 左: イラスト ---- */
+#gm-dlg .gm-intro{
+  flex:0 0 auto; width:var(--gm-intro-w); margin-right:30px; overflow:hidden;
+  transition:width .7s var(--gm-ease), margin-right .7s var(--gm-ease), opacity .5s ease;
+}
+#gm-dlg .gm-intro-inner{
+  width:var(--gm-intro-w);
+  transition:transform .7s var(--gm-ease), filter .7s ease;
+}
+#gm-dlg .gm-intro-fig{
+  position:relative; width:100%; aspect-ratio:618/567; overflow:hidden;
+  border-radius:15.2% / 16.6%;          /* 原画の角丸(実測で半径約94px / 618x567)に合わせる */
+}
+#gm-dlg .gm-intro-fig img{ display:block; width:100%; height:100%; user-select:none; -webkit-user-drag:none; pointer-events:none; }
+
+/* 通常計算: 左へスライドして消える */
+#gm-dlg.gm-intro-off .gm-intro{ width:0; margin-right:0; opacity:0; }
+#gm-dlg.gm-intro-off .gm-intro-inner{ transform:translateX(-40px) scale(.95); filter:blur(3px); }
+
+/* ---- スポットライト(画像の上に重ねる。位置は画像に対する%なので、拡大縮小してもズレない) ---- */
+#gm-dlg .gm-hl{
+  position:absolute; box-sizing:border-box; pointer-events:none; opacity:0;
+  left:var(--hl-l,0%); top:var(--hl-t,0%); width:var(--hl-w,0%); height:var(--hl-h,0%);
+  border:2.5px solid #fa9219; border-radius:calc(var(--gm-intro-w) * .035);
+  box-shadow:0 0 14px 2px rgba(250,146,25,.8), 0 0 0 100vmax rgba(8,10,14,.58);   /* 外側の大きな影で、ほかの部分を暗くする */
+  transition:left .38s var(--gm-ease), top .38s var(--gm-ease), width .38s var(--gm-ease), height .38s var(--gm-ease), opacity .25s ease;
+}
+#gm-dlg .gm-intro-fig[data-hl] .gm-hl{ opacity:1; animation:gmHlPulse 1.5s ease-in-out infinite; }
+@keyframes gmHlPulse{ 0%,100%{ border-color:#fa9219; } 50%{ border-color:#ffc477; } }
+
+/* ---- 右: 番号バッジ(イラストの丸と同じ色 #fa9219)。イラストを収納している間は小さく消える ---- */
+#gm-dlg .gm-lab{ display:inline-flex; align-items:center; }
+#gm-dlg .gm-no{
+  display:inline-flex; align-items:center; justify-content:center; flex:none;
+  width:1.55em; height:1.55em; margin-right:.6em; border-radius:50%;
+  background:#fa9219; color:#111; font-weight:800; font-size:.82em; line-height:1;
+  transition:width .45s var(--gm-ease), margin-right .45s var(--gm-ease), opacity .3s ease, transform .45s var(--gm-ease), box-shadow .3s ease;
+}
+#gm-dlg.gm-intro-off .gm-no{ width:0; margin-right:0; opacity:0; transform:scale(.2); }
+#gm-dlg .gm-row.gm-row-hl .gm-no{ box-shadow:0 0 0 3px rgba(250,146,25,.35), 0 0 10px rgba(250,146,25,.8); transform:scale(1.08); }
+#gm-dlg .gm-row{ position:relative; }
+#gm-dlg .gm-row.gm-row-hl{ background:linear-gradient(90deg, rgba(250,146,25,.11), rgba(250,146,25,0) 70%); }
+
+/* ---- 狭い画面(iPad縦など)では、イラストを出さず今と同じ1列にする ---- */
+@media (max-width:820px){
+  #gm-dlg{ width:min(500px,100%); }
+  #gm-dlg .gm-intro{ display:none; }
+  #gm-dlg .gm-main{ width:100%; }
+  #gm-dlg .gm-no{ display:none; }
+}
+/* 動きを減らす設定の端末では、アニメーションを止める */
+@media (prefers-reduced-motion:reduce){
+  #gm-dlg .gm-intro,#gm-dlg .gm-intro-inner,#gm-dlg .gm-hl,#gm-dlg .gm-no{ transition:none !important; animation:none !important; }
+}

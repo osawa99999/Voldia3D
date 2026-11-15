@@ -692,6 +692,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     toast(_isFirstSurveyPt ? '📍 測点が設置されたので、北方向を設定できます' : '📍 測点設置完了', 1500);
   });
   document.getElementById('sv-dist').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('sv-ok').click();});
+// 47回目: 測点設置の入力画面で右クリック=キャンセル(既定の右クリックメニューは出さない)
+document.getElementById('survey-dialog').addEventListener('contextmenu',e=>{e.preventDefault();document.getElementById('sv-cancel').click();});
   // r025(マスター指示⑥): テンキーボタン。sv-distへ直接数字を追記/クリアする(小数点は1個まで)
   document.querySelectorAll('.sv-num-btn').forEach(btn=>{
     btn.addEventListener('click',()=>{
@@ -1518,6 +1520,8 @@ function _gmInit(){
   _gmEl('gm-mode-normal').addEventListener('click',()=>_gmApplyMode('normal'));
   _gmEl('gm-mode-doboku').addEventListener('click',()=>_gmApplyMode('doboku'));
   _gmEl('gm-back').addEventListener('click',()=>{_gmEl('gm-overlay').style.display='none';_gmHideTip();}); // 2D画面へ戻る
+  // 47回目: 3D生成方法ダイアログで右クリック=戻る(キャンセル)。既定の右クリックメニューは出さない
+  _gmEl('gm-overlay').addEventListener('contextmenu',e=>{e.preventDefault();_gmEl('gm-back').click();});
   _gmEl('gm-start').addEventListener('click',_gmStart);
   // ヘルプ: マウスはホバー、タッチ端末(ホバー無し)はタップで3.5秒表示。法面角度は既存のホバー表示(slope-hover-tip)をそのまま使う
   document.querySelectorAll('#gm-dlg [data-gmtip]').forEach(t=>{
