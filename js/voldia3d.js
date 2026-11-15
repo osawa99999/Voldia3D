@@ -4091,7 +4091,7 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
   console.log('[CP-5] buildManifoldUnionGeom 呼び出し直前');
   let result = excavFrustumsForMesh.length
     ? (isDoboku
-        ? await buildManifoldUnionGeom(excavFrustumsForMesh, isDoboku, yamadomeOffsetX, yamadomeOffsetY, {grayFrustums: structFrustumsForMesh}) // r126: 紫の壁ハッチからグレー(既存躯体)接触部分を除くため渡す
+        ? await buildManifoldUnionGeom(excavFrustumsForMesh, isDoboku, yamadomeOffsetX, yamadomeOffsetY, {grayFrustums: structFrustumsForMesh, decimateTolMm: (typeof window._planarDecimateTolMm==='number' ? window._planarDecimateTolMm : 5)}) // r126: 紫の壁ハッチからグレー(既存躯体)接触部分を除くため渡す
         : await buildSimpleExtrudeGeom(excavFrustumsForMesh))
     : null;
   console.log('[CP-6] buildManifoldUnionGeom/buildSimpleExtrudeGeom 呼び出し直後 result=', !!result);
@@ -5238,7 +5238,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r129(base:VoldiaM r069)"; // r129(47回目): 同一平面の三角形を形を変えずに減らす(_decimatePlanarMesh=誤差0のエッジ縮約)。 r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。 r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+const VOLDIA3D_VER = "Voldia-3D-r130(base:VoldiaM r069)"; // r130(48回目): 問題7=許容つきの間引き(_guardedDecimateMesh。許容5mm=3Dイメージだけ。window._planarDecimateTolMm=0で誤差0=r129に戻る。Land Logic・欠陥スキャンは誤差0のまま)。 r129(47回目): 同一平面の三角形を形を変えずに減らす(_decimatePlanarMesh=誤差0のエッジ縮約)。 r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。 r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5899,6 +5899,7 @@ function _clipTriOutsideGrayPrisms(tri, prisms){
 //     (b) vが、2つの平面(または開いた縁)の境目の「一直線の途中」にある(共線) → 境目に沿った隣(2つの端)のどちらかへ寄せる
 //     3つ以上の面が集まる角・折れ曲がる所・曲がる境目は寄せない。
 //   安全条件: 寄せた後の三角形が裏返らない(法線の内積≈1)・つぶれない・非多様体(辺が3枚以上)を作らない(リンク条件)。1つでも破れる時はその頂点は寄せない。
+//   (r130: 3Dイメージだけは、さらに許容つきの間引き=_guardedDecimateMesh を使う。この関数=誤差0は、許容0の呼び出しと、許容つきが失敗した時の代わりに使う)
 //   使う側: buildManifoldUnionGeom の結果(cyan/redの面リスト)。positionsは書き換えない(使われなくなった頂点が残るだけ。他の配列から番号で参照されても壊れない)。window._planarDecimate=false で無効。
 // ============================================================
 function _decimatePlanarMesh(positions, lists, opt){
@@ -5950,13 +5951,115 @@ function _decimatePlanarMesh(positions, lists, opt){
   for(let i=0;i<T;i++) if(alive[i]){ out[lst[i]].push(tri[i][0], tri[i][1], tri[i][2]); after++; }
   return {before:T, after, collapsed, lists: out.map((a,li) => (lists[li] && lists[li].constructor !== Array) ? new lists[li].constructor(a) : a)};
 }
+// ============================================================
+// r130(48回目): 許容つきの間引き(_guardedDecimateMesh)=問題7(ずれた平面)の対応。マスター決定: 許容5mm。
+//   背景: r129の間引きは「誤差0」でしか三角形を減らせず、丸め(10mm格子)でわずかにずれた平面・境目の頂点が残っていた(R1/R2/ymd_1508など)。
+//   方式: r129と同じ縮約(頂点vを隣のuへ寄せて消す。vの周りが全部ほぼ同じ平面=内部の頂点 / 2つの平面の境目のほぼ一直線の途中=共線の頂点)。
+//         頂点は動かさない(消すだけ)ので、角度の浅い境目での誤差の増幅は起きない。positionsは書き換えない。
+//         「ほぼ同じ平面」= 近接する三角形を、全頂点が当てはめた平面から tolM 以内・法線の差が angDeg 以内の間でまとめた領域。
+//   安全条件: r129の条件(リンク条件=非多様体を作らない・裏返り/つぶれなし)に加え、
+//         ①寄せる前後の局所のずれ(密な標本点で両方向)を測り、それまでの積み上げ(三角形ごとに保持)と足して tolM を超える寄せは行わない。
+//         ②三角形の法線は元の法線から angDeg 以内。
+//   限界: ずれの上限は標本点による測定+積み上げ(安全側)で管理しており、数学的な証明ではない。実測はR1〜R8・ymd_1508で上限以内(最大4.3mm/許容5mm)。
+//   使う側: buildManifoldUnionGeom の opts.decimateTolMm(mm)。省略=0=従来(r129=誤差0)。0より大きい時だけ使う。Land Logic(LandXML)と欠陥スキャンは指定しない(誤差0のまま)。
+//   戻り: {before,after,collapsed,lists,budget(m)}。大きすぎる時(>20000面)はnull(呼び出し側がr129へ戻す)。
+// ============================================================
+function _guardedDecimateMesh(positions, lists, tolM, angDeg){
+  const P = positions, K = 4294967296, cosA = Math.cos(angDeg*Math.PI/180), tri = [], lst = [], t0 = Date.now(), TIME_MS = 6000;
+  lists.forEach((I, li) => { if(!I) return; for(let t=0;t+2<I.length;t+=3){ tri.push([I[t], I[t+1], I[t+2]]); lst.push(li); } });
+  const T = tri.length; if(T < 4) return {before:T, after:T, collapsed:0, budget:0};
+  if(T > 20000) return null;
+  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]], mul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k];
+  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2], cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]], len=a=>Math.sqrt(dot(a,a));
+  const pos = v => [P[v*3], P[v*3+1], P[v*3+2]];
+  // 点-三角形の最短距離
+  const ptTri = (p,a,b,c) => {
+    const ab=sub(b,a), ac=sub(c,a), ap=sub(p,a); const d1=dot(ab,ap), d2=dot(ac,ap); if(d1<=0&&d2<=0) return len(ap);
+    const bp=sub(p,b); const d3=dot(ab,bp), d4=dot(ac,bp); if(d3>=0&&d4<=d3) return len(bp);
+    const vc=d1*d4-d3*d2; if(vc<=0&&d1>=0&&d3<=0){ const v=d1/(d1-d3); return len(sub(p,add(a,mul(ab,v)))); }
+    const cp=sub(p,c); const d5=dot(ab,cp), d6=dot(ac,cp); if(d6>=0&&d5<=d6) return len(cp);
+    const vb=d5*d2-d1*d6; if(vb<=0&&d2>=0&&d6<=0){ const w=d2/(d2-d6); return len(sub(p,add(a,mul(ac,w)))); }
+    const va=d3*d6-d5*d4; if(va<=0&&(d4-d3)>=0&&(d5-d6)>=0){ const w=(d4-d3)/((d4-d3)+(d5-d6)); return len(sub(p,add(b,mul(sub(c,b),w)))); }
+    const sm=va+vb+vc; if(Math.abs(sm)<1e-30) return Math.min(len(ap),len(bp),len(sub(p,c)));
+    const den=1/sm; return len(sub(p,add(a,add(mul(ab,vb*den),mul(ac,vc*den)))));
+  };
+  const nrm = (a,b,c) => { const n=cross(sub(pos(b),pos(a)),sub(pos(c),pos(a))); const L=len(n); return L>0 ? [n[0]/L,n[1]/L,n[2]/L,L/2] : [0,0,0,0]; };
+  const tn=[], ta=[]; tri.forEach(t => { const n=nrm(t[0],t[1],t[2]); tn.push([n[0],n[1],n[2]]); ta.push(n[3]); }); // 元の法線・面積(以後も更新しない=元の法線との差で裏返りを見る)
+  // 領域: 辺でつながる同じリストの三角形を、全頂点が当てはめ平面から tolM 以内・法線差 angDeg 以内の間でまとめる(隣同士の比較の連鎖にしない)
+  const fitOk = triList => {
+    let S=[0,0,0], C=[0,0,0], A=0;
+    for(const t of triList){ S=add(S,mul(tn[t],ta[t])); const g=mul(add(add(pos(tri[t][0]),pos(tri[t][1])),pos(tri[t][2])),1/3); C=add(C,mul(g,ta[t])); A+=ta[t]; }
+    const L=len(S); if(L<1e-18||A<=0) return false; const n=mul(S,1/L); C=mul(C,1/A);
+    for(const t of triList){ if(dot(tn[t],n)<cosA) return false; for(const v of tri[t]) if(Math.abs(dot(sub(pos(v),C),n))>tolM) return false; }
+    return true;
+  };
+  const par = tri.map((_,i)=>i), find = i => { while(par[i]!==i){ par[i]=par[par[i]]; i=par[i]; } return i; }, members = tri.map((_,i)=>[i]);
+  const edges = new Map(); tri.forEach((t,i) => { for(let k=0;k<3;k++){ const a=t[k], b=t[(k+1)%3], key = a<b ? a*K+b : b*K+a; let l=edges.get(key); if(!l){ l=[]; edges.set(key,l); } l.push(i); } });
+  const pairs = []; edges.forEach(l => { if(l.length!==2) return; const [x,y]=l; if(lst[x]!==lst[y]||ta[x]===0||ta[y]===0) return; pairs.push([x,y,dot(tn[x],tn[y])]); });
+  pairs.sort((p,q)=>q[2]-p[2]);
+  for(let pass=0; pass<6; pass++){ let any=false;
+    for(const [x,y] of pairs){ const rx=find(x), ry=find(y); if(rx===ry) continue; if(members[rx].length+members[ry].length>600) continue; if(Date.now()-t0>TIME_MS) break;
+      const trial=members[rx].concat(members[ry]); if(fitOk(trial)){ par[ry]=rx; members[rx]=trial; members[ry]=null; any=true; } }
+    if(!any||Date.now()-t0>TIME_MS) break; }
+  const reg = tri.map((_,i)=>find(i));
+  // 局所のずれ: 旧い扇形と新しい扇形を、密な標本点(4x4の重心座標)で両方向に測った最大距離
+  const localDev = (Fold, Fnew) => {
+    if(!Fnew.length) return Infinity; const N=4;
+    const samp = Tl => { const s=[]; for(const q of Tl) for(let i=0;i<=N;i++) for(let j=0;j<=N-i;j++){ const a=i/N, b=j/N, c=1-a-b; s.push(add(add(mul(q[0],a),mul(q[1],b)),mul(q[2],c))); } return s; };
+    const f = (S,Tl) => { let mx=0; for(const p of S){ let m=1e9; for(const q of Tl){ const d=ptTri(p,q[0],q[1],q[2]); if(d<m) m=d; if(m<1e-12) break; } if(m>mx) mx=m; } return mx; };
+    return Math.max(f(samp(Fold),Fnew), f(samp(Fnew),Fold));
+  };
+  const alive = new Uint8Array(T).fill(1), err = new Float64Array(T), coords = t => t.map(pos);
+  const vinc = new Map(); tri.forEach((t,i) => t.forEach(v => { if(!vinc.has(v)) vinc.set(v,new Set()); vinc.get(v).add(i); }));
+  const neighbors = v => { const nb = new Map(); for(const t of vinc.get(v)){ if(!alive[t]) continue; for(const u of tri[t]) if(u!==v){ if(!nb.has(u)) nb.set(u,[]); nb.get(u).push(t); } } return nb; };
+  let collapsed = 0, budget = 0;
+  const tryVertex = v => {
+    const inc = [...vinc.get(v)].filter(t => alive[t]); if(!inc.length) return false;
+    if(new Set(inc.map(t=>reg[t])).size > 2 || inc.some(t => ta[t]===0)) return false;
+    const nb = neighbors(v), crease = [];
+    for(const [u,ts] of nb){ if(ts.length===1) crease.push(u); else if(ts.length===2){ if(reg[ts[0]]!==reg[ts[1]]) crease.push(u); } else return false; }
+    let cands;
+    if(crease.length===0) cands = [...nb.keys()];
+    else if(crease.length===2){ const A=pos(crease[0]), B=pos(crease[1]), V=pos(v), ab=sub(B,A), av=sub(V,A), L2=dot(ab,ab); if(L2<=0) return false;
+      const sc=dot(av,ab)/L2; if(sc<=1e-6||sc>=1-1e-6||len(cross(av,ab))/Math.sqrt(L2)>tolM) return false; cands = crease.slice(); }
+    else return false;
+    let best = null; const emax = Math.max(...inc.map(t=>err[t]));
+    for(const u of cands){
+      const S = nb.get(u), apex = new Set(S.map(t => tri[t].find(x => x!==v && x!==u)));
+      const Nu = new Set(); for(const t of vinc.get(u)){ if(!alive[t]) continue; for(const x of tri[t]) if(x!==u && x!==v) Nu.add(x); }
+      let common = 0; for(const x of nb.keys()) if(x!==u && Nu.has(x)) common++;
+      if(common !== apex.size) continue; // リンク条件(非多様体を作らない)
+      let good = true; const newT = [];
+      for(const t of inc){ if(S.includes(t)) continue; const nt = tri[t].map(x => x===v?u:x); const n2 = nrm(nt[0],nt[1],nt[2]); if(n2[3] < 1e-12 || dot(n2, tn[t]) < cosA){ good=false; break; } newT.push([t,nt]); }
+      if(!good) continue;
+      const d = localDev(inc.map(t=>coords(tri[t])), newT.map(x=>coords(x[1]))), en = emax + d; // 積み上げ=これまでの上限+今回のずれ
+      if(!(en <= tolM)) continue;
+      if(!best || d < best.d) best = {u,S,newT,d,en};
+    }
+    if(!best) return false;
+    for(const t of inc) if(best.S.includes(t)){ alive[t]=0; tri[t].forEach(x => vinc.get(x).delete(t)); }
+    for(const [t,nt] of best.newT){ tri[t]=nt; vinc.get(v).delete(t); vinc.get(best.u).add(t); err[t]=best.en; }
+    if(best.en > budget) budget = best.en; collapsed++; return true;
+  };
+  const verts = [...vinc.keys()];
+  for(let pass=0; pass<30; pass++){ let any=false; for(const v of verts){ if(Date.now()-t0>TIME_MS) break; if(vinc.get(v).size && tryVertex(v)) any=true; } if(!any||Date.now()-t0>TIME_MS) break; }
+  let after = 0; const out = lists.map(() => []);
+  for(let i=0;i<T;i++) if(alive[i]){ out[lst[i]].push(tri[i][0], tri[i][1], tri[i][2]); after++; }
+  return {before:T, after, collapsed, budget, lists: out.map((a,li) => (lists[li] && lists[li].constructor !== Array) ? new lists[li].constructor(a) : a)};
+}
 // r129(47回目): 本体(_buildManifoldUnionGeomRaw)の結果に、平面メッシュの間引き(同一平面の余分な三角形を、形を変えずに減らす)を通す。
 async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
   const r = await _buildManifoldUnionGeomRaw(frustums, isDoboku, yamadomeOffsetX, yamadomeOffsetY, opts);
   if(r && r.positions && window._planarDecimate !== false){
     try{
-      const d = _decimatePlanarMesh(r.positions, [r.cyanIndices, r.redIndices]);
-      if(d && d.collapsed > 0){ r.cyanIndices = d.lists[0]; r.redIndices = d.lists[1]; console.log(`[DECIMATE] 同一平面の三角形を間引き: ${d.before}→${d.after}面(形は変わりません)`); }
+      // r130(48回目): opts.decimateTolMm(mm)>0 の時だけ、許容つきの間引き(_guardedDecimateMesh。形が最大でその許容まで動く)。省略・0=従来のr129(誤差0)。
+      //   許容つきを使うのは3Dイメージ(runCalcの呼び出し)だけ。Land Logic(LandXML)・欠陥スキャン・単体チェックは指定しない=誤差0のまま。
+      const tolMm = (opts && typeof opts.decimateTolMm === 'number') ? opts.decimateTolMm : 0;
+      let d = null, guarded = false;
+      if(tolMm > 0){ try{ d = _guardedDecimateMesh(r.positions, [r.cyanIndices, r.redIndices], tolMm/1000, 3); guarded = !!d; }catch(e){ console.warn('[DECIMATE] 許容つきの間引きに失敗(誤差0の間引きに切り替えます)', e); d = null; } }
+      if(!d) d = _decimatePlanarMesh(r.positions, [r.cyanIndices, r.redIndices]);
+      if(d && d.collapsed > 0 && d.lists){ r.cyanIndices = d.lists[0]; r.redIndices = d.lists[1];
+        console.log(guarded ? `[DECIMATE] 同一平面に近い三角形を間引き(許容${tolMm}mm): ${d.before}→${d.after}面(形が最大${(d.budget*1000).toFixed(1)}mm動いた可能性があります)` : `[DECIMATE] 同一平面の三角形を間引き: ${d.before}→${d.after}面(形は変わりません)`); }
     }catch(e){ console.warn('[DECIMATE] 間引きに失敗(そのまま使います)', e); }
   }
   return r;
