@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r148): 上部旋回のドラッグ判定を統一(マスター指示)。旋回=水色●(isDragMarker)のドラッグだけ。●以外(上部・下部の本体・ブーム・アーム・バケット)のドラッグは移動(_pickPlacedDrag)。以前はuserData.isBoomの部品をつかんでも旋回だった(data/voldia_models.jsのisBoom付与は残るが、旋回には使わなくなった)。●がブーム等に埋まって見えていても、レイ上に●があれば●を優先。前版=backup/voldia_placement_r147.js
 // 48回目(r147): ホイールのズームが限界に近い(注視点まで3m以内)のにズームインのホイールを5回連続で回した時、トーストで「ホイールでのズームには限界があります/一度遠くに離れて、ホイールクリックで近づいてください」を出す(12秒は再表示しない)。showToastは改行(\n)入りなら2行で出す。※配置モードHTMLは変更なし(voldia_placement_v0093.html)。前版=backup/voldia_placement_r146.js
 // 47回目(r146): ①左パネルのボタンにマウスオーバーの解説(Vold出力/範囲スクショ/印刷/HTML書き出し) ②オブジェクト配置のマウス位置の丸を全種類「白」に統一 ③ボックス・足場の設定画面で右クリック=キャンセル ④ひな形の版をr3へ(robots noindex)。
 // 47回目(r145): HTML書き出しに「線(仮囲い・計画線)」と「クレーンの作業半径リング」を追加(実機で出ていなかった=これらはplacedObjectsではなくscene直下に置かれているため集め漏れていた)。
@@ -3521,6 +3522,21 @@ window.addEventListener('message', function(ev) {
     }
   });
 
+  // r148(48回目): 左ボタンで押した位置のオブジェクトの「つかみ方」を決める(マスター指示: 上部のドラッグ判定を統一)。
+  //   旋回 = 水色●(userData.isDragMarker)をドラッグした時だけ。●以外(上部・下部の本体、ブーム・アーム・バケット等)をドラッグしたら移動。
+  //   以前は userData.isBoom(ブーム・アーム・バケット・ミニバックホウの上部)をつかんでも旋回になり、上部のどこで旋回/移動になるかがあいまいだった。
+  //   ●は depthTest:false で常に手前に描かれるので、レイが●より先に機体に当たっても、レイ上に●があれば●を優先する(見えている●を押したのに移動になるのを防ぐ)。
+  //   戻り: null(つかめない: 何もない・構台) / {obj:ルート, upper:上部グループ|null, hitObj, rotate:旋回か}
+  function _pickPlacedDrag(intersects) {
+    if (!intersects || !intersects.length) return null;
+    const mk = intersects.find(h => h.object.userData.isDragMarker === true);
+    const hitObj = (mk || intersects[0]).object;
+    let obj = hitObj, upper = null;
+    while (obj && !obj.userData.isRoot) { if (obj.userData.isUpper) upper = obj; obj = obj.parent; }
+    if (!obj || obj.userData.type === 'kotai') return null;
+    return { obj, upper, hitObj, rotate: !!(hitObj.userData.isDragMarker && upper) };
+  }
+
   window.addEventListener('pointerdown', e => {
     pointerDownPos = { x: e.clientX, y: e.clientY };
 
@@ -3593,49 +3609,29 @@ window.addEventListener('message', function(ev) {
     if (e.button === 0 && !currentType) {
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
-      if (intersects.length > 0) {
-        let hitObj = intersects[0].object;
-        let isBoom = hitObj.userData.isBoom === true || hitObj.userData.isDragMarker === true;
+      const pick = _pickPlacedDrag(intersects); // r148: つかみ方の判定は _pickPlacedDrag に集約(旋回=水色●だけ・それ以外は移動)
+      if (pick) {
+        const obj = pick.obj, upper = pick.upper;
+        dragObj = obj; isDragging = false; controls.enabled = false;
 
-        let obj = hitObj;
-        let upper = null;
-        while (obj && !obj.userData.isRoot) {
-          if (obj.userData.isUpper) upper = obj;
-          obj = obj.parent;
-        }
-        if (obj && obj.userData.type !== 'kotai') {
-          dragObj = obj; isDragging = false; controls.enabled = false;
+        if (pick.rotate) { // 旋回: 水色●(isDragMarker)をつかんだ時だけ
+          dragObj.userData.isBoomDragging = true;
+          dragObj.userData.dragUpper = upper;
+          dragPlane.constant = -obj.position.y;
 
-          if (hitObj.userData.isDragMarker && upper) {
-            dragObj.userData.isBoomDragging = true;
-            dragObj.userData.dragUpper = upper;
-            dragPlane.constant = -obj.position.y;
-            
-            upper.traverse(c => {
-              if (c.userData.isDragMarker) {
-                c.scale.set(1.5, 1.5, 1.5);
-                c.material.color.setHex(0xff3333);
-              }
-            });
-          } else if (isBoom && upper && obj.userData.type !== 'arrow') { 
-            dragObj.userData.isBoomDragging = true;
-            dragObj.userData.dragUpper = upper;
-            dragPlane.constant = -obj.position.y;
-            
-            upper.traverse(c => {
-              if (c.userData.isDragMarker) {
-                c.scale.set(1.5, 1.5, 1.5);
-                c.material.color.setHex(0xff3333);
-              }
-            });
-          } else {
-            dragObj.userData.isBoomDragging = false;
-            dragObj.userData.isPlaced = false;
-            dragPlane.constant = -obj.position.y;
-            const intersectPt = new THREE.Vector3();
-            raycaster.ray.intersectPlane(dragPlane, intersectPt);
-            if (intersectPt) { dragOffset.copy(intersectPt).sub(obj.position); }
-          }
+          upper.traverse(c => {
+            if (c.userData.isDragMarker) {
+              c.scale.set(1.5, 1.5, 1.5);
+              c.material.color.setHex(0xff3333);
+            }
+          });
+        } else { // 移動: ●以外(上部・下部の本体、ブーム・アーム・バケットなど)
+          dragObj.userData.isBoomDragging = false;
+          dragObj.userData.isPlaced = false;
+          dragPlane.constant = -obj.position.y;
+          const intersectPt = new THREE.Vector3();
+          raycaster.ray.intersectPlane(dragPlane, intersectPt);
+          if (intersectPt) { dragOffset.copy(intersectPt).sub(obj.position); }
         }
       }
     }
