@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r147): ホイールのズームが限界に近い(注視点まで3m以内)のにズームインのホイールを5回連続で回した時、トーストで「ホイールでのズームには限界があります/一度遠くに離れて、ホイールクリックで近づいてください」を出す(12秒は再表示しない)。showToastは改行(\n)入りなら2行で出す。※配置モードHTMLは変更なし(voldia_placement_v0093.html)。前版=backup/voldia_placement_r146.js
 // 47回目(r146): ①左パネルのボタンにマウスオーバーの解説(Vold出力/範囲スクショ/印刷/HTML書き出し) ②オブジェクト配置のマウス位置の丸を全種類「白」に統一 ③ボックス・足場の設定画面で右クリック=キャンセル ④ひな形の版をr3へ(robots noindex)。
 // 47回目(r145): HTML書き出しに「線(仮囲い・計画線)」と「クレーンの作業半径リング」を追加(実機で出ていなかった=これらはplacedObjectsではなくscene直下に置かれているため集め漏れていた)。
 // 47回目(r144): ①足場の編集窓を開いた時、一番下の段が見える位置までスクロール ②HTML書き出しから各オブジェクトの回転グリップ(水色●=isDragMarker)等の操作用の部品を除く ③ひな形が古い版のままなら書き出さずに知らせる(VIEWER_TEMPLATE_VER_NEED)。
@@ -29,6 +30,7 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
   function showToast(msg, ms) { // 41回目: 表示時間を任意指定できるように(省略時は従来どおり3秒)
     const el = document.getElementById('toast');
     el.textContent = msg;
+    el.style.whiteSpace = (String(msg).indexOf('\n') >= 0) ? 'pre-line' : ''; // r147(48回目): 改行(\n)入りのトーストは2行で出す
     el.style.opacity = '1';
     clearTimeout(tTimer);
     tTimer = setTimeout(() => { el.style.opacity = '0'; }, ms || 3000);
@@ -4064,6 +4066,23 @@ window.addEventListener('message', function(ev) {
   const _moveCancel = () => { _moveAnim = null; }; // 移動中に利用者が操作したら、その操作を優先する
   renderer.domElement.addEventListener('pointerdown', _moveCancel);
   renderer.domElement.addEventListener('wheel', _moveCancel, { passive: true });
+  // r147(48回目): ホイールのズームが限界に近いのに回し続けている人への案内トースト。
+  //   ホイール=ズーム(注視点へ寄るだけ。場所の移動ではない)なので、注視点の近くまで来ると、いくら回しても寄れない。
+  //   注視点まで ZOOM_LIMIT_DIST(m)以内で、ズームイン方向のホイールが連続(各回の間隔 WHEEL_GAP_MS 以内)して WHEEL_WARN_COUNT 回に達したら出す。
+  //   一度出したら WHEEL_TOAST_COOLDOWN_MS は出さない。ズームアウト・間隔が空く・距離が離れる=数え直し。ctrl+ホイール(ブラウザの拡大)は対象外。
+  const ZOOM_LIMIT_DIST = 3, WHEEL_WARN_COUNT = 5, WHEEL_GAP_MS = 700, WHEEL_TOAST_COOLDOWN_MS = 12000;
+  let _zwCount = 0, _zwLast = 0, _zwToastAt = -1e9;
+  renderer.domElement.addEventListener('wheel', e => {
+    if (!controls.enabled || e.ctrlKey) return;
+    const now = performance.now();
+    if (!(e.deltaY < 0)) { _zwCount = 0; return; } // ズームアウトなどは数え直し(deltaY<0=ズームイン=OrbitControlsのdollyIn)
+    if (camera.position.distanceTo(controls.target) > ZOOM_LIMIT_DIST) { _zwCount = 0; return; }
+    _zwCount = (now - _zwLast <= WHEEL_GAP_MS) ? _zwCount + 1 : 1; _zwLast = now;
+    if (_zwCount >= WHEEL_WARN_COUNT && now - _zwToastAt > WHEEL_TOAST_COOLDOWN_MS) {
+      _zwToastAt = now; _zwCount = 0;
+      showToast('ホイールでのズームには限界があります\n一度遠くに離れて、ホイールクリックで近づいてください', 4500);
+    }
+  }, { passive: true });
   window.addEventListener('keydown', e => { if (e.key && e.key.indexOf('Arrow') === 0) _moveCancel(); });
   document.addEventListener('mouseleave', () => { moveIcon.visible = false; });
   window.addEventListener('pointerup', e => {
