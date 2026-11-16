@@ -57,9 +57,12 @@ body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;background:var(--
 #sh-list li.selected{background:#1a3a5c;border-left-color:#64b5f6;}
 #sh-list li.noslope-item{border-left-color:var(--warn);}
 #sh-list li.geo-error-item{border-left-color:#ff1744 !important;box-shadow:0 0 0 1px rgba(255,23,68,.5) inset;}
-.sh-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
-.sh-name{font-weight:600;color:#ccc;font-size:.78em;}
-.sh-area{color:#90caf9;font-size:.72em;}
+/* v0161(48回目): 以前は justify-content:space-between で、余った幅を「つまみ・チェック・色の丸・名前・面積・×」の間に均等に配っていたため、
+   面積の桁数(331.13 と 28.11 など)や名前の長さで、左のチェックと丸の位置が行ごとにずれていた。左の部品は一定の間隔(gap)で詰め、余りは名前(flex:1)が受ける。 */
+.sh-header{display:flex;justify-content:flex-start;gap:8px;align-items:center;margin-bottom:4px;}
+.sh-name{font-weight:600;color:#ccc;font-size:.78em;flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sh-header>input[type=text]{flex:1 1 0;min-width:0;} /* 名前の編集中の入力欄(_startNameEdit)も同じ幅の受け方にする */
+.sh-area{color:#90caf9;font-size:.72em;white-space:nowrap;flex-shrink:0;}
 .delbtn{background:transparent!important;border:1px solid #555!important;
         padding:2px 5px!important;font-size:.7em!important;flex-shrink:0;cursor:pointer;
         border-radius:3px;color:#aaa;}
@@ -455,6 +458,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #gm-dlg .gm-slope .slope-ang-btn{padding:8px 0;font-size:.95em;border-radius:8px;border:1px solid #555;background:#2f2f2f;color:#aaa;cursor:pointer;}
 #gm-dlg .gm-slope .slope-ang-btn.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
 #gm-dlg .gm-slope .slope-ang-btn:disabled{cursor:not-allowed;}
+/* v0161(48回目): 建築向けの2つ(1:0.577・1:1.732)は既存6個(3列×2段)の下の段に2個横並び(全幅を2等分) */
+#gm-dlg .gm-slope .gm-slope-row2{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;}
 #gm-dlg .gm-note{color:#f7e24a;font-weight:700;font-size:.82em;text-align:center;margin:16px 0 14px;line-height:1.6;}
 #gm-dlg .gm-foot{display:flex;gap:12px;}
 #gm-back{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
@@ -540,7 +545,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0152</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0161</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -1072,6 +1077,10 @@ D&D or クリックでロードしてください</p>
         <button type="button" class="slope-ang-btn" data-ang="39.81">1:1.2</button>
         <button type="button" class="slope-ang-btn" data-ang="33.69">1:1.5</button>
         <button type="button" class="slope-ang-btn" data-ang="26.57">1:2.0</button>
+        <div class="gm-slope-row2"><!-- v0161(48回目): 建築向けの2つ。説明文は js/voldia_main.js の SLOPE_INFO(キー=data-ang) -->
+          <button type="button" class="slope-ang-btn" data-ang="60">1:0.577</button>
+          <button type="button" class="slope-ang-btn" data-ang="30">1:1.732</button>
+        </div>
       </div>
     </div>
     <div class="gm-note">※体積は層別スライスＵＮＩＯＮ法（ClipperLib）を使用した概算値です</div>
@@ -1133,6 +1142,7 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0161(48回目): ①アプリ内左上のバージョン表示(#app-version-label)を v0152→v0161 に更新(v0153〜v0160で更新漏れしていた。ファイル名のバージョンを上げる時は必ず同じ値にする) ②2D左UIの一覧で、チェックボックスと色の丸の位置が行ごとにずれていたのを修正(.sh-header のCSS。原因=space-betweenで余白を均等配分していた) ③3D生成方法ダイアログの法面角度に建築向けの2ボタン(1:0.577=60°・1:1.732=30°)を既存6個の下の段に追加(js/voldia_main.js の SLOPE_INFO にホバー説明)。配置モード(voldia_placement_v0093.html)は変更なし・js/voldia_placement.js r147=ホイールのズーム限界トースト。 -->
 <!-- v0160(48回目): 問題7=3Dイメージの三角形の間引きを「許容5mm」つきに(js/voldia3d.js r130: _guardedDecimateMesh)。形が元から最大5mmまで動く代わりに三角形が減る(R1〜R8で約−21%・乱数60セットで約−10%)。Land Logic(LandXML)・欠陥スキャンは従来どおり誤差0。コンソールで window._planarDecimateTolMm=0 にすると誤差0(r129)に戻る(次の3D生成から有効)。 -->
 <!-- v0159(47回目): ①3D生成方法ダイアログに断面イラスト(左)を追加・設定項目に①〜④の番号・入力中は該当部分が光る・通常計算ではイラストが左へ収納(css/voldia_gm_intro.css・data/voldia_intro_img.js・js/voldia_gm_intro.js) ②右クリックで戻る/キャンセル(3D生成方法ダイアログ・測点設置) ③データ出力で掘削深さ10m超の警告 ④robots noindex ⑤voldia3d.js r129=形状クリーニング(許容差5mm)・合体の全体チェック・同一平面の三角形を形を変えずに間引き ⑥同一形状(同じ座標・同じ色)は作図時に除外・法面ボタンの点灯修正。配置モードは voldia_placement_v0093.html。 -->
 <!-- v0158(47回目): ①形状破綻の対策 voldia3d.js r128=3D化の入口と合体した輪郭に「形状のクリーニング」(許容差5mm)・合体した全体の3Dを合体なしと比べて悪ければ合体を取りやめ ②同一形状(同じ座標・同じ色)は作図の時点で除外(M3) ③法面ボタンの点灯判定を小数の角度でも効くよう修正(P1)。配置モードは voldia_placement_v0092.html(HTML書き出しに線と作業半径を追加)。 -->
