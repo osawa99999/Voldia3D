@@ -1394,6 +1394,19 @@ function _openTopMeshVolumeMm3(res){
   return Math.abs(v) * 1e9; // m3→mm3
 }
 const _MERGE_VALID_TOL = 0.005; // 0.5%
+// r131(48回目): 合体判定キャッシュ(window._mergeValidCache)のキーに「判定の入力の全部」を入れる(テスト担当の報告: 法面を切り替えると前の法面の判定が使い回され、結果が新規計算と変わる)。
+//   原因: キーに法面角度が無く(個別・全体とも)、個別のキーには isDoboku・taperMm・色、全体のキーには taperMm・穴(holesMm)も無かった。キャッシュはページ再読込まで消えない。
+//   方針: キャッシュを消して回避するのではなく、判定が読む値をすべてキーに入れる(読む値の洗い出し: _buildManifoldUnionGeomRaw/_calcVolumeFallback/_frustumLayerStable
+//         が読むのは 図形の ptsMm・D・tl・OD・noSlope・taperMm・holesMm・color と、法面(getSlopeRatio)・isDoboku・window._vertexQuantMm・オフセット)。
+//   入力が増えたら、ここ(_mergeCtxSig=共通の条件 / _mergeShapeSig=図形ごと)に足す。
+function _mergeCtxSig(isDoboku){
+  let sr = -1; try{ sr = Math.round(getSlopeRatio() * 1e6); }catch(e){}
+  return [sr, isDoboku !== false ? 1 : 0, window._vertexQuantMm || 0];
+}
+function _mergeShapeSig(f, withHoles){
+  const q = pts => pts.map(p => [Math.round(p.x*100), Math.round(p.y*100)]);
+  return [q(f.ptsMm), f.D, f.tl||0, f.OD||0, f.noSlope?1:0, f.taperMm||0, f.color==='purple'?1:0, withHoles ? (f.holesMm||[]).map(q) : 0];
+}
 async function _mergeSameDepthFrustumsValidated(frustums, offsetXmm, offsetYmm, isDoboku){
   const merged = _mergeTouchingSameDepthFrustums(frustums);
   if(merged === frustums) return frustums;
@@ -1401,7 +1414,7 @@ async function _mergeSameDepthFrustumsValidated(frustums, offsetXmm, offsetYmm, 
   const out = []; let kept = 0;
   for(const f of merged){
     if(!f._mergedFrom){ out.push(f); continue; }
-    const key = JSON.stringify([f.ptsMm.map(p => [Math.round(p.x*100), Math.round(p.y*100)]), f.D, f.tl||0, f.OD||0, f.noSlope?1:0, offsetXmm||0, offsetYmm||0, window._vertexQuantMm]);
+    const key = JSON.stringify([_mergeShapeSig(f, false), offsetXmm||0, offsetYmm||0, _mergeCtxSig(isDoboku)]); // r131: 法面・isDoboku・taperMm・色もキーに入れた
     let ok = window._mergeValidCache.get(key);
     if(ok === undefined){
       ok = false; let cacheIt = true;
@@ -1436,7 +1449,7 @@ async function _mergeSameDepthFrustumsValidated(frustums, offsetXmm, offsetYmm, 
   if(frustums._offsetX !== undefined){ out._offsetX = frustums._offsetX; out._offsetY = frustums._offsetY; }
   // r128(47回目) 全体チェック(提案書P2): 個々の合体は安全でも、全体を組み立てると偽の床・逆勾配・非多様体の辺が出ることがある。
   //   合体した全体と、合体しない全体の両方を3D化して欠陥点数を比べ、合体の方が悪ければ合体を全部取りやめる(3D側・体積側とも、この関数の結果を共有するので食い違わない)。
-  const sceneKey = 'S|' + JSON.stringify([frustums.filter(f => f && f.color !== 'gray').map(f => [f.ptsMm.map(p => [Math.round(p.x*100), Math.round(p.y*100)]), f.D, f.tl||0, f.OD||0, f.noSlope?1:0, f.color==='purple'?1:0]), offsetXmm||0, offsetYmm||0, isDoboku !== false, window._vertexQuantMm||0]);
+  const sceneKey = 'S|' + JSON.stringify([frustums.filter(f => f && f.color !== 'gray').map(f => _mergeShapeSig(f, true)), offsetXmm||0, offsetYmm||0, _mergeCtxSig(isDoboku)]); // r131: 法面・taperMm・穴もキーに入れた
   let sceneOk = window._mergeValidCache.get(sceneKey);
   if(sceneOk === undefined){
     sceneOk = true; let cacheScene = true;
@@ -2616,38 +2629,8 @@ function calcAreaPts(pts){
 
 
 
-// r010: 自己交差の事前検出。offsetPolygon()は各頂点を局所的な二等分線方向へ
-// ずらすだけでグローバルな自己交差解消は行わないため、複雑な凹形状では
-// オフセット後リングが自己交差しうる。判定はClipperLibのSimplifyPolygon
-// (Vatti法)に委ね、単純化前後で面積・輪郭数が変化したら自己交差ありとみなす。
-function _ringSelfIntersects(ptsMm, SF){
-  SF = SF || 1000;
-  if(!ptsMm || ptsMm.length < 3) return false;
-  const path = ptsMm.map(p=>({X:Math.round(p.x*SF), Y:Math.round(p.y*SF)}));
-  let a0 = 0;
-  for(let i=0;i<path.length;i++){
-    const j=(i+1)%path.length;
-    a0 += path[i].X*path[j].Y - path[j].X*path[i].Y;
-  }
-  const origArea = Math.abs(a0)/2;
-  if(origArea < SF*SF*0.5) return false; // 1mm²未満の縮退形状は対象外（別途の面積0チェックに任せる）
-
-  let simplified;
-  try{
-    simplified = ClipperLib.Clipper.SimplifyPolygon(path, ClipperLib.PolyFillType.pftNonZero);
-  }catch(e){
-    return false; // 判定不能時は誤検知(見た目には正常な図形が赤くなる)より見逃しを優先
-  }
-  if(!simplified || simplified.length !== 1) return true; // 単純化で複数ポリゴンに分裂＝自己交差
-  let a1 = 0;
-  const p2 = simplified[0];
-  for(let i=0;i<p2.length;i++){
-    const j=(i+1)%p2.length;
-    a1 += p2[i].X*p2[j].Y - p2[j].X*p2[i].Y;
-  }
-  const simpArea = Math.abs(a1)/2;
-  return Math.abs(simpArea - origArea) / origArea > 0.001; // 単純化で面積が0.1%超変化＝自己交差ループを切除した
-}
+// 48回目: ここにあった古い _ringSelfIntersects(ptsMm, SF)(r010: ClipperLibのSimplifyPolygonで面積・輪郭数の変化を見る版)は、後ろの同名の関数
+//   _ringSelfIntersects(p)(隣り合わない辺どうしの交差を見る版)に上書きされ、一度も使われていなかったため削除した(全文は backup/voldia3d_r131.js)。
 
 // 図形1つ分（外周＋各穴）について、生の輪郭と「実際に計算で使われる
 // 最大オフセット距離まで膨張させた輪郭」の両方を自己交差判定する。
@@ -3534,7 +3517,7 @@ async function runCalc(mode){
     let deletedCount = 0;
     const chamferResults = fs.map(f => {
       if(f.noSlope || !f.ptsMm || f.ptsMm.length < 3) return {f, action:'keep'};
-      const {pts, ok, deleted} = tryChamferMm(f.ptsMm);
+      const {pts, deleted} = tryChamferMm(f.ptsMm);
       if(deleted){ hasSharps=true; deletedCount++; return {f, action:'delete'}; }
       // ok=trueでも元と同じ場合はkeep
       const changed = pts.length !== f.ptsMm.length ||
@@ -5238,7 +5221,43 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
-const VOLDIA3D_VER = "Voldia-3D-r130(base:VoldiaM r069)"; // r130(48回目): 問題7=許容つきの間引き(_guardedDecimateMesh。許容5mm=3Dイメージだけ。window._planarDecimateTolMm=0で誤差0=r129に戻る。Land Logic・欠陥スキャンは誤差0のまま)。 r129(47回目): 同一平面の三角形を形を変えずに減らす(_decimatePlanarMesh=誤差0のエッジ縮約)。 r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。 r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。 r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。 r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。 r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。 r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。 r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。 r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。 r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。 r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。 r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。 r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。 r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。 r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。 r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。r110(37回目): 既存躯体も透過スライダーに連動。r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。r101: 3Dイメージの影ON/OFF(デフォルトOFF)。r100: 既存躯体の底面∞(doboku系統のみ)。r099(35回目): frustum個別テーパーf.taperMm対応
+// ===== 改版履歴(新しい順・1行=1改版)。以前は下の VOLDIA3D_VER の行末に1行で続けて書いていた。48回目に1改版1行へ分割して整理(本文は元のまま・欠落なし) =====
+// r132(48回目): コード整理=挙動を変えない削除。①書き込みだけで誰にも読まれないwindow変数 _yamadomeBattOffsetMm・_yamadomePrismID ②後ろの同名関数に上書きされて使われなかった古い _ringSelfIntersects(ptsMm, SF) ③未使用の分割代入 ok。削除の一覧と残したものは引継ぎ書の「コード整理記録」。前版=backup/voldia3d_r131.js
+// r131(48回目): 合体判定キャッシュのキーに法面角度・isDoboku・taperMm・色・穴を追加(_mergeCtxSig/_mergeShapeSig。法面を切り替えると前の法面の判定が使い回されていた=テスト担当の報告)。
+// r130(48回目): 問題7=許容つきの間引き(_guardedDecimateMesh。許容5mm=3Dイメージだけ。window._planarDecimateTolMm=0で誤差0=r129に戻る。Land Logic・欠陥スキャンは誤差0のまま)。
+// r129(47回目): 同一平面の三角形を形を変えずに減らす(_decimatePlanarMesh=誤差0のエッジ縮約)。
+// r128(47回目): 形状破綻の対策(提案書P2・P3・M1〜M2)=①3D化の入口(getAllFrustums)と合体した輪郭に「形状のクリーニング」(許容差5mm: 一直線の点・近接頂点の除去、図形どうしの頂点合わせ、辺への寄せ。安全装置付き) ②合体した全体の3Dを合体なしと比べ、悪ければ合体を全部取りやめる(_sceneDefects)。
+// r127(47回目): 「偽の床」再来(2階建て問題)の修正=合体した図形の安全チェックを強化(事前=_frustumLayerStableで層分けが不安定な合体を取りやめ・事後=3Dに途中の水平面(偽の床)や逆勾配の面があれば取りやめ=_cavityMeshDefects)。体積の一致だけでは薄い面を検出できないため。
+// r126(44回目): 紫の壁ハッチからグレー接触部分を除外+掃除。
+// r125(44回目): 角問題=同条件で接する/重なるオブジェクトを法面オフセット前に合体(_mergeTouchingSameDepthFrustums。3D・体積の両方)。
+// r124(44回目): 山留ハッチ消えの根本修正=山留の一直線上の頂点でまたがる壁の三角形を、辺ごとに重なる区間で採用(_clipYamadomeOverlayToContact)。
+// r123(43回目): マスター案B実装=3Dを作ってから同一平面の細かい面を整理(_simplifyFrustumManifold: 法面frustumを量子化格子へ丸め→ID統合→ManifoldのSimplify)。 r122b(43回目): 変化点が複数ある形の層分けを境界方式へ(_boundariesPlan)・吸収のずれ判定(_absorbDevTol)を境界方式にも追加。
+// r122: 「耳」の根本修正=オフセット輪郭の『消えた辺(辺イベント)』処理(_collapseInvertedEdges)を追加し、変化点が上面/下面の近い時の多対1吸収を_loftLayerTopoにも入れた(吸収で形がずれる量を輪郭線の距離で測り、量子化の1.5倍以内の時だけ)。 r121b(43回目): 安定して作れない形状の事前判定(_frustumLayerStable)を追加。
+// r121: 変化点を上面/下面へ吸収する方式を作り直し(本物の上面/下面リングへ多対1で繋ぐ・吸収距離=量子化の30倍=300mm・線形チェックは本来の深さで)。薄い層が出来ず1/71・1/160〜1/190の法面の横線が消える。
+// r120(42回目): 変化点の前後を薄い層に割らず「変化点と変化点の間を1枚」に(法面の中段の波打ち対策)。
+// r119(42回目): 深さ方向の層分けを「一律16等分」→「変化点だけ」に(1/193の法面の細かい帯をなくす)。
+// r118(42回目): 「やばい.vold」偽の床の根本修正(深さ方向loftの頂点の対応を保つ。ファイル冒頭【r118】参照)。
+// r117(41回目): ①既存躯体にエッジ線(透過を上げても輪郭が見える) ②山留ハッチを掘削が接する区間だけに(表示専用・失敗時は従来どおり全周)。
+// r116(41回目): 3Dスクショに背景色(黒/白/透明)の選択ダイアログ。
+// r115(41回目): ファイル名の日付を yymmdd_hhmm に統一(getVoldiaTimestamp。getJSTDateStrは削除)・3D結果画面のGLB出力/LANDXML出力ボタンの表示切替フック(updateOutputButtons)。計算ロジック無改造。
+// r114(40回目): 捨てコン+砕石・余掘りの読み取りを parseInputNum() 経由に(桁区切り表示対応。値の意味・フォールバックは従来のまま)。
+// r113(40回目): 3D結果画面のメッシュ/影/色ボタンをボタン色表示に変更(計算ロジック無改造)。
+// r112(39回目): _lastExistingStructGeoms(書き込みのみ)を削除(挙動不変)。
+// r111(39回目): 死んだ関数7個を削除(挙動不変。削除一覧は冒頭【r111 削除一覧】)。
+// r110(37回目): 既存躯体も透過スライダーに連動。
+// r109(37回目): 現状地盤GLを計算の度に入力欄から同期 + 微テーパーを壁の高さ別の可変設定(LANDXML_TAPER)に。
+// r108(37回目): 負のtaperMm(既存躯体=天端が内へ狭まる)に対応(contourOf)。
+// r107(37回目): 現状地盤GL≠0のとき既存躯体だけGL基準のままで青・山留と高さが食い違う不具合を修正(runCalc/computeDobokuSiteBottomFromRaw)。
+// r106(36回目): LandXML微テーパー量を変数LANDXML_MICRO_TAPER_MMに集約。
+// r105(36回目): 山留ラインと重なる紫の辺は山留面優先(紫の壁なし・段差対策)。
+// r104(36回目): 山留ラインと重なる紫壁ハッチを除外(山留優先・ハッチ二重表示対策)。
+// r103(36回目): 影の縞対策(光に向いた面のみ影マップへ・影カメラをボックスにフィット・テクセル基準バイアス)・ボタン2段(2+2)。
+// r102(36回目): 影の明暗を強化・影マップ1024化・ボタン行の折り返し・影の診断ログ。
+// r101: 3Dイメージの影ON/OFF(デフォルトOFF)。
+// r100: 既存躯体の底面∞(doboku系統のみ)。
+// r099(35回目): frustum個別テーパーf.taperMm対応
+// ===== ここまで改版履歴 =====
+const VOLDIA3D_VER = "Voldia-3D-r132(base:VoldiaM r069)"; // 改版履歴は直上のコメント
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -6362,7 +6381,6 @@ async function _buildManifoldUnionGeomRaw(frustums, isDoboku=true, yamadomeOffse
           // 前提に基づく修正だったため撤回し、元の全周一律realYTopに戻す。
           const battHeightM = Math.max(0, realYTop - realYBot);
           const battOffsetMm = Math.tan(BATTER_DEG*Math.PI/180) * battHeightM * 1000;
-          window._yamadomeBattOffsetMm = battOffsetMm; // r047: 後段の断面判定の許容誤差計算にも使う
           const ydMmTop = battOffsetMm > 0.01 ? offsetPolygon(ydMm, battOffsetMm) : ydMm;
           const yTopMargin = realYTop + 50, yBotMargin = realYBot - 50; // 50m余裕(垂直方向は絶対にクリップしない安全マージン)
 
@@ -6399,7 +6417,6 @@ async function _buildManifoldUnionGeomRaw(frustums, isDoboku=true, yamadomeOffse
           const ydPrism = ydPrismProduct.asOriginal();
           ydPrismProduct.delete();
           const ydPrismID = ydPrism.originalID();
-          window._yamadomePrismID = ydPrismID; // 後段の断面判定ループで使う
           if(ydPrism.status && ydPrism.status() !== 'NoError'){
             console.warn('[MANIFOLD] 山留プリズムがwatertightでない可能性: status=' + ydPrism.status());
           }

@@ -1989,7 +1989,7 @@ async function runEvidenceAnalysis(mode){
   }catch(err){ console.warn('[深さ警告]', err); }
   const btnId=mode==='structure'?'btn-analyze-structure':'btn-analyze-earthwork';
   const btn=document.getElementById(btnId);
-  const btnGlb=document.getElementById('btn-glb'); // r070: GLB出力は本機能に統合済み、単体ボタンはOFFのまま
+  // r070: GLB出力は本機能に統合済み、単体ボタン(btn-glb)はOFFのまま。(48回目: 使われない変数 btnGlb を削除)
   if(btn)btn.disabled=true;
   const epTitleEl=document.getElementById('exp-prog')?.querySelector('.ep-title');
   if(epTitleEl) epTitleEl.textContent='⚙ データ出力（Excel/PNG/PDF/GLB）生成中...';
@@ -1999,7 +1999,7 @@ async function runEvidenceAnalysis(mode){
   try{
     // r019(29回目セッション): 土量計算(earthwork)モードの時だけ既存躯体をGLBから除外。
     // 躯体解析(structure)モードは用途未確認のため従来通り(除外しない)を維持。
-    const {glb, meshes: meshesA, totalVerts, totalTris}=await buildVoldiaGLBBytes(epSet, mode==='earthwork');
+    const {glb, meshes: meshesA, totalVerts}=await buildVoldiaGLBBytes(epSet, mode==='earthwork');
     epSet(45,'メッシュ解析中（面分類・グルーピング）...');
     await new Promise(r=>setTimeout(r,20));
     const {totalVolume, count}=await _evRunAnalysis(mode, glb);

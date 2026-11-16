@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r148b): 水色●にマウスが乗っている間はカーソルを橙色の回転カーソルに変える(_rotCursor。判定はつかみと同じ_pickPlacedDrag)。
 // 48回目(r148): 上部旋回のドラッグ判定を統一(マスター指示)。旋回=水色●(isDragMarker)のドラッグだけ。●以外(上部・下部の本体・ブーム・アーム・バケット)のドラッグは移動(_pickPlacedDrag)。以前はuserData.isBoomの部品をつかんでも旋回だった(data/voldia_models.jsのisBoom付与は残るが、旋回には使わなくなった)。●がブーム等に埋まって見えていても、レイ上に●があれば●を優先。前版=backup/voldia_placement_r147.js
 // 48回目(r147): ホイールのズームが限界に近い(注視点まで3m以内)のにズームインのホイールを5回連続で回した時、トーストで「ホイールでのズームには限界があります/一度遠くに離れて、ホイールクリックで近づいてください」を出す(12秒は再表示しない)。showToastは改行(\n)入りなら2行で出す。※配置モードHTMLは変更なし(voldia_placement_v0093.html)。前版=backup/voldia_placement_r146.js
 // 47回目(r146): ①左パネルのボタンにマウスオーバーの解説(Vold出力/範囲スクショ/印刷/HTML書き出し) ②オブジェクト配置のマウス位置の丸を全種類「白」に統一 ③ボックス・足場の設定画面で右クリック=キャンセル ④ひな形の版をr3へ(robots noindex)。
@@ -4013,18 +4014,35 @@ window.addEventListener('message', function(ev) {
     return !!(cc && cc.style.display === 'flex');
   }
   // 掴めるオブジェクト(pointerdownの掴む判定と同じ条件)の上にカーソルがあれば、そのレイ結果を返す。無ければnull。※raycasterはsetFromCamera済みの前提
+  let _hoverPick = null; // r148: 直近のホバーのレイ結果に対する _pickPlacedDrag の結果(旋回の●の上か=rotate)
   function _moveObjectHit() {
     const hs = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
+    _hoverPick = _pickPlacedDrag(hs); // pointerdown(つかみ)と同じ判定を使う=カーソルが変わる所と旋回できる所が必ず一致する
     if (!hs.length) return null;
     let o = hs[0].object; while (o && !o.userData.isRoot) o = o.parent;
     return (o && o.userData.type !== 'kotai') ? hs[0] : null;
   }
+  // r148(48回目・マスター案): 旋回の●(水色)にマウスが乗っている間は、マウスカーソルを橙色の「回転」カーソルにして、旋回できる所だと分かるようにする。
+  //   ●以外(機体の上部・下部)では普通のカーソルのまま(ドラッグ=移動)。●をつかんで旋回している間も、ボタンを押している間は維持する。
+  //   カーソルの絵は SVG(橙の回転矢印+白縁)。色は ROT_CURSOR_COLOR の1か所。※ブラウザのカーソルは色だけを変えられないので、画像のカーソルに差し替えている。
+  const ROT_CURSOR_COLOR = '#ff9800';
+  const ROT_CURSOR = 'url("data:image/svg+xml,' + encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'>" +
+    "<g fill='none' stroke-linecap='round' stroke-linejoin='round'>" +
+    "<path d='M16 5 A11 11 0 1 1 5 16' stroke='white' stroke-width='6.5'/><path d='M16 5 A11 11 0 1 1 5 16' stroke='" + ROT_CURSOR_COLOR + "' stroke-width='3.2'/>" +
+    "<path d='M0.5 16.5 L5 8.5 L9.5 16.5 Z' fill='" + ROT_CURSOR_COLOR + "' stroke='white' stroke-width='2'/>" +
+    "<circle cx='16' cy='16' r='3' fill='" + ROT_CURSOR_COLOR + "' stroke='white' stroke-width='1.6'/></g></svg>") + '") 16 16, grab';
+  let _rotCursorOn = false;
+  function _rotCursor(on) { if (on === _rotCursorOn) return; _rotCursorOn = on; renderer.domElement.style.cursor = on ? ROT_CURSOR : ''; } // 自分が変えた時だけ戻す(構台作図中のcrosshair等には触らない)
   let _moveObjAt = -1e9, _moveObjHit = null;
   function _moveIconUpdate(target, buttons, hits) { // pointermove から(hits=既存の地面レイの結果)
     const isCanvas = !!target && target.tagName === 'CANVAS' && target.id !== 'radar-canvas';
+    if (isCanvas && buttons !== 0 && !currentType && dragObj && dragObj.userData.isBoomDragging) _rotCursor(true); // 旋回ドラッグ中は●のカーソルのまま
+    else if (!isCanvas || buttons !== 0 || currentType || _moveAnim || _moveBlocked()) _rotCursor(false);
     if (!isCanvas || buttons !== 0 || currentType || _moveAnim || _moveBlocked()) { moveIcon.visible = false; return; }
     const t = performance.now();
     if (t - _moveObjAt >= MOVE_OBJ_INTERVAL_MS) { _moveObjHit = _moveObjectHit(); _moveObjAt = t; } // 間引き
+    _rotCursor(!!(_hoverPick && _hoverPick.rotate)); // r148: ●の上=回転カーソル
     const oh = _moveObjHit, h = oh || hits[0];
     if (!h) { moveIcon.visible = false; return; }
     const n = new THREE.Vector3(0, 1, 0);

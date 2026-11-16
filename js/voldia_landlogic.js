@@ -241,7 +241,6 @@
     // 通常(blue)+山留(purple): 傾斜を強制ON(土量計算では山留のみ強制垂直になっているため上書き)
     // 微テーパー量(マスター仕様=10mm)。頂点量子化(window._vertexQuantMm)の格子に丸められても
     // 崩れないよう、必ず量子化単位qの整数倍にする(q=10なら10、q=5なら10、q=20なら20)。
-    const _q = window._vertexQuantMm;
     // r011: 微テーパー量はvoldia3d.jsの変数LANDXML_MICRO_TAPER_MM(1か所管理)。読めない時だけ従来の10mm。
     const taperMm = (typeof window.LANDXML_MICRO_TAPER_MM === 'number' && window.LANDXML_MICRO_TAPER_MM > 0) ? window.LANDXML_MICRO_TAPER_MM : 10;
     // r014(37回目): 倒し量は壁の高さ別の可変(voldia3d.jsのwindow.LANDXML_TAPER: 最小15mm〜最大55mm、既定は5mm+10mm/m)。
