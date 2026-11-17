@@ -32,6 +32,9 @@
     box-sizing: border-box; white-space: nowrap;
   }
   #voldia-save-btn:hover { background: #388e3c; }
+  /* v0094(48回目): 戻るボタンと保存ボタンの間隔を、他のボタン(範囲スクショ・印刷・HTML書き出し=margin-top:6px)とそろえる。ボタン名の括弧の中は小さい字 */
+  #voldia-save-btn { margin-top: 6px; }
+  .btn-sub { font-size: 0.75em; }
   #voldia-save-btn:disabled { opacity: 0.6; cursor: default; }
   #voldia-print-btn, #voldia-shot-btn, #voldia-html-btn {
     background: #37474f; color: #cfd8dc; border: 1px solid #607d8b; border-radius: 4px;
@@ -336,9 +339,9 @@
 
 <div id="left-panel">
   <button id="voldia-back-btn" style="width:100%;box-sizing:border-box;">◀ Voldiaに戻る</button>
-  <button id="voldia-save-btn" style="width:100%;box-sizing:border-box;">📤 Vold出力</button>
+  <button id="voldia-save-btn" style="width:100%;box-sizing:border-box;">📤 保存<span class="btn-sub">(Vold出力)</span></button>
   <button id="voldia-shot-btn" style="width:100%;box-sizing:border-box;">📷 範囲スクショ</button>
-  <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷(A3 PDF)</button>
+  <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷<span class="btn-sub">(A3 PDF)</span></button>
   <button id="voldia-html-btn" style="width:100%;box-sizing:border-box;">🌐 HTML書き出し</button> <!-- v0089(47回目) -->
   <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
 
@@ -595,6 +598,7 @@
 <script src="data/voldia_models.js"></script>
 <script src="data/voldia_scaffold_tex.js"></script>
 <script src="data/voldia_viewer_template.js?v=r3"></script> <!-- v0089(47回目): HTML書き出しのViewer一体型HTMLのひな形 --> <!-- v0082(45回目): 足場のテクスチャ画像 -->
+<!-- v0094(48回目): ①左パネルの「Voldiaに戻る」と「保存」の間隔を他のボタンとそろえた(#voldia-save-btnにmargin-top:6px) ②「Vold出力」→「保存(Vold出力)」・「印刷(A3 PDF)」の括弧の中を小さい字に(.btn-sub)。ロジックは js/voldia_placement.js r149(右クリック/Escでダイアログをキャンセル・白丸・構台の右クリックで1つ戻る・Enter繰り返しの表示・●の吸着・線のマウスオーバー表示)。 -->
 <!-- v0080(41回目): 左パネルの「印刷」の上に「📷 範囲スクショ」を追加(#voldia-shot-btn)。押すと画面全体が範囲選択モードになり(#shot-select-overlay)、ドラッグした範囲をそのままPNG保存する。背景色の変更は無し。ロジックは voldia_placement.js の「範囲スクショ」ブロック。 -->
 <div id="shot-select-overlay"><div id="shot-select-box"></div></div>
 <!-- v0079(40回目): 【削除】data/LOW_1TOKO_geo.js と data/voldia_worker_toko.js を読み込んでいたscriptタグ2行。

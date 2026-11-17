@@ -5222,6 +5222,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
 // ===== 改版履歴(新しい順・1行=1改版)。以前は下の VOLDIA3D_VER の行末に1行で続けて書いていた。48回目に1改版1行へ分割して整理(本文は元のまま・欠落なし) =====
+// r133(48回目): _guardedDecimateMesh の取りこぼし対策(テスト担当の破壊テスト報告): ①ずれの測定を2段(N=4→余裕×1.3→ぎりぎりだけN=32)。N=4だけだと許容5mmを最大+15%超えた(5.73mm)②元は逆勾配でなかった面が縮約で逆勾配(ny>0.05)になる縮約を拒否(山留の細い壁面で逆勾配が増えていた)。前版=backup/voldia3d_r132.js
 // r132(48回目): コード整理=挙動を変えない削除。①書き込みだけで誰にも読まれないwindow変数 _yamadomeBattOffsetMm・_yamadomePrismID ②後ろの同名関数に上書きされて使われなかった古い _ringSelfIntersects(ptsMm, SF) ③未使用の分割代入 ok。削除の一覧と残したものは引継ぎ書の「コード整理記録」。前版=backup/voldia3d_r131.js
 // r131(48回目): 合体判定キャッシュのキーに法面角度・isDoboku・taperMm・色・穴を追加(_mergeCtxSig/_mergeShapeSig。法面を切り替えると前の法面の判定が使い回されていた=テスト担当の報告)。
 // r130(48回目): 問題7=許容つきの間引き(_guardedDecimateMesh。許容5mm=3Dイメージだけ。window._planarDecimateTolMm=0で誤差0=r129に戻る。Land Logic・欠陥スキャンは誤差0のまま)。
@@ -5257,7 +5258,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // r100: 既存躯体の底面∞(doboku系統のみ)。
 // r099(35回目): frustum個別テーパーf.taperMm対応
 // ===== ここまで改版履歴 =====
-const VOLDIA3D_VER = "Voldia-3D-r132(base:VoldiaM r069)"; // 改版履歴は直上のコメント
+const VOLDIA3D_VER = "Voldia-3D-r133(base:VoldiaM r069)"; // 改版履歴は直上のコメント
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -5979,7 +5980,8 @@ function _decimatePlanarMesh(positions, lists, opt){
 //   安全条件: r129の条件(リンク条件=非多様体を作らない・裏返り/つぶれなし)に加え、
 //         ①寄せる前後の局所のずれ(密な標本点で両方向)を測り、それまでの積み上げ(三角形ごとに保持)と足して tolM を超える寄せは行わない。
 //         ②三角形の法線は元の法線から angDeg 以内。
-//   限界: ずれの上限は標本点による測定+積み上げ(安全側)で管理しており、数学的な証明ではない。実測はR1〜R8・ymd_1508で上限以内(最大4.3mm/許容5mm)。
+//   限界: ずれの上限は標本点による測定+積み上げ(安全側)で管理しており、数学的な証明ではない。r133で標本の取りこぼし(N=4で最大+15%)を、余裕×1.3+ぎりぎりの時だけN=32の測り直しで抑えた。
+//   r133: 逆勾配になる縮約の拒否も追加(元は逆勾配でなかった面が、縮約の傾きで ny>0.05 になる縮約は行わない)。
 //   使う側: buildManifoldUnionGeom の opts.decimateTolMm(mm)。省略=0=従来(r129=誤差0)。0より大きい時だけ使う。Land Logic(LandXML)と欠陥スキャンは指定しない(誤差0のまま)。
 //   戻り: {before,after,collapsed,lists,budget(m)}。大きすぎる時(>20000面)はnull(呼び出し側がr129へ戻す)。
 // ============================================================
@@ -6022,8 +6024,8 @@ function _guardedDecimateMesh(positions, lists, tolM, angDeg){
     if(!any||Date.now()-t0>TIME_MS) break; }
   const reg = tri.map((_,i)=>find(i));
   // 局所のずれ: 旧い扇形と新しい扇形を、密な標本点(4x4の重心座標)で両方向に測った最大距離
-  const localDev = (Fold, Fnew) => {
-    if(!Fnew.length) return Infinity; const N=4;
+  const localDev = (Fold, Fnew, N) => {
+    if(!Fnew.length) return Infinity; N = N || 4;
     const samp = Tl => { const s=[]; for(const q of Tl) for(let i=0;i<=N;i++) for(let j=0;j<=N-i;j++){ const a=i/N, b=j/N, c=1-a-b; s.push(add(add(mul(q[0],a),mul(q[1],b)),mul(q[2],c))); } return s; };
     const f = (S,Tl) => { let mx=0; for(const p of S){ let m=1e9; for(const q of Tl){ const d=ptTri(p,q[0],q[1],q[2]); if(d<m) m=d; if(m<1e-12) break; } if(m>mx) mx=m; } return mx; };
     return Math.max(f(samp(Fold),Fnew), f(samp(Fnew),Fold));
@@ -6049,10 +6051,19 @@ function _guardedDecimateMesh(positions, lists, tolM, angDeg){
       let common = 0; for(const x of nb.keys()) if(x!==u && Nu.has(x)) common++;
       if(common !== apex.size) continue; // リンク条件(非多様体を作らない)
       let good = true; const newT = [];
-      for(const t of inc){ if(S.includes(t)) continue; const nt = tri[t].map(x => x===v?u:x); const n2 = nrm(nt[0],nt[1],nt[2]); if(n2[3] < 1e-12 || dot(n2, tn[t]) < cosA){ good=false; break; } newT.push([t,nt]); }
+      for(const t of inc){ if(S.includes(t)) continue; const nt = tri[t].map(x => x===v?u:x); const n2 = nrm(nt[0],nt[1],nt[2]); if(n2[3] < 1e-12 || dot(n2, tn[t]) < cosA){ good=false; break; }
+        // r133: 元は逆勾配(ny>0.05)でなかった面が、縮約の傾き(最大3°)で逆勾配になる縮約は行わない(山留の垂直に近い細い壁面で、法線が不安定なため起きていた=テスト担当の報告(3))
+        if(n2[1] > 0.05 && Math.abs(n2[1]) <= 0.99 && !(tn[t][1] > 0.05 && Math.abs(tn[t][1]) <= 0.99)){ good=false; break; }
+        newT.push([t,nt]); }
       if(!good) continue;
-      const d = localDev(inc.map(t=>coords(tri[t])), newT.map(x=>coords(x[1]))), en = emax + d; // 積み上げ=これまでの上限+今回のずれ
-      if(!(en <= tolM)) continue;
+      // r133: ずれの測定を2段にする。N=4の標本は最大点を取りこぼし、真の値より小さく出る(反例CEG1: 4.88mmに見えて実際は5.50mm=+12%)。
+      //   ①N=4で測る。積み上げ(emax+d4)がもう許容を超えるなら、細かく測るほど値は大きくなる(N=32の標本はN=4の標本を含む)ので確実に拒否。
+      //   ②N=4で×1.3の余裕を足しても許容に収まるなら、そのまま受け入れる(積み上げには×1.3を入れる)。
+      //   ③余裕を足すと許容を超えるぎりぎりの時だけ、N=32で測り直す(×1.05の余裕)。測り直しは少数なので、全部をN=32にするより速い。
+      const oldC = inc.map(t=>coords(tri[t])), newC = newT.map(x=>coords(x[1]));
+      let d = localDev(oldC, newC, 4); if(!(emax + d <= tolM)) continue;
+      if(emax + d*1.3 <= tolM) d = d*1.3; else { d = localDev(oldC, newC, 32) * 1.05; if(!(emax + d <= tolM)) continue; }
+      const en = emax + d; // 積み上げ=これまでの上限+今回のずれ(余裕込み)
       if(!best || d < best.d) best = {u,S,newT,d,en};
     }
     if(!best) return false;

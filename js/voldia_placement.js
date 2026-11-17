@@ -1,6 +1,9 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r149): 配置モードの修正12件のうち9件(マスター要望): ①ボックス・足場などの設定画面が開いている間は、画面のどこで右クリックしてもキャンセル(_topDialogCancel。右ドラッグ=パンは除く)。Escも同じ(ダイアログが無ければ配置中のツールを終了)
+//   ②コメント・矢印の配置中も白丸を出す ④構台の作図も右クリックで1つ戻る ⑤ツールを使った後に「Enterで繰り返し配置」を表示(構台は除く) ⑥⑦左パネルのボタンの間隔・名称(HTML=voldia_placement_v0094.html) ⑧●の吸着(28px以内。つかむ・カーソル変更の両方) ⑩線にマウスオーバーで「ダブルクリックで削除」 ⑫(配置モードのEsc)。
+//   未対応(次): ③線ツールのクリックと画面回転の両立 ⑨足場上の作業員の落下 ⑪カラーコーンを旋回方式に ⑫のうち2D・3Dイメージ側のEsc。前版=backup/voldia_placement_r148b.js
 // 48回目(r148b): 水色●にマウスが乗っている間はカーソルを橙色の回転カーソルに変える(_rotCursor。判定はつかみと同じ_pickPlacedDrag)。
 // 48回目(r148): 上部旋回のドラッグ判定を統一(マスター指示)。旋回=水色●(isDragMarker)のドラッグだけ。●以外(上部・下部の本体・ブーム・アーム・バケット)のドラッグは移動(_pickPlacedDrag)。以前はuserData.isBoomの部品をつかんでも旋回だった(data/voldia_models.jsのisBoom付与は残るが、旋回には使わなくなった)。●がブーム等に埋まって見えていても、レイ上に●があれば●を優先。前版=backup/voldia_placement_r147.js
 // 48回目(r147): ホイールのズームが限界に近い(注視点まで3m以内)のにズームインのホイールを5回連続で回した時、トーストで「ホイールでのズームには限界があります/一度遠くに離れて、ホイールクリックで近づいてください」を出す(12秒は再表示しない)。showToastは改行(\n)入りなら2行で出す。※配置モードHTMLは変更なし(voldia_placement_v0093.html)。前版=backup/voldia_placement_r146.js
@@ -926,7 +929,7 @@ window.addEventListener('message', function(ev) {
     } else if (d.type === 'voldia-save-done') {
       const btn = document.getElementById('voldia-save-btn');
       btn.textContent = d.ok ? '✓ 出力完了' : '⚠ 出力失敗';
-      setTimeout(() => { btn.disabled = false; btn.textContent = '📤 Vold出力'; }, 1800);
+      setTimeout(() => { btn.disabled = false; btn.innerHTML = '📤 保存<span class="btn-sub">(Vold出力)</span>'; }, 1800); // r149: 名称を「保存(Vold出力)」に(括弧の中は小さい字)
     }
   });
   if (_voldiaParent) {
@@ -1110,11 +1113,11 @@ window.addEventListener('message', function(ev) {
       const a = Object.assign(document.createElement('a'), {href:url, download:`Vold3DScreen_${stamp}.pdf`});
       a.click(); URL.revokeObjectURL(url);
       btn.textContent = '✓ 印刷完了';
-      setTimeout(()=>{ btn.textContent = '🖨 印刷(A3 PDF)'; }, 1800);
+      setTimeout(()=>{ btn.innerHTML = '🖨 印刷<span class="btn-sub">(A3 PDF)</span>'; }, 1800);
     }catch(e){
       console.error(e);
       btn.textContent = '⚠ 失敗';
-      setTimeout(()=>{ btn.textContent = '🖨 印刷(A3 PDF)'; }, 1800);
+      setTimeout(()=>{ btn.innerHTML = '🖨 印刷<span class="btn-sub">(A3 PDF)</span>'; }, 1800);
     }
   });
 
@@ -1310,11 +1313,38 @@ window.addEventListener('message', function(ev) {
       b.addEventListener('pointerleave', hide); b.addEventListener('pointerdown', hide); b.addEventListener('blur', hide);
     });
   })();
-  // 47回目: ボックス・足場の設定画面で右クリック=キャンセル(その画面の上で右クリックした時。3D画面の右ドラッグ(パン)には影響しない)
-  [['box-input-ui', 'box-btn-cancel'], ['scaffold-input-ui', 'scf-btn-cancel']].forEach(([ui, cancel]) => {
-    const el = document.getElementById(ui); if (!el) return;
-    el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); const c = document.getElementById(cancel); if (c) c.click(); });
-  });
+  // r149(48回目・マスター指示): 設定画面(ボックス・足場・コメント・テンキー・確認など)が開いている間は、画面のどこで右クリックしてもキャンセル。
+  //   (以前は設定画面の上でしか効かなかった。画面側の pointerdown が、ダイアログ表示中は何もせず return するため)。
+  //   右ドラッグ(パン)は除く: 押した位置から5px以上動いたら右クリックとは見なさない。Escキーも同じ「いま一番手前のもの」をキャンセルする。
+  //   順序: 確認ダイアログ > 足場の編集画面 > テンキー > 足場/ボックス/コメントの入力画面。Escだけは、ダイアログが無ければ配置中のツールを終了する(AutoCADのEsc)。
+  function _topDialogCancel() {
+    const shown = id => { const el = document.getElementById(id); return !!el && getComputedStyle(el).display !== 'none'; };
+    const click = id => () => { const c = document.getElementById(id); if (c) c.click(); };
+    if (shown('vhtml-confirm-overlay')) return click('vhtml-confirm-no');
+    if (shown('kotai-confirm-overlay')) return click('kotai-confirm-no');
+    if (shown('custom-confirm-overlay')) return click('custom-confirm-no');
+    if (typeof _scfIsOpen === 'function' && _scfIsOpen()) return () => _scfEditClose();
+    if (shown('numpad-ui')) return click('numpad-cancel');
+    if (shown('scaffold-input-ui')) return click('scf-btn-cancel');
+    if (shown('box-input-ui')) return click('box-btn-cancel');
+    if (shown('text-input-ui')) return click('text-btn-cancel');
+    return null;
+  }
+  let _rcDown = null;
+  window.addEventListener('pointerdown', e => { if (e.button === 2) _rcDown = { x: e.clientX, y: e.clientY }; }, true);
+  window.addEventListener('contextmenu', e => {
+    const moved = _rcDown && Math.hypot(e.clientX - _rcDown.x, e.clientY - _rcDown.y) > 5; _rcDown = null;
+    const act = _topDialogCancel(); if (!act || moved) return;
+    e.preventDefault(); e.stopPropagation(); act();
+  }, true);
+  window.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const shot = document.getElementById('shot-select-overlay'); if (shot && getComputedStyle(shot).display !== 'none') return; // 範囲スクショは専用の処理
+    let act = _topDialogCancel();
+    if (!act && currentType) act = () => exitPlacementMode();
+    if (!act) return;
+    e.preventDefault(); e.stopPropagation(); act();
+  }, true);
 
   // ボタン→確認ダイアログ→書き出し。three等のソースは、このページが読み込んでいるscriptタグと同じURLから取得する(取得元を1か所に保つ。このページ自体がオンラインで動いている前提)
   (function () {
@@ -2726,6 +2756,7 @@ window.addEventListener('message', function(ev) {
   // 4. UIロジックと配置管理
   // ==========================================
   let currentType = null;
+  let _lastToolWasKotai = false; // r149: 直前に使ったツールが構台か(構台は繰り返すものではないので、ヒントを出さない)
   let _lastPalBtnForRepeat = null; // r051: Enterキーでのリピート機能。構台(kotai)・保存系は対象外。
   const placedObjects = []; 
 
@@ -2733,6 +2764,7 @@ window.addEventListener('message', function(ev) {
     btn.addEventListener('click', () => {
       // r051: リピート機能(手動・Enterキー)用に直前選択ボタンを記録。構台(kotai)は対象外。
       if(btn.dataset.type !== 'kotai') _lastPalBtnForRepeat = btn;
+      _lastToolWasKotai = (btn.dataset.type === 'kotai');
       const nextType = btn.dataset.type;
       const isSame = (currentType === nextType);
 
@@ -2788,7 +2820,7 @@ window.addEventListener('message', function(ev) {
       } else if (currentType === 'kotai') {
         // r062: 構台。真上カメラへ切替、多角形描画モードへ入る
         document.getElementById('placement-msg-text').innerText = "頂点をクリックしてください（0.5mグリッドにスナップ）";
-        document.getElementById('placement-msg-sub').innerText = "始点クリックまたはダブルクリックで確定／Escでキャンセル";
+        document.getElementById('placement-msg-sub').innerText = "始点クリックまたはダブルクリックで確定／右クリックで1つ戻る／Escでキャンセル";
         document.getElementById('line-color-picker').style.display = "none";
         document.getElementById('finish-line-btn').style.display = "none";
         enterKotaiMode();
@@ -2819,6 +2851,21 @@ window.addEventListener('message', function(ev) {
     _lastPalBtnForRepeat.click();
     showToast(`↩ リピート: ${_lastPalBtnForRepeat.textContent.trim()}`);
   });
+
+  // r149(48回目・マスター要望): Enterでツールを繰り返し配置できることが分かりにくいので、ツールを使った後は画面に「Enterで繰り返し配置」を出す。
+  //   構台は何度も描くものではないので出さない(直前に使ったのが構台の間)。配置待ち・ダイアログ表示中・ドラッグ中・文字入力中は出さない。
+  const _repeatHint = document.createElement('div');
+  _repeatHint.id = 'repeat-hint';
+  _repeatHint.style.cssText = 'display:none;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:8000;background:rgba(0,0,0,.72);color:#fff;padding:5px 14px;border-radius:14px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;border:1px solid rgba(255,255,255,.25);';
+  document.body.appendChild(_repeatHint);
+  function _repeatHintUpdate() {
+    const tag = document.activeElement && document.activeElement.tagName;
+    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable);
+    const show = !!_lastPalBtnForRepeat && !_lastToolWasKotai && !currentType && !dragObj && !typing && !_topDialogCancel() && !_kotaiSavedCam;
+    if (show) { const t = '↩ Enterで繰り返し配置（' + _lastPalBtnForRepeat.textContent.trim() + '）'; if (_repeatHint.textContent !== t) _repeatHint.textContent = t; }
+    _repeatHint.style.display = show ? 'block' : 'none';
+  }
+  setInterval(_repeatHintUpdate, 250);
 
   // r072(21回目引継ぎ・マスター要望「作業エリアが広いとホイールだけのズームでは
   // 拡大操作に限界がある」対策): カーソルキーでカメラの前後左右移動を追加。
@@ -3186,6 +3233,14 @@ window.addEventListener('message', function(ev) {
     kotaiPointMarkers.push(m);
   }
 
+  // r149(48回目・マスター要望): 構台の作図も、線と同じ「右クリックで1つ戻る」。1点も無い時の右クリックはツールを終了(線と同じ)。
+  function _kotaiUndoPoint() {
+    if (kotaiPoints.length === 0) { exitPlacementMode(); return; }
+    kotaiPoints.pop();
+    const m = kotaiPointMarkers.pop(); if (m) scene.remove(m);
+    _kotaiUpdatePreviewLine(null);
+  }
+
   function _kotaiUpdatePreviewLine(hoverPt) {
     if (kotaiPreviewMesh) { scene.remove(kotaiPreviewMesh); kotaiPreviewMesh = null; }
     if (kotaiPoints.length === 0) return;
@@ -3202,7 +3257,7 @@ window.addEventListener('message', function(ev) {
   function _kotaiOnPointerDown(e) {
     e.stopPropagation();
     if (e.button === 1) { e.preventDefault(); _kotaiPanning = true; _kotaiPanLast = { x: e.clientX, y: e.clientY }; return; }
-    if (e.button === 2) { _kotaiShowExitConfirm(); return; }
+    if (e.button === 2) { _kotaiUndoPoint(); return; } // r149: 右クリック=1つ戻る(線と同じ)。以前は終了確認だった
     if (e.button !== 0) return;
     let pt = _kotaiRaycastGround(e.clientX, e.clientY);
     if (!pt) return;
@@ -3528,6 +3583,26 @@ window.addEventListener('message', function(ev) {
   //   以前は userData.isBoom(ブーム・アーム・バケット・ミニバックホウの上部)をつかんでも旋回になり、上部のどこで旋回/移動になるかがあいまいだった。
   //   ●は depthTest:false で常に手前に描かれるので、レイが●より先に機体に当たっても、レイ上に●があれば●を優先する(見えている●を押したのに移動になるのを防ぐ)。
   //   戻り: null(つかめない: 何もない・構台) / {obj:ルート, upper:上部グループ|null, hitObj, rotate:旋回か}
+  // r149(48回目・マスター要望): 水色●に当たり判定を合わせにくいので「吸着」を入れる。マウスが●の画面上の位置から MARKER_SNAP_PX 以内なら、●に当たったものとして扱う(つかむ時も、カーソルを変える時も)。
+  //   ●が複数ある時は一番近いもの。カメラの後ろ・非表示の●は対象外。マーカーの一覧は物体ごとに1回だけ集めて WeakMap に持つ(毎回全部をたどると重いので)。
+  const MARKER_SNAP_PX = 28, _mkCache = new WeakMap(); let _mkTmp = null; // _mkTmp は初回の呼び出しで作る(読み込み時にTHREEを使わない)
+  function _findNearMarker(cx, cy) {
+    let best = null, bd = MARKER_SNAP_PX;
+    for (const root of placedObjects) {
+      if (!root.visible || root.userData.type === 'kotai') continue;
+      let list = _mkCache.get(root);
+      if (!list) { list = []; root.traverse(c => { if (c.userData.isDragMarker === true) list.push(c); }); _mkCache.set(root, list); }
+      for (const c of list) {
+        if (!c.visible) continue;
+        if (!_mkTmp) _mkTmp = new THREE.Vector3();
+        c.getWorldPosition(_mkTmp); _mkTmp.project(camera);
+        if (_mkTmp.z > 1 || _mkTmp.z < -1) continue;
+        const d = Math.hypot((_mkTmp.x * 0.5 + 0.5) * window.innerWidth - cx, (-_mkTmp.y * 0.5 + 0.5) * window.innerHeight - cy);
+        if (d < bd) { bd = d; best = c; }
+      }
+    }
+    return best;
+  }
   function _pickPlacedDrag(intersects) {
     if (!intersects || !intersects.length) return null;
     const mk = intersects.find(h => h.object.userData.isDragMarker === true);
@@ -3610,7 +3685,8 @@ window.addEventListener('message', function(ev) {
     if (e.button === 0 && !currentType) {
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
-      const pick = _pickPlacedDrag(intersects); // r148: つかみ方の判定は _pickPlacedDrag に集約(旋回=水色●だけ・それ以外は移動)
+      const _nm = _findNearMarker(e.clientX, e.clientY); // r149: ●の近く(吸着)
+      const pick = _nm ? _pickPlacedDrag([{ object: _nm }]) : _pickPlacedDrag(intersects); // r148: つかみ方の判定は _pickPlacedDrag に集約(旋回=水色●だけ・それ以外は移動)
       if (pick) {
         const obj = pick.obj, upper = pick.upper;
         dragObj = obj; isDragging = false; controls.enabled = false;
@@ -3638,6 +3714,7 @@ window.addEventListener('message', function(ev) {
     }
   });
 
+  let _lineTipAt = -1e9, _lineTipOn = false; // r149: 線のマウスオーバー表示(間引き用)
   let _lastPointerClientX = 0, _lastPointerClientY = 0; // [FIX 19回目] clientX権限エラー対策の退避用
   window.addEventListener('pointermove', e => {
     // [FIX 19回目 2026-08-30] file://運用時にFirefoxで稀に発生する
@@ -3667,6 +3744,19 @@ window.addEventListener('message', function(ev) {
       kotaiDeleteTip.style.display = 'none';
     }
 
+    // r149(48回目・マスター要望): 線にマウスが乗っている間も、構台と同じ「ダブルクリックで削除」を出す(判定はダブルクリック削除と同じ fenceLines へのレイ。60msに1回に間引く)。
+    {
+      let lineTip = document.getElementById('line-delete-tip');
+      if (!lineTip && kotaiDeleteTip) { lineTip = document.createElement('div'); lineTip.id = 'line-delete-tip'; lineTip.style.cssText = kotaiDeleteTip.style.cssText; lineTip.textContent = kotaiDeleteTip.textContent; document.body.appendChild(lineTip); }
+      if (lineTip) {
+        const nowT = performance.now();
+        if (!currentType && !dragObj && nowT - _lineTipAt >= 60) { _lineTipAt = nowT; _lineTipOn = fenceLines.some(g => raycaster.intersectObjects(g.children, true).length > 0); }
+        else if (currentType || dragObj) _lineTipOn = false;
+        const onKotaiTip = kotaiDeleteTip.style.display === 'block';
+        if (_lineTipOn && !onKotaiTip) { lineTip.style.display = 'block'; lineTip.style.left = (cx + 14) + 'px'; lineTip.style.top = (cy - 28) + 'px'; } else lineTip.style.display = 'none';
+      }
+    }
+
     if (currentType === 'line' && currentLinePoints.length > 0) {
       if (terrainHits.length > 0) {
         // r025: 始点(currentLinePoints[0])付近なら、閉じる候補としてスナップ＋ツールチップ表示
@@ -3690,14 +3780,17 @@ window.addEventListener('message', function(ev) {
       document.getElementById('line-close-tip').style.display = 'none';
     }
 
-    if (currentType && !dragObj && currentType !== 'text_balloon' && currentType !== 'arrow' && currentType !== 'custom_box_input' && currentType !== 'scaffold_input' && currentType !== 'kotai') {
-      if (terrainHits.length > 0) {
+    // r149(48回目): コメント・矢印を選んでいる間もマウス位置に白丸を出す(以前は出ず、普通の矢印カーソルのままだった)。コメントは物体の上にも置けるので、クリックと同じ物体+地面のレイで位置を決める。
+    let _mkHits = terrainHits;
+    if (currentType === 'text_balloon') _mkHits = raycaster.intersectObjects([...placedObjects, ...terrainMeshes], true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
+    if (currentType && !dragObj && currentType !== 'custom_box_input' && currentType !== 'scaffold_input' && currentType !== 'kotai') {
+      if (_mkHits.length > 0) {
         placementMarker.visible = true;
-        placementMarker.position.copy(terrainHits[0].point);
+        placementMarker.position.copy(_mkHits[0].point);
         placementMarker.position.y += 0.2; 
         
-        const normal = terrainHits[0].face.normal.clone();
-        const nMat = new THREE.Matrix3().getNormalMatrix(terrainHits[0].object.matrixWorld);
+        const normal = _mkHits[0].face.normal.clone();
+        const nMat = new THREE.Matrix3().getNormalMatrix(_mkHits[0].object.matrixWorld);
         normal.applyMatrix3(nMat).normalize();
         
         const qNormal = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
@@ -4017,7 +4110,8 @@ window.addEventListener('message', function(ev) {
   let _hoverPick = null; // r148: 直近のホバーのレイ結果に対する _pickPlacedDrag の結果(旋回の●の上か=rotate)
   function _moveObjectHit() {
     const hs = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite);
-    _hoverPick = _pickPlacedDrag(hs); // pointerdown(つかみ)と同じ判定を使う=カーソルが変わる所と旋回できる所が必ず一致する
+    const _nm = (typeof _findNearMarker === 'function' && typeof _lastPointerClientX === 'number') ? _findNearMarker(_lastPointerClientX, _lastPointerClientY) : null; // r149: ●の近く(吸着)
+    _hoverPick = _nm ? _pickPlacedDrag([{ object: _nm }]) : _pickPlacedDrag(hs); // pointerdown(つかみ)と同じ判定を使う=カーソルが変わる所と旋回できる所が必ず一致する
     if (!hs.length) return null;
     let o = hs[0].object; while (o && !o.userData.isRoot) o = o.parent;
     return (o && o.userData.type !== 'kotai') ? hs[0] : null;
