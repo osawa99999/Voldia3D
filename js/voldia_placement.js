@@ -1,6 +1,8 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r151): ⑨足場を範囲外へ移動して消す時、載っていた作業員が足場より先に・突き抜けて落ちていたのを修正(足場と同じ落とし方・同じ開始時刻で一緒に落とす。_scfSettleWorkers(vanishT0))。前版=backup/voldia_placement_r150a.js
+// 48回目(r150): ③線ツールのクリックと旋回の両立(A案)=押してから10px動くまで旋回させず、離した時に10px以内ならクリック(頂点を置く)、超えたらその位置から旋回。足場の設定画面の右クリック/Escが効かなかった不具合を修正(_scfIsOpenは設定画面の判定だったのを、編集画面=scaffold-edit-uiに直した)。前版=backup/voldia_placement_r149.js
 // 48回目(r149): 配置モードの修正12件のうち9件(マスター要望): ①ボックス・足場などの設定画面が開いている間は、画面のどこで右クリックしてもキャンセル(_topDialogCancel。右ドラッグ=パンは除く)。Escも同じ(ダイアログが無ければ配置中のツールを終了)
 //   ②コメント・矢印の配置中も白丸を出す ④構台の作図も右クリックで1つ戻る ⑤ツールを使った後に「Enterで繰り返し配置」を表示(構台は除く) ⑥⑦左パネルのボタンの間隔・名称(HTML=voldia_placement_v0094.html) ⑧●の吸着(28px以内。つかむ・カーソル変更の両方) ⑩線にマウスオーバーで「ダブルクリックで削除」 ⑫(配置モードのEsc)。
 //   未対応(次): ③線ツールのクリックと画面回転の両立 ⑨足場上の作業員の落下 ⑪カラーコーンを旋回方式に ⑫のうち2D・3Dイメージ側のEsc。前版=backup/voldia_placement_r148b.js
@@ -1323,7 +1325,7 @@ window.addEventListener('message', function(ev) {
     if (shown('vhtml-confirm-overlay')) return click('vhtml-confirm-no');
     if (shown('kotai-confirm-overlay')) return click('kotai-confirm-no');
     if (shown('custom-confirm-overlay')) return click('custom-confirm-no');
-    if (typeof _scfIsOpen === 'function' && _scfIsOpen()) return () => _scfEditClose();
+    if (shown('scaffold-edit-ui')) return click('scf-edit-close'); // 足場の編集画面(開口)。※_scfIsOpen()は「設定画面」が開いているかなので、ここでは使わない
     if (shown('numpad-ui')) return click('numpad-cancel');
     if (shown('scaffold-input-ui')) return click('scf-btn-cancel');
     if (shown('box-input-ui')) return click('box-btn-cancel');
@@ -2326,14 +2328,23 @@ window.addEventListener('message', function(ev) {
     }
     renderer.shadowMap.needsUpdate = true;
   }
-  function _scfSettleWorkers() { // 支え(床板・地面)が無くなった作業員を落下させる
+  // r151(48回目・マスター指摘): 足場を作図範囲の外へ移動して削除する時、足場に載っていた作業員は足場より先に・足場を突き抜けて落ちていた
+  //   (足場は vanishObject の「80m/s²で1秒」の落とし方、作業員は fallingObjects の「毎フレーム加速」で、加速度が約9倍も違ったため)。
+  //   vanishT0(足場の落下の開始時刻)を渡された時は、足元に地面が無い作業員を、足場と同じ落とし方・同じ開始時刻で一緒に落として消す。
+  function _scfSettleWorkers(vanishT0) { // 支え(床板・地面)が無くなった作業員を落下させる
     const decks = _scfDeckMeshes();
-    for (const w of placedObjects) {
+    for (const w of placedObjects.slice()) { // (配列から外すので、コピーをたどる)
       if (!w.userData || w.userData.type !== 'worker' || !w.userData.isPlaced) continue;
       if (fallingObjects.some(d => d.mesh === w)) continue;
       fallRaycaster.set(new THREE.Vector3(w.position.x, w.position.y + 0.4, w.position.z), new THREE.Vector3(0, -1, 0));
       const hits = fallRaycaster.intersectObjects([..._getFloorMeshes(), ...decks], true).filter(h => h.object.isMesh);
       if (hits.length > 0 && hits[0].point.y >= w.position.y - 0.3) continue; // 足元に面がある=そのまま
+      if (vanishT0 !== undefined && hits.length === 0) { // 足場ごと範囲外へ落ちる: 足場と一緒に(同じ加速度・同じ開始時刻で)落ちて消える
+        const k = placedObjects.indexOf(w); if (k !== -1) placedObjects.splice(k, 1);
+        w.userData.isVanishing = true;
+        vanishingObjects.push({ mesh: w, t0: vanishT0, y0: w.position.y, s0: w.scale.clone() });
+        continue;
+      }
       w.userData.isPlaced = false;
       fallingObjects.push({ mesh: w, targetY: hits.length > 0 ? hits[0].point.y : -Infinity, normal: new THREE.Vector3(0, 1, 0), speed: 0, isBouncing: false, vx: 0, vz: 0 });
     }
@@ -2519,10 +2530,11 @@ window.addEventListener('message', function(ev) {
   function vanishObject(mesh) {
     const idx = placedObjects.indexOf(mesh);
     if (idx !== -1) placedObjects.splice(idx, 1);
-    if (mesh.userData.type === 'scaffold') _scfSettleWorkers(); // r133: 載っていた作業員は落下
+    const t0 = performance.now(); // r151: 足場と載っていた作業員は、同じ開始時刻・同じ落とし方で落ちる
+    if (mesh.userData.type === 'scaffold') _scfSettleWorkers(t0); // r133: 載っていた作業員は落下(足元に地面が無ければ足場と一緒に)
     if (mesh.userData.radiusMesh) mesh.userData.radiusMesh.visible = false; // クレーンの作業半径円は先に消す
     mesh.userData.isVanishing = true;
-    vanishingObjects.push({ mesh, t0: performance.now(), y0: mesh.position.y, s0: mesh.scale.clone() });
+    vanishingObjects.push({ mesh, t0, y0: mesh.position.y, s0: mesh.scale.clone() });
     renderer.shadowMap.needsUpdate = true;
   }
   function updateVanishingObjects() { // animate()から毎フレーム呼ぶ
@@ -3613,7 +3625,32 @@ window.addEventListener('message', function(ev) {
     return { obj, upper, hitObj, rotate: !!(hitObj.userData.isDragMarker && upper) };
   }
 
+  // r150(48回目・マスター案A): 線ツールで、クリックしながらマウスが少し動いても頂点を置く(以前は5px以上動くと「ドラッグ=画面の旋回」と見なされ、頂点が置かれず画面だけ少し揺れた)。
+  //   線ツール中の左ボタンは、押してから LINE_CLICK_PX(10px)動くまで旋回させない(その間だけOrbitControlsを止めておく)。10pxを超えたら、その位置から旋回を始める
+  //   (OrbitControlsに「押した」イベントを渡し直す。このイベントには _voldiaSynth を付け、画面側の処理は無視する)。離した時にまだ10px以内なら「クリック」で頂点を置く。
+  //   マウス・ペンだけ(タッチは対象外)。右ボタン・他のツールは従来どおり。
+  const LINE_CLICK_PX = 10;
+  let _lineDead = null; // 線ツールで押してから、まだ10px以内の間: {x, y, id}
   window.addEventListener('pointerdown', e => {
+    if (e._voldiaSynth || currentType !== 'line' || e.button !== 0 || e.pointerType === 'touch' || e.target !== renderer.domElement) return;
+    _lineDead = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    controls.enabled = false; // OrbitControlsはこの押下を無視する(旋回を始めない)
+  }, true);
+  window.addEventListener('pointermove', e => {
+    if (!_lineDead || e.pointerId !== _lineDead.id) return;
+    if (Math.hypot(e.clientX - _lineDead.x, e.clientY - _lineDead.y) <= LINE_CLICK_PX) return;
+    _lineDead = null; controls.enabled = true;
+    if (currentType !== 'line') return;
+    const init = { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY, button: 0, buttons: 1, pointerId: e.pointerId, pointerType: e.pointerType || 'mouse', isPrimary: true, view: window };
+    const ev = (typeof PointerEvent === 'function') ? new PointerEvent('pointerdown', init) : new MouseEvent('pointerdown', init);
+    if (ev.pointerType === undefined) Object.defineProperty(ev, 'pointerType', { value: init.pointerType });
+    ev._voldiaSynth = true;
+    renderer.domElement.dispatchEvent(ev); // ここから旋回
+  }, true);
+  window.addEventListener('pointerup', e => { if (_lineDead) { _lineDead = null; controls.enabled = true; } }, true);
+
+  window.addEventListener('pointerdown', e => {
+    if (e._voldiaSynth) return; // r150: 線ツールの旋回開始のために渡し直したイベント(押した位置は元のまま)
     pointerDownPos = { x: e.clientX, y: e.clientY };
 
     if (e.target.tagName !== 'CANVAS' || e.target.id === 'radar-canvas') return;
@@ -3896,7 +3933,7 @@ window.addEventListener('message', function(ev) {
 
     if (!dragObj) {
       const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
-      if (dist < 5 && e.button === 0 && e.target.tagName === 'CANVAS' && e.target.id !== 'radar-canvas') {
+      if (dist < (currentType === 'line' ? LINE_CLICK_PX : 5) && e.button === 0 && e.target.tagName === 'CANVAS' && e.target.id !== 'radar-canvas') { // r150: 線ツールだけ10px以内ならクリック
         if (currentType) {
           mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
           mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
