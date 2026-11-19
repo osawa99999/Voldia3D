@@ -1,6 +1,7 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r152): ⑪カラーコーン(conebar)の旋回を重機と同じ「水色●をドラッグ」方式に。反対側のコーンを芯にして全体が回る(_coneBarBegin/_coneBarRotateTo。向きはyawで保存される)。クリックで15°回る方式は廃止。●は data/voldia_models.js の createConeBar に追加。前版=backup/voldia_placement_r151.js
 // 48回目(r151): ⑨足場を範囲外へ移動して消す時、載っていた作業員が足場より先に・突き抜けて落ちていたのを修正(足場と同じ落とし方・同じ開始時刻で一緒に落とす。_scfSettleWorkers(vanishT0))。前版=backup/voldia_placement_r150a.js
 // 48回目(r150): ③線ツールのクリックと旋回の両立(A案)=押してから10px動くまで旋回させず、離した時に10px以内ならクリック(頂点を置く)、超えたらその位置から旋回。足場の設定画面の右クリック/Escが効かなかった不具合を修正(_scfIsOpenは設定画面の判定だったのを、編集画面=scaffold-edit-uiに直した)。前版=backup/voldia_placement_r149.js
 // 48回目(r149): 配置モードの修正12件のうち9件(マスター要望): ①ボックス・足場などの設定画面が開いている間は、画面のどこで右クリックしてもキャンセル(_topDialogCancel。右ドラッグ=パンは除く)。Escも同じ(ダイアログが無ければ配置中のツールを終了)
@@ -3519,6 +3520,32 @@ window.addEventListener('message', function(ev) {
   let pointerDownPos = { x: 0, y: 0 };
   const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); 
 
+  // r152(48回目・マスター要望): カラーコーン(conebar)の旋回。芯=●と反対側のコーン。●をドラッグすると、芯のコーンを動かさずに全体が回る。
+  //   向きは他の物体と同じ yaw(保存される)で持ち、芯が動かないように中心(root.position)をずらす。高さ・傾きは新しい中心の地面に合わせる。
+  function _coneBarBegin(root, marker) {
+    root.updateMatrixWorld(true);
+    const ml = root.worldToLocal(marker.getWorldPosition(new THREE.Vector3()));
+    const pl = new THREE.Vector3(-ml.x, 0, -ml.z); // 芯=反対側のコーン(ルートの原点について対称)
+    root.userData._coneMarkerLocal = ml; root.userData._conePivotLocal = pl; root.userData._conePivotWorld = root.localToWorld(pl.clone());
+  }
+  function _coneBarRotateTo(root, pt) {
+    const u = root.userData, pv = u._conePivotWorld, ml = u._coneMarkerLocal, pl = u._conePivotLocal;
+    if (!pv || !ml || !pl) return;
+    const dx = pt.x - pv.x, dz = pt.z - pv.z; if (Math.hypot(dx, dz) < 0.1) return; // 芯のすぐ上は向きが定まらない
+    u.yaw = Math.atan2(dx, dz) - Math.atan2(ml.x - pl.x, ml.z - pl.z); // 芯→●の向き(ローカル)が、芯→マウスの向き(世界)に重なる回転
+    updateOrientation(root); root.updateMatrixWorld(true);
+    for (let k = 0; k < 2; k++) { // 芯のコーンが動かないように中心をずらす(地形の傾きがあっても2回で収束)
+      const cur = root.localToWorld(pl.clone()); root.position.x += pv.x - cur.x; root.position.z += pv.z - cur.z; root.updateMatrixWorld(true);
+    }
+    fallRaycaster.set(new THREE.Vector3(root.position.x, 100, root.position.z), new THREE.Vector3(0, -1, 0));
+    const hits = fallRaycaster.intersectObjects(_getFloorMeshes(), true).filter(h => h.object.isMesh);
+    if (hits.length > 0) {
+      root.position.y = hits[0].point.y;
+      u.normal = hits[0].face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(hits[0].object.matrixWorld)).normalize();
+    } else { root.position.y = 0; u.normal = new THREE.Vector3(0, 1, 0); }
+    updateOrientation(root);
+    checkFallenStatus(root, false);
+  }
   function updateOrientation(obj) {
     if (obj.userData.type === 'text_balloon') {
       return; 
@@ -3629,7 +3656,7 @@ window.addEventListener('message', function(ev) {
   //   線ツール中の左ボタンは、押してから LINE_CLICK_PX(10px)動くまで旋回させない(その間だけOrbitControlsを止めておく)。10pxを超えたら、その位置から旋回を始める
   //   (OrbitControlsに「押した」イベントを渡し直す。このイベントには _voldiaSynth を付け、画面側の処理は無視する)。離した時にまだ10px以内なら「クリック」で頂点を置く。
   //   マウス・ペンだけ(タッチは対象外)。右ボタン・他のツールは従来どおり。
-  const LINE_CLICK_PX = 10;
+  const LINE_CLICK_PX = 20;
   let _lineDead = null; // 線ツールで押してから、まだ10px以内の間: {x, y, id}
   window.addEventListener('pointerdown', e => {
     if (e._voldiaSynth || currentType !== 'line' || e.button !== 0 || e.pointerType === 'touch' || e.target !== renderer.domElement) return;
@@ -3731,6 +3758,7 @@ window.addEventListener('message', function(ev) {
         if (pick.rotate) { // 旋回: 水色●(isDragMarker)をつかんだ時だけ
           dragObj.userData.isBoomDragging = true;
           dragObj.userData.dragUpper = upper;
+          if (obj.userData.type === 'conebar') _coneBarBegin(obj, pick.hitObj); // r152: 芯(反対側のコーン)を覚える
           dragPlane.constant = -obj.position.y;
 
           upper.traverse(c => {
@@ -3860,6 +3888,7 @@ window.addEventListener('message', function(ev) {
       
       if (intersectPt) {
         if (dragObj.userData.isBoomDragging) {
+          if (dragObj.userData.type === 'conebar') { _coneBarRotateTo(dragObj, intersectPt); renderer.shadowMap.needsUpdate = true; return; } // r152: カラーコーンは、芯のコーンを中心に全体を回す
           const upper = dragObj.userData.dragUpper;
           const localPt = intersectPt.clone().applyMatrix4(new THREE.Matrix4().copy(dragObj.matrixWorld).invert());
           const dx = localPt.x - upper.position.x;
@@ -3987,7 +4016,7 @@ window.addEventListener('message', function(ev) {
             let obj = objHits[0].object;
             while (obj && !obj.userData.isRoot) { obj = obj.parent; }
             if (obj) {
-              if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow' || obj.userData.type === 'kotai') {
+              if (obj.userData.type === 'text_balloon' || obj.userData.type === 'arrow' || obj.userData.type === 'kotai' || obj.userData.type === 'conebar') { // r152: カラーコーンのクリック回転は廃止(水色●の旋回に)
                 // シングルクリックによる処理は削除
               } else {
                 const _carry1 = (obj.userData.type === 'scaffold') ? _scfCarryBegin(obj) : null; // r134: 載っている作業員も一緒に回す
@@ -4013,14 +4042,18 @@ window.addEventListener('message', function(ev) {
         });
 
         dragObj.userData.isBoomDragging = false;
-        dragObj = null;
-        isDragging = false;
-        controls.enabled = true;
-        renderer.shadowMap.needsUpdate = true; 
-        return;
+        if (dragObj.userData.type !== 'conebar') {
+          dragObj = null;
+          isDragging = false;
+          controls.enabled = true;
+          renderer.shadowMap.needsUpdate = true; 
+          return;
+        }
+        // r152: カラーコーンは旋回で中心の位置も動くので、離した所で通常の移動と同じ確定処理(重なりの回避・範囲外なら落ちて消える等)へ進む
+        delete dragObj.userData._conePivotWorld; delete dragObj.userData._conePivotLocal; delete dragObj.userData._coneMarkerLocal;
       }
       if (!isDragging && e.button === 0 && !currentType) {
-        if (dragObj.userData.type === 'text_balloon' || dragObj.userData.type === 'arrow') {
+        if (dragObj.userData.type === 'text_balloon' || dragObj.userData.type === 'arrow' || dragObj.userData.type === 'conebar') { // r152: カラーコーンのクリック回転は廃止
           // シングルクリックでの処理削除
         } else {
           if (dragObj.userData.type === 'scaffold' && !dragObj.userData._carry) dragObj.userData._carry = _scfCarryBegin(dragObj); // r134
