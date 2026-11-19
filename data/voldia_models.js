@@ -863,6 +863,11 @@ const MIX_GEO = {
       setShadows(mesh);
       group.add(mesh);
     });
+    // r152(48回目・マスター要望): カラーコーンの回転を、重機の旋回と同じ「水色●をドラッグ」方式にする(クリックで15°ずつ回る方式は廃止)。
+    //   片側(−X側)のコーンを芯にして、反対側(+X側)のコーンの上の水色●をドラッグすると、全体が芯のコーンを中心に回る(回す処理は js/voldia_placement.js の _coneBarRotateTo)。
+    //   つかみの判定(_pickPlacedDrag)は「上部(isUpper)の中の●」を探すので、●だけを入れた空の上部グループを置く(メッシュは動かさない)。コーンは±1.0mの位置。
+    const upper = new THREE.Group(); upper.userData.isUpper = true; group.add(upper);
+    const marker = createDragMarker(0.17); marker.position.set(1.0, 0.86, 0); upper.add(marker);
     return group;
   }
 
