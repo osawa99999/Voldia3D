@@ -1,6 +1,8 @@
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
+// 48回目(r154): 線の「ダブルクリックで削除」の文字と削除の判定をそろえた。文字が出ている線(_hoverFence)をダブルクリックで削除する(以前は表示が60msに1回の間引きで、文字が出ているのに消えないことがあった)。物体が手前にある時は出さない・画面以外では出さない。前版=backup/voldia_placement_r153.js
+// 48回目(r153): 線ツールのクリック判定の幅を10px→20pxに(LINE_CLICK_PX。実際に使ってもらったところ10pxでは効果が薄いとの意見)。前版=backup/voldia_placement_r152.js
 // 48回目(r152): ⑪カラーコーン(conebar)の旋回を重機と同じ「水色●をドラッグ」方式に。反対側のコーンを芯にして全体が回る(_coneBarBegin/_coneBarRotateTo。向きはyawで保存される)。クリックで15°回る方式は廃止。●は data/voldia_models.js の createConeBar に追加。前版=backup/voldia_placement_r151.js
 // 48回目(r151): ⑨足場を範囲外へ移動して消す時、載っていた作業員が足場より先に・突き抜けて落ちていたのを修正(足場と同じ落とし方・同じ開始時刻で一緒に落とす。_scfSettleWorkers(vanishT0))。前版=backup/voldia_placement_r150a.js
 // 48回目(r150): ③線ツールのクリックと旋回の両立(A案)=押してから10px動くまで旋回させず、離した時に10px以内ならクリック(頂点を置く)、超えたらその位置から旋回。足場の設定画面の右クリック/Escが効かなかった不具合を修正(_scfIsOpenは設定画面の判定だったのを、編集画面=scaffold-edit-uiに直した)。前版=backup/voldia_placement_r149.js
@@ -2704,6 +2706,7 @@ window.addEventListener('message', function(ev) {
         }
       });
       showToast('🗑️ 線を削除しました');
+      if (_hoverFence === fenceToDelete) _hoverFence = null; // r154
       fenceToDelete = null;
     }
     document.getElementById('custom-confirm-overlay').style.display = 'none';
@@ -3560,6 +3563,14 @@ window.addEventListener('message', function(ev) {
 
   window.addEventListener('dblclick', e => {
     if (currentType) return; 
+    // r154: 「ダブルクリックで削除」の文字が出ている線があれば、それをそのまま削除対象にする(文字が見えている=確実に反応)。
+    if (_hoverFence && fenceLines.indexOf(_hoverFence) !== -1) {
+      fenceToDelete = _hoverFence;
+      document.getElementById('custom-confirm-overlay').style.display = 'flex';
+      controls.enabled = false;
+      return;
+    }
+    if (e.target !== renderer.domElement) return; // r154: 画面(キャンバス)以外(パネル等)のダブルクリックでは、後ろの線を削除しない
     
     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -3653,10 +3664,10 @@ window.addEventListener('message', function(ev) {
   }
 
   // r150(48回目・マスター案A): 線ツールで、クリックしながらマウスが少し動いても頂点を置く(以前は5px以上動くと「ドラッグ=画面の旋回」と見なされ、頂点が置かれず画面だけ少し揺れた)。
-  //   線ツール中の左ボタンは、押してから LINE_CLICK_PX(10px)動くまで旋回させない(その間だけOrbitControlsを止めておく)。10pxを超えたら、その位置から旋回を始める
-  //   (OrbitControlsに「押した」イベントを渡し直す。このイベントには _voldiaSynth を付け、画面側の処理は無視する)。離した時にまだ10px以内なら「クリック」で頂点を置く。
+  //   線ツール中の左ボタンは、押してから LINE_CLICK_PX(20px)動くまで旋回させない(その間だけOrbitControlsを止めておく)。LINE_CLICK_PXを超えたら、その位置から旋回を始める
+  //   (OrbitControlsに「押した」イベントを渡し直す。このイベントには _voldiaSynth を付け、画面側の処理は無視する)。離した時にまだLINE_CLICK_PX以内なら「クリック」で頂点を置く。
   //   マウス・ペンだけ(タッチは対象外)。右ボタン・他のツールは従来どおり。
-  const LINE_CLICK_PX = 20;
+  const LINE_CLICK_PX = 20; // r153: 10→20px(数人に使ってもらったが10pxでは効果が薄いとの意見。マスター案)
   let _lineDead = null; // 線ツールで押してから、まだ10px以内の間: {x, y, id}
   window.addEventListener('pointerdown', e => {
     if (e._voldiaSynth || currentType !== 'line' || e.button !== 0 || e.pointerType === 'touch' || e.target !== renderer.domElement) return;
@@ -3779,7 +3790,7 @@ window.addEventListener('message', function(ev) {
     }
   });
 
-  let _lineTipAt = -1e9, _lineTipOn = false; // r149: 線のマウスオーバー表示(間引き用)
+  let _hoverFence = null; // r154: いま「ダブルクリックで削除」の文字が出ている線(なければnull)
   let _lastPointerClientX = 0, _lastPointerClientY = 0; // [FIX 19回目] clientX権限エラー対策の退避用
   window.addEventListener('pointermove', e => {
     // [FIX 19回目 2026-08-30] file://運用時にFirefoxで稀に発生する
@@ -3809,17 +3820,21 @@ window.addEventListener('message', function(ev) {
       kotaiDeleteTip.style.display = 'none';
     }
 
-    // r149(48回目・マスター要望): 線にマウスが乗っている間も、構台と同じ「ダブルクリックで削除」を出す(判定はダブルクリック削除と同じ fenceLines へのレイ。60msに1回に間引く)。
+    // r149/r154(48回目・マスター要望): 線にマウスが乗っている間も、構台と同じ「ダブルクリックで削除」を出す。
+    //   r154: 「文字が出ている=ダブルクリックで必ず消える」にそろえる(以前は表示とダブルクリックが別々にレイを飛ばし、表示は60msに1回に間引いていたため、
+    //   最後の動きが評価されず、文字は出ているのに実際の位置は線から外れている、が起きた)。今はマウスが動くたびに判定し、乗っている線(一番手前)を _hoverFence に覚える。
+    //   ダブルクリックは、文字が出ている線(_hoverFence)をそのまま削除対象にする(改めて細い線へレイを飛ばし直さない)。物体(重機・足場など)が線より手前にある時は出さない。
     {
       let lineTip = document.getElementById('line-delete-tip');
       if (!lineTip && kotaiDeleteTip) { lineTip = document.createElement('div'); lineTip.id = 'line-delete-tip'; lineTip.style.cssText = kotaiDeleteTip.style.cssText; lineTip.textContent = kotaiDeleteTip.textContent; document.body.appendChild(lineTip); }
-      if (lineTip) {
-        const nowT = performance.now();
-        if (!currentType && !dragObj && nowT - _lineTipAt >= 60) { _lineTipAt = nowT; _lineTipOn = fenceLines.some(g => raycaster.intersectObjects(g.children, true).length > 0); }
-        else if (currentType || dragObj) _lineTipOn = false;
-        const onKotaiTip = kotaiDeleteTip.style.display === 'block';
-        if (_lineTipOn && !onKotaiTip) { lineTip.style.display = 'block'; lineTip.style.left = (cx + 14) + 'px'; lineTip.style.top = (cy - 28) + 'px'; } else lineTip.style.display = 'none';
+      let hovered = null;
+      if (lineTip && !currentType && !dragObj && fenceLines.length > 0 && e.target === renderer.domElement && kotaiDeleteTip.style.display !== 'block') {
+        let lineDist = Infinity;
+        for (const g of fenceLines) { const h = raycaster.intersectObjects(g.children, true); if (h.length > 0 && h[0].distance < lineDist) { lineDist = h[0].distance; hovered = g; } }
+        if (hovered) { const oh = raycaster.intersectObjects(placedObjects, true).filter(h => h.object.isMesh || h.object.isSprite); if (oh.length > 0 && oh[0].distance <= lineDist) hovered = null; }
       }
+      _hoverFence = hovered;
+      if (lineTip) { if (hovered) { lineTip.style.display = 'block'; lineTip.style.left = (cx + 14) + 'px'; lineTip.style.top = (cy - 28) + 'px'; } else lineTip.style.display = 'none'; }
     }
 
     if (currentType === 'line' && currentLinePoints.length > 0) {
