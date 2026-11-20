@@ -1,6 +1,28 @@
+// 48回目: ④Escキー=一番手前のダイアログを閉じる。何も開いていなければ3Dイメージ画面を閉じてVoldia 2Dへ戻る(_escTopDialog。2Dの作図・編集のEscは従来のまま)。前版=backup/voldia_main_r48c.js
+// 48回目: ③コード整理=挙動を変えない削除: 使われない変数 q・totalStr・totalDepth・odVal と、それで呼ぶ所が無くなった関数 calcTotalDepth、書き込みだけで読まれない _consentGiven(宣言と代入3か所)。前版=backup/voldia_main_pretidy.js
 // 48回目: ①法面角度のホバー説明(SLOPE_INFO)に建築向け2件(1:0.577=60°・1:1.732=30°)を追加 ②一覧の行の名前に title(省略時の全文表示)。※行の並びのずれ修正はCSS=Voldia_v0161.html の .sh-header
 // ============================================================
-// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離) / r053(41回目): ①測点ダイアログ(タイトル出し分け・設置ボタンのグレーアウト) ②測点/グレーオブジェクトのマウスオーバー表示 ③グレー設定トーストの文言 / r052(41回目): ヘルプ文(_GM_TIPS)6件の改行位置をマスター指定に変更 / r051(41回目): ①オブジェクトスナップの優先度を「交点>端点>中点>線上」に(従来は最短距離優先で、線上の交点が選ばれにくかった) ②3D結果画面にGLB出力/LANDXML出力ボタン・出力ダイアログ・各ボタンのヘルプ文(voldiaConfirmGLBは撤去) / r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog) / r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし) / r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由 / r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止) / r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止 / r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一 / r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造 / r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除 / r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照) / r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照) / r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない) / r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造) / r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加 / r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に / r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// voldia_main.js — 2D作図エンジン本体 (Voldia_v0118.htmlインラインscriptより分離)
+// ===== 改版履歴(新しい順・1行=1改版)。以前は1行に " / " 区切りで続けて書いていた。48回目に1改版1行へ分割して整理(本文は元のまま・欠落なし) =====
+// r053(41回目): ①測点ダイアログ(タイトル出し分け・設置ボタンのグレーアウト) ②測点/グレーオブジェクトのマウスオーバー表示 ③グレー設定トーストの文言
+// r052(41回目): ヘルプ文(_GM_TIPS)6件の改行位置をマスター指定に変更
+// r051(41回目): ①オブジェクトスナップの優先度を「交点>端点>中点>線上」に(従来は最短距離優先で、線上の交点が選ばれにくかった) ②3D結果画面にGLB出力/LANDXML出力ボタン・出力ダイアログ・各ボタンのヘルプ文(voldiaConfirmGLBは撤去)
+// r050(41回目): ①✏修正モードを右クリックで終了/ドラッグ中ならキャンセル(ESCと同じ。_editEscape)・修正モード中の右クリックで測点が消える副作用を防止 ②3Dイメージ画面の「◀ 戻る」=3D生成方法ダイアログへ戻る(backToGenDialog)
+// r049(41回目): 図形の作図完了・削除のトーストを、位置番号ではなく一覧に表示している図形名に統一(欠番後に『四角形7』と『図形6』でずれていた。採番_nextShapeNumberは変更なし)
+// r048(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を負の値不可(トースト+0に戻す)・桁区切り表示に。読み取りは共通関数parseInputNum()経由
+// r047(40回目): ①図形名の採番を「既存の最大番号+1」に修正(欠番ができると重複していた) ②作図中にVoldを投げてもダイアログを必ず表示(同意済みの即読込の例外を廃止)
+// r046(40回目): Voldファイル読込時の表示を起動ダイアログ(Voldモード)に変更(_openVoldDialog/_suShowVold)。旧・長文免責モーダルでの同意確認(_requireConsent)は廃止
+// r045(40回目): ①法面行の旧opacity強制(updSidebar内)を削除=通常計算でも法面角度がグレーアウトされなかった根本原因 ②起動ダイアログの「戻る」(#su-back)を「キャンセル」に統一
+// r044(40回目): 「3D生成方法」ダイアログ(showGenDialog系)を新設、3Dイメージボタンはこのダイアログを開く。起動ダイアログに「キャンセル」(_suCancel)を追加。ダイアログ表示中のキー/ツールロックにgm-overlayを追加。計算ロジックは無改造
+// r043(39回目): 書き込みのみだった_lastExistingStructGeoms(voldia3d.js側の変数)への代入2か所を削除
+// r042(39回目): 死んだ関数・変数を削除(削除一覧は下の【r042 削除一覧】参照)
+// r041(38回目): 起動フロー改造で不要になった旧コードを削除(削除一覧は下の【r041 削除一覧】参照)
+// r040(38回目): 起動ダイアログの縮尺既定値を1/100に・方眼紙モードに「戻る」ボタン追加(枠外クリックでは閉じない)
+// r039(38回目): 起動フローをArecal方式に統合(免責=「了解してはじめる」/ページ・元図の線・縮尺・角度調整を1つの起動ダイアログへ。体積・3D側は無改造)
+// r038(37回目): ✏修正の四角形を「拡大縮小(直角のまま)・辺の中点◆は平行移動」に変更し、描画ツールと同じオブジェクトスナップを追加
+// r037(37回目): ✏修正ボタン(頂点ドラッグ)追加+オブジェクト一覧の青を青灰色に
+// r036(36回目): グレー(既存躯体)の下端欄を「∞」表示(見た目のみ)
+// ===== ここまで改版履歴 =====
 // ============================================================
 // 【r042 削除一覧】(39回目。全ファイル=JS5本+HTML2本を横断検索し、呼び出し元ゼロ/書き込みのみ、と確認したものだけを削除。挙動は変えていない)
 //  削除した関数: chamferSharpAngles() + MIN_CHAMFER_M(鋭角カットの旧2D版。現役は voldia3d.js の tryChamferMm)
@@ -1106,7 +1128,6 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
     const{x:lx2,y:ly2}=getLogi(e);
     const HIT2=10/zoom;
     const onEdge2=yamadome.pts.some((p,i)=>{
-      const q=yamadome.pts[(i+1)%yamadome.pts.length];
       return Math.hypot(p.x-lx2,p.y-ly2)<HIT2*2;
     }) || pointInPoly(lx2,ly2,yamadome.pts);
     if(!onEdge2) return;
@@ -1292,7 +1313,6 @@ function loadPDF(file){
 //  ・縮尺はこれまで通りapplyScale()に任せる(体積・3D側は一切変更なし)。
 //  ・元図の線の抽出→回転焼き込みの順は従来のまま(bakeRotation()がvecPts/vecSegsも回転させる)。
 // ================================================================
-let _consentGiven=false;       // このセッションで免責に同意済みか
 let _discConsentMode=false;    // 免責の別窓が「同意確認」モードか(false=読むだけ)
 let _discCb=null;
 let _suPdf=null,_suInited=false,_suPaperSeq=0,_suTipOwner=null,_suGridMode=false;
@@ -1311,7 +1331,7 @@ function _showDisclaimer(consentMode,cb){
 function _discClose(){
   document.getElementById('disclaimer-modal').style.display='none';
   if(_discConsentMode){
-    _consentGiven=true;_discConsentMode=false;
+    _discConsentMode=false;
     const f=_discCb;_discCb=null;
     if(f)f();
   }
@@ -1614,7 +1634,30 @@ function _lxInit(){
   if(_lxInited)return;_lxInited=true;
   _lxEl('lx-no').addEventListener('click',_lxClose);
   _lxEl('lx-yes').addEventListener('click',_lxYes);
-  document.addEventListener('keydown',e=>{ // Escは「いいえ」。3D画面側のEsc処理より先に取る
+  // 48回目(マスター要望): Escキー=「とにかくキャンセルして入力待ちに戻る」(AutoCADと同じ)。いま一番手前のダイアログを閉じ、何も開いていなければ、
+//   3Dイメージ画面が開いている時だけ「✕ 閉じる」(=Voldia 2Dへ戻る。closeCalcModal)。
+//   専用のEsc処理がある画面(LandXMLの確認=lx-overlay・スクショ=ss-overlay・出力パネル=io-float-panel・配置モード=placement-overlay・計算中)は、その処理に任せる(ここでは何もしない)。
+//   2Dの作図・編集のEsc(山留編集・測点・距離・選択合成・部分削除・作図中・選択解除・修正モード)は従来のまま(下の keydown)。
+function _escTopDialog(){
+  const vis=id=>{const el=document.getElementById(id);return !!el&&getComputedStyle(el).display!=='none';};
+  const click=id=>()=>{const b=document.getElementById(id);if(b)b.click();};
+  if(['placement-overlay','lx-overlay','ss-overlay','io-float-panel','calc-progress-overlay'].some(vis)) return 'self';
+  if(vis('confirm-modal')) return click('confirm-modal-no');
+  if(vis('license-modal')) return click('license-modal-close');
+  if(vis('disclaimer-modal')) return click('disclaimer-ok');
+  if(vis('survey-dialog')) return click('sv-cancel');
+  if(vis('north-dialog')) return click('na-cancel');
+  if(vis('su-overlay')) return click('su-cancel');
+  if(vis('gm-overlay')) return click('gm-back');
+  const cm=document.getElementById('calc-modal'); if(cm&&cm.classList.contains('show')) return ()=>closeCalcModal();
+  return null;
+}
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const act=_escTopDialog(); if(!act||act==='self') return;
+  e.preventDefault(); e.stopPropagation(); act();
+},true);
+document.addEventListener('keydown',e=>{ // Escは「いいえ」。3D画面側のEsc処理より先に取る
     if(e.key==='Escape'&&_lxEl('lx-overlay').style.display==='flex'){e.stopPropagation();e.preventDefault();_lxClose();}
   },true);
 }
@@ -1826,7 +1869,7 @@ function _nextShapeNumber(){
 //  ・元図の線が保存されているVoldだけ「元図の線を読込む」を表示(既定ON)。外すと線(vecSegs)は読み込まない。
 //  ・読込のたびに必ずこのダイアログを出す(作図中に投げた場合も同じ)。r046で入れた「同意済み+元図の線なしは即読込」の例外は、
 //    作図中にダイアログが出ないという不具合になったため r047 で廃止。
-//  ・「了解してはじめる」で同意扱い(_consentGiven=true)→(現在の内容があれば破棄の確認)→applyVoldData(data,{loadVec})。
+//  ・「了解してはじめる」で同意扱い→(現在の内容があれば破棄の確認)→applyVoldData(data,{loadVec})。
 // ================================================================
 async function _openVoldDialog(f){
   let data;
@@ -1870,7 +1913,6 @@ function _suCancel(){
 function _suStart(){
   if(_suVoldMode){ // r046: Voldモード。縮尺などの入力検証は不要(Vold内の値を使う)
     const cb=_suVoldCb,loadVec=_suEl('su-vec').checked;
-    _consentGiven=true; // 「了解してはじめる」=免責に同意
     _suEl('su-overlay').style.display='none';_suHideTip();
     _suVoldMode=false;_suVoldCb=null;
     if(cb)cb(loadVec);
@@ -1893,7 +1935,6 @@ function _suStart(){
     denom=parseFloat(sv.split('/')[1]);
   }
   err.textContent='';
-  _consentGiven=true; // 「了解してはじめる」=免責に同意
   _suEl('su-overlay').style.display='none';
   _suHideTip();
   if(_suGridMode){
@@ -2851,8 +2892,6 @@ function updSidebar(){
     else if(subMode&&subTargets.has(idx))li.style.outline='2px solid #ff9800';
     else li.style.outline='';
     const areaStr=sh.area.toFixed(2);
-    const totalDepth=calcTotalDepth(sh);
-    const totalStr=totalDepth>0?`${Math.round(totalDepth)}mm`:'未入力';
 
     // ヘッダー部分をDOMで構築（innerHTML混在避けるため）
     const header=document.createElement('div');
@@ -2959,7 +2998,6 @@ function updSidebar(){
     // 新UI: 天端・下端・余掘・垂直↔法面トグル
     const topVal = (sh.topLevel!==undefined&&sh.topLevel!=='')?sh.topLevel:0;
     const botVal = sh.depthBeam!==undefined?sh.depthBeam:1800;
-    const odVal  = sh.overdig!==undefined?sh.overdig:200;
     const depthBlock=document.createElement('div');
     depthBlock.className='depth-block';
     depthBlock.innerHTML=`
@@ -3118,13 +3156,7 @@ function updSidebar(){
   if(calcBtn){calcBtn.disabled=!hasAll;calcBtn.style.opacity=hasAll?'1':'0.4';calcBtn.style.cursor=hasAll?'pointer':'not-allowed';}
 }
 
-function calcTotalDepth(sh){
-  const b=parseFloat(sh.depthBeam);
-  const tl=parseFloat(sh.topLevel)||0;
-  const c=getConcThick();
-  if(isNaN(b))return 0;
-  return Math.max(0, tl - b + c);
-}
+// 48回目: calcTotalDepth(sh)は、使われない変数 totalStr/totalDepth を消したことで呼ぶ所が無くなったため削除(全文は backup/voldia_main_pretidy.js)。
 
 // ================================================================
 //  スケール適用
