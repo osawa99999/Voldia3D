@@ -1,3 +1,5 @@
+// 50回目(修正提案書v002 2B): createArrowMesh() を平らな矢印板+縦ビルボード(tiltGroup)に作り直し。ポールは倍率で伸びる。前版=orig/voldia_models_r153.js
+// 50回目(修正提案書v002 2A): createConeBar(n) に個数(2〜10)を追加。コーンとバーを2.0mずつずらして一列に並べる(n=2は従来と同じ形)。前版=orig/voldia_models_r152.js
 // ============================================================
 // data/voldia_models.js
 // 配置モード用 3Dオブジェクトモデル生成関数群(重機・作業員・杭・標識類)
@@ -165,58 +167,67 @@ const MIX_GEO = {
 
   const setShadows = (m) => { m.castShadow = true; m.receiveShadow = true; };
 
+  // 50回目(修正提案書v002 2B・マスター要望「一度作って見てから考える」): 矢印を「平らな矢印板」+「縦だけのビルボード」に作り直し。
+  //   構成: root → baseGroup(黒い土台+ポール[isPole]) + upperGroup[isUpper。旋回=rotation.y・倍率=scale] → tiltGroup[isTilt] → 矢印板(赤・両面) / upperGroup直下に旋回マーカー●。
+  //   矢印板: 輪郭は従来の3D矢印と同じ寸法(軸の幅0.5・長さ2.0・先端の三角=幅1.4・長さ1.2)。向き=+Z(従来と同じ=旋回・レーダーの角度計算はそのまま)・板の厚み0.05・影は落とさない。
+  //   ビルボード: tiltGroup.rotation.z を js/voldia_placement.js の _updateArrowBillboards() が毎フレーム更新する(横から見ると板が垂直に立ち、真上から見ると水平に寝る。矢印の向き=方位はカメラに追従しない)。
+  //   ポール: 倍率に合わせて伸ばす(_applyArrowScale)。ポール高さ=矢印の中心の高さ。
+  const ARROW_SHAFT_HALF_W = 0.25, ARROW_SHAFT_LEN = 2.0, ARROW_HEAD_HALF_W = 0.7, ARROW_HEAD_LEN = 1.2, ARROW_PLATE_T = 0.05;
   function createArrowMesh() {
     const group = new THREE.Group();
 
     // ベース部分（黒い土台とポール）
     const baseGroup = new THREE.Group();
     const matBlack = new THREE.MeshLambertMaterial({ color: 0x111111 });
-    
+
     const dotGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
     const dotMesh = new THREE.Mesh(dotGeo, matBlack);
     dotMesh.position.y = 0.05;
     setShadows(dotMesh);
     baseGroup.add(dotMesh);
 
-    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.0, 8);
+    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.0, 8); // 高さ1.0を基準に、倍率ごとに scale.y で伸ばす
     const poleObj = new THREE.Mesh(poleGeo, matBlack);
     poleObj.position.y = 0.5;
+    poleObj.userData.isPole = true;
     setShadows(poleObj);
     baseGroup.add(poleObj);
 
     group.add(baseGroup);
 
-    // アッパー部分（矢印本体と旋回グリップ）
+    // アッパー部分（旋回=rotation.y・倍率=scale）
     const upperGroup = new THREE.Group();
-    upperGroup.position.set(0, 1.0, 0); 
-    upperGroup.userData.isUpper = true; 
+    upperGroup.position.set(0, 1.0, 0);
+    upperGroup.userData.isUpper = true;
 
-    const matRed = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+    // 傾き部分(縦ビルボード): 矢印の向き(Z軸)を軸に回して、板をカメラのほうへ倒す
+    const tiltGroup = new THREE.Group();
+    tiltGroup.userData.isTilt = true;
 
-    const shaftRadius = 0.25;
-    const shaftLength = 2.0;
-    const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 16);
-    shaftGeo.rotateX(Math.PI / 2); 
-    shaftGeo.translate(0, 0, shaftLength / 2 - 0.5); 
+    // 矢印板: 輪郭を (u=向き(Z方向), v=幅(Y方向)) で描いて押し出し → 向きを +Z・幅を Y・厚みを X に回す
+    const u0 = -0.5, uShaftEnd = u0 + ARROW_SHAFT_LEN, uTip = uShaftEnd + ARROW_HEAD_LEN;
+    const shape = new THREE.Shape();
+    shape.moveTo(u0, -ARROW_SHAFT_HALF_W);
+    shape.lineTo(uShaftEnd, -ARROW_SHAFT_HALF_W);
+    shape.lineTo(uShaftEnd, -ARROW_HEAD_HALF_W);
+    shape.lineTo(uTip, 0);
+    shape.lineTo(uShaftEnd, ARROW_HEAD_HALF_W);
+    shape.lineTo(uShaftEnd, ARROW_SHAFT_HALF_W);
+    shape.lineTo(u0, ARROW_SHAFT_HALF_W);
+    shape.lineTo(u0, -ARROW_SHAFT_HALF_W);
+    const plateGeo = new THREE.ExtrudeGeometry(shape, { depth: ARROW_PLATE_T, bevelEnabled: false });
+    plateGeo.translate(0, 0, -ARROW_PLATE_T / 2); // 厚みの中心を板の面(原点)に
+    plateGeo.rotateY(-Math.PI / 2);               // (x=向き, y=幅, z=厚み) → (z=向き, y=幅, x=厚み)
+    // 明るさ: 傾きで光の当たり方が変わって暗くならないよう、陰影なし(MeshBasicMaterial)の赤。両面表示。
+    const matRed = new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+    const plate = new THREE.Mesh(plateGeo, matRed);
+    plate.castShadow = false; plate.receiveShadow = false; // 影は落とさない
+    plate.userData.isArrowBody = true;
+    tiltGroup.add(plate);
+    upperGroup.add(tiltGroup);
 
-    const shaftMesh = new THREE.Mesh(shaftGeo, matRed);
-    setShadows(shaftMesh);
-    shaftMesh.userData.isArrowBody = true;
-    upperGroup.add(shaftMesh);
-
-    const headRadius = 0.7;
-    const headLength = 1.2;
-    const headGeo = new THREE.CylinderGeometry(0, headRadius, headLength, 16);
-    headGeo.rotateX(Math.PI / 2);
-    headGeo.translate(0, 0, shaftLength - 0.5 + headLength / 2); 
-
-    const headMesh = new THREE.Mesh(headGeo, matRed);
-    setShadows(headMesh);
-    headMesh.userData.isArrowBody = true;
-    upperGroup.add(headMesh);
-
-    const marker = createDragMarker(0.25); 
-    marker.position.set(0, 0, shaftLength + headLength + 0.1); 
+    const marker = createDragMarker(0.25);
+    marker.position.set(0, 0, ARROW_SHAFT_LEN + ARROW_HEAD_LEN + 0.1); // 従来と同じ位置(矢印の先の少し先)
     upperGroup.add(marker);
 
     group.add(upperGroup);
@@ -847,27 +858,47 @@ const MIX_GEO = {
   const R_BAR_MATS = {};
   Object.keys(R_BAR_COLORS).forEach(k => { R_BAR_MATS[k] = new THREE.MeshLambertMaterial({ color: R_BAR_COLORS[k], side: THREE.DoubleSide }); }); // GLBは doubleSided:true(細いバーを裏からも見せる)
 
-  function createConeBar() {
+  // 50回目(修正提案書v002 2A・マスター要望): カラーコーンの個数を 2〜10 から選べる。並び=コーン1・バー1・コーン2・…・コーンn(コーン間隔2.0m・全体の中心が原点)。
+  //   元のモデルは「コーン2個+バー1本」。赤(球006)と白帯(球)は左右のコーンが完全に同じ形(左を+2.0m動かすと右と三角形ごとに一致=node_repro/test_50b で確認)、
+  //   黒(球002)と黄(球004)はコーン間のバー1本。そこで、コーン(赤・白帯)は左のコーンを、バー(黒・黄)は元のバーを、必要な数だけ2.0mずつずらして並べる(個数ごとの別モデルは持たない)。
+  //   n=2 の結果は従来と同じ(コーン x=±1.0・バー1本)。●(旋回)は最後のコーン(x=+(n-1))の上・芯は最初のコーン(x=-(n-1))=中心について対称なので、js/voldia_placement.js の _coneBarBegin はそのまま使える。
+  const CONEBAR_MIN = 2, CONEBAR_MAX = 10;
+  function createConeBar(n) {
+    n = Math.max(CONEBAR_MIN, Math.min(CONEBAR_MAX, parseInt(n, 10) || CONEBAR_MIN));
     const group = new THREE.Group();
     Object.keys(R_BAR_GEO).forEach(name => {
-      const srcPos = R_BAR_GEO[name], pos = new Float32Array(srcPos.length); // 複製(元データは共有しない)
-      for (let i = 0; i < srcPos.length; i += 3) { pos[i] = srcPos[i + 2] + 1.0; pos[i + 1] = srcPos[i + 1]; pos[i + 2] = -srcPos[i]; }
+      const srcPos = R_BAR_GEO[name];
+      const isCone = (name === '球006' || name === '球'); // 赤・白帯=コーン / 黒・黄=バー
+      // 組み立て時に頂点へ焼き込む向き変換(従来と同じ): x' = z+1 / y' = y / z' = -x
+      const tris = []; // 三角形ごと(9要素)の変換後座標
+      for (let i = 0; i < srcPos.length; i += 9) {
+        const t = new Array(9);
+        for (let j = 0; j < 3; j++) { t[j * 3] = srcPos[i + j * 3 + 2] + 1.0; t[j * 3 + 1] = srcPos[i + j * 3 + 1]; t[j * 3 + 2] = -srcPos[i + j * 3]; }
+        tris.push(t);
+      }
+      const base = isCone ? tris.filter(t => (t[0] + t[3] + t[6]) / 3 < 0) : tris; // コーンは左(x<0)のコーン1個分
+      const offsets = [];
+      if (isCone) { for (let j = 0; j < n; j++) offsets.push(2 * j); }       // 左のコーン(x=-1.0)を +0,+2,… → x=-(n-1) … +(n-1) の n 個。※n=2 なら x=-1.0 と +1.0
+      else { for (let k = 0; k < n - 1; k++) offsets.push(2 * k - (n - 2)); } // バー(元は中心x=0)を n-1 本。中心 = -(n-2) … +(n-2)
+      // コーンの位置: 左コーンの中心は x=-1.0。j番目の中心は -1.0 + 2j、これを全体の中心基準にそろえる(-(n-2) だけずらす)
+      const shift = isCone ? -(n - 2) : 0;
+      const pos = new Float32Array(base.length * offsets.length * 9);
+      let w = 0;
+      offsets.forEach(off => base.forEach(t => { for (let q = 0; q < 9; q += 3) { pos[w++] = t[q] + off + shift; pos[w++] = t[q + 1]; pos[w++] = t[q + 2]; } }));
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       geo.computeVertexNormals(); // 面ごとに頂点を複製済み(非インデックス)なのでフラットシェーディングになる
       const mesh = new THREE.Mesh(geo, R_BAR_MATS[name]);
       // エッジ線(js/voldia_placement.js の addEdgeLines が見る設定): 赤の本体は「折れ角85°以上」だけ=底の四角い板(90°)の線だけ残す。
-      //   (数値で確認済み: 赤の204辺のうち85°以上は底板の24本=コーン1つにつき12本で、次に大きいのが79.6°=側面の縦線・底板とコーンの境目・先端の輪。)
       //   バーの黒/黄・白帯は線を付けない。userData は数値・真偽値だけ(clone で失われない)。
       if (name === '球006') mesh.userData.edgeAngle = 85; else mesh.userData.noEdges = true;
       setShadows(mesh);
       group.add(mesh);
     });
-    // r152(48回目・マスター要望): カラーコーンの回転を、重機の旋回と同じ「水色●をドラッグ」方式にする(クリックで15°ずつ回る方式は廃止)。
-    //   片側(−X側)のコーンを芯にして、反対側(+X側)のコーンの上の水色●をドラッグすると、全体が芯のコーンを中心に回る(回す処理は js/voldia_placement.js の _coneBarRotateTo)。
-    //   つかみの判定(_pickPlacedDrag)は「上部(isUpper)の中の●」を探すので、●だけを入れた空の上部グループを置く(メッシュは動かさない)。コーンは±1.0mの位置。
+    // r152(48回目): 旋回=水色●をドラッグ。芯=●と反対側(最初)のコーン。●を入れた空の上部グループ(isUpper)を置く。
     const upper = new THREE.Group(); upper.userData.isUpper = true; group.add(upper);
-    const marker = createDragMarker(0.17); marker.position.set(1.0, 0.86, 0); upper.add(marker);
+    const marker = createDragMarker(0.17); marker.position.set(n - 1.0, 0.86, 0); upper.add(marker); // 50回目: 最後のコーンの上(n=2なら従来どおり x=1.0)
+    group.userData.coneCount = n;
     return group;
   }
 

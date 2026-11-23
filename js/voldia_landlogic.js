@@ -1,3 +1,4 @@
+// r018(50回目・修正提案書v002 1A): 測点が0個でもGLB・3D_DXF・LANDXMLを出せるように。原点=仮原点=オブジェクトの左上角(_llResolveOrigin が virtual:true を返し、_oxM/_ozM=0)。出力の中身(三角形・頂点の形)は変えない。前版=orig/voldia_landlogic_r017.js
 // ════════════════════════════════════════════════════════════
 //  Land Logic  ★現行バージョン: r015 (41回目セッション)
 //   r017(41回目): GLBの色指定を削除(色は全GLB共通でvoldia_export.jsのencodeMultiGLB側に一本化=濃いグレー)
@@ -188,7 +189,9 @@
   // 測点が1個→問答無用でそれが原点 / 複数→ノースアロー設定(🧭)で選んだ測点 / 0個または複数で未選択→null(出力を止める)
   function _llResolveOrigin(){
     const pts = (typeof surveyPts !== 'undefined' && Array.isArray(surveyPts)) ? surveyPts : [];
-    if(pts.length === 0) return {ok:false, msg:'⚠ 測点がありません。📍測点設置で原点にする点を置いてください'};
+    // r018(50回目・1A): 測点が0個でも出力できる。原点(0,0)=「仮原点」=3Dのローカル座標の原点=全図形の外接矩形の左上角(余掘りぶん外へ広げた点)。
+    //   .voldには保存しない(originSurveyIdxは触らない)。測点を後から置けば、通常どおりその測点が原点になる。
+    if(pts.length === 0) return {ok:true, idx:-1, pt:null, auto:true, virtual:true};
     let idx = (typeof originSurveyIdx === 'number' && pts[originSurveyIdx]) ? originSurveyIdx : null;
     let auto = false;
     if(idx === null){
@@ -353,11 +356,12 @@
 
     // r012: 原点(測点)を(0,0)にして北上回転(座標の意味はファイル先頭のr012コメント参照)
     const _mmpx = (25.4/72) * scaleDenom / RS;                       // voldia3d.jsと同じmm/px
-    const _oxM = (_org.pt.x * _mmpx - offsetX) * 0.001;
-    const _ozM = (_org.pt.y * _mmpx - offsetY) * 0.001;
+    // r018(50回目): 仮原点(測点なし)の時は 0。メッシュ座標は (X_mm - offsetX)/1000 なので、(0,0)がそのまま外接矩形の左上角。
+    const _oxM = _org.virtual ? 0 : (_org.pt.x * _mmpx - offsetX) * 0.001;
+    const _ozM = _org.virtual ? 0 : (_org.pt.y * _mmpx - offsetY) * 0.001;
     const _theta = (typeof northAngleDeg === 'number' && !isNaN(northAngleDeg)) ? northAngleDeg : 0;
     const _dms = (typeof degToDMSStr === 'function') ? degToDMSStr(_theta) : (_theta + '°');
-    console.log(`[LAND-LOGIC] 原点=測点No.${_org.idx+1}${_org.auto?'(1個のため自動)':''} 3D位置(x,z)=(${_oxM.toFixed(4)}, ${_ozM.toFixed(4)})m / 北方位角=${_dms} (${_theta.toFixed(6)}°)`);
+    console.log(`[LAND-LOGIC] 原点=${_org.virtual?'仮原点(オブジェクトの左上角)':'測点No.'+(_org.idx+1)+(_org.auto?'(1個のため自動)':'')} 3D位置(x,z)=(${_oxM.toFixed(4)}, ${_ozM.toFixed(4)})m / 北方位角=${_dms} (${_theta.toFixed(6)}°)`);
     finalPositions = _llToNorthUp(finalPositions, _oxM, _ozM, _theta);
     { let mnx=1e9,mxx=-1e9,mnz=1e9,mxz=-1e9,mny=1e9,mxy=-1e9;
       for(let i=0;i<finalPositions.length;i+=3){ const x=finalPositions[i],y=finalPositions[i+1],z=finalPositions[i+2];
@@ -426,7 +430,7 @@
     const fname = 'Voldia3D_' + _llTs() + '.DXF';
     _llDownload(new Blob([r.text], {type:'application/dxf'}), fname);
     console.log('[LAND-LOGIC] ' + fname + ' をダウンロードしました (3DFACE ' + r.faces + '面)');
-    if(typeof toast === 'function') toast('🧊 3D_DXFを出力しました: ' + fname + '（' + r.faces + '面・単位m・原点=測点）', 4000);
+    if(typeof toast === 'function') toast('🧊 3D_DXFを出力しました: ' + fname + '（' + r.faces + '面・単位m・原点=' + (m.org && m.org.virtual ? '仮原点(オブジェクトの左上角)' : '測点') + '）', 4000);
     return true;
   }
 

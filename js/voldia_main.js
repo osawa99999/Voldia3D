@@ -1,3 +1,5 @@
+// 50回目(v0168): 出力ダイアログの仮原点の欄を「仮原点」だけに短縮(説明は確認文に集約)。ダイアログ自体のはみ出し対策はHTML側(#lx-dlg)。
+// 50回目: 修正提案書v002 ①1B LANDXML出力に開発中ロック(Tキー+Hキーを同時に押している間だけ有効。ページを開き直すとロックに戻る。保存しない) ②1C 3D_DXFのホバー文を「AUTOCAD」表記に ③1A 測点が0個でもGLB・3D_DXF・LANDXMLを出せるように(原点=仮原点=オブジェクトの左上角。確認は出力ダイアログ内に毎回表示。本体はvoldia_landlogic.js r018)。前版=orig/voldia_main_r48d.js
 // 48回目: ④Escキー=一番手前のダイアログを閉じる。何も開いていなければ3Dイメージ画面を閉じてVoldia 2Dへ戻る(_escTopDialog。2Dの作図・編集のEscは従来のまま)。前版=backup/voldia_main_r48c.js
 // 48回目: ③コード整理=挙動を変えない削除: 使われない変数 q・totalStr・totalDepth・odVal と、それで呼ぶ所が無くなった関数 calcTotalDepth、書き込みだけで読まれない _consentGiven(宣言と代入3か所)。前版=backup/voldia_main_pretidy.js
 // 48回目: ①法面角度のホバー説明(SLOPE_INFO)に建築向け2件(1:0.577=60°・1:1.732=30°)を追加 ②一覧の行の名前に title(省略時の全文表示)。※行の並びのずれ修正はCSS=Voldia_v0161.html の .sh-header
@@ -1496,13 +1498,10 @@ const _GM_TIPS={
   'out-shot':'表示されている３Dを単一画像として保存します',
   'out-data':'体積の計算表を出力します',
   'out-glb':'PowerPointなどで使用できる\n３Dデータを出力します',
-  'out-dxf3d':'AutoCADで使用できる\n３D面(3DFACE)のDXFを出力します',
+  'out-dxf3d':'AUTOCADなどで使用できる\n３D面(3DFACE)のDXFを出力します',
   'out-xml':'MG重機で使用するデータを出力します',
-  'out-off':'測点（0，0）が無ければ使用できません',
-  // 47回目: グレーアウト(測点が無い)時の説明をボタンごとに変更(2行・横幅は文字が入る幅まで広げる=_gmShowTip)
-  'out-off-dxf3d':'AUTOCADなどで使用する３D面を出力します。\n測点を設定しなければ使用できません',
-  'out-off-glb':'一部の３DCADで使用できる３Dオブジェクトを出力します。\n測点を設定しなければ使用できません',
-  'out-off-xml':'マシンガイダンス用データを出力します。\n測点を設定しなければ使用できません'
+  // 50回目(1B): LANDXML出力は開発中ロック。Tキー+Hキーを同時に押している間だけ有効(押していない間はグレー+この説明)
+  'out-dev':'開発中の機能です\nもう少々お待ちください'
 };
 let _gmInited=false,_gmTipTimer=null;
 function _gmEl(id){return document.getElementById(id);}
@@ -1523,7 +1522,6 @@ function _gmShowTip(el,key){
   const txt=_GM_TIPS[key];
   if(!tip||!txt)return;
   tip.textContent=txt;
-  tip.style.maxWidth=/^out-off-/.test(key)?'min(520px,94vw)':''; // 47回目: 2行の長い説明は1行が折り返されない幅まで広げる(他の説明は従来の幅)
   tip.style.display='block';
   const r=el.getBoundingClientRect();
   const tw=tip.offsetWidth;
@@ -1563,7 +1561,7 @@ function _gmInit(){
 // ================================================================
 //  r051(41回目): 3D結果画面の出力ボタン(📦GLB出力 / 🗺LANDXML出力)とヘルプ・出力ダイアログ
 //   通常計算: GLB出力=従来のexportGLB(測点・北の向きは使わない)。LANDXML出力は非表示。
-//   土量計算: GLB出力=Land Logic(原点・北上げ済み) / LANDXML出力=Land Logic。どちらも測点が1つも無ければグレーアウト。
+//   土量計算: GLB出力=Land Logic(原点・北上げ済み) / LANDXML出力=Land Logic。50回目: 測点が無くても出せる(仮原点)。LANDXML出力は開発中ロック(T+H)。
 //   グレーアウトは disabled ではなく .is-off + aria-disabled(disabledだと一部ブラウザでマウスオーバーのヘルプが出ないため)。
 //   土量計算の出力は確認ダイアログ(#lx-overlay)を出し、原点測点(複数ある時は選択)と北の向きを見せてから出力する。
 // ================================================================
@@ -1577,14 +1575,41 @@ function updateOutputButtons(){
   g.classList.toggle('show',mode==='normal'||mode==='doboku');
   x.classList.toggle('show',mode==='doboku');
   if(dx)dx.classList.toggle('show',mode==='normal'||mode==='doboku'); // 47回目: 3D_DXF出力(通常計算・土量計算とも表示)
-  const off=(mode==='doboku')&&!(typeof surveyPts!=='undefined'&&surveyPts.length>0); // 土量計算は測点(原点)が必須
-  g.classList.toggle('is-off',off);x.classList.toggle('is-off',off);
-  g.setAttribute('aria-disabled',off?'true':'false');x.setAttribute('aria-disabled',off?'true':'false');
-  if(dx){dx.classList.toggle('is-off',off);dx.setAttribute('aria-disabled',off?'true':'false');dx.setAttribute('data-gmtip',off?'out-off-dxf3d':'out-dxf3d');}
-  g.setAttribute('data-gmtip',off?'out-off-glb':'out-glb');
-  x.setAttribute('data-gmtip',off?'out-off-xml':'out-xml');
+  // 50回目(1A): 測点が0個でも、GLB出力・3D_DXF出力は使える(原点=仮原点=オブジェクトの左上角。voldia_landlogic.js r018)ので、グレーアウトしない。
+  g.classList.remove('is-off');g.setAttribute('aria-disabled','false');g.setAttribute('data-gmtip','out-glb');
+  if(dx){dx.classList.remove('is-off');dx.setAttribute('aria-disabled','false');dx.setAttribute('data-gmtip','out-dxf3d');}
+  // 50回目(1B): LANDXML出力は開発中ロック。Tキー+Hキーを同時に押している間(window._devUnlock)だけ使える。
+  const xOff=!window._devUnlock;
+  x.classList.toggle('is-off',xOff);x.setAttribute('aria-disabled',xOff?'true':'false');
+  x.setAttribute('data-gmtip',xOff?'out-dev':'out-xml');
   _outTipInit();
 }
+// 50回目(1B): 開発中ロックの解除キー=Tキー+Hキーの同時押し(物理キー e.code で判定=IME(日本語入力)ONでも効く)。
+//   押している間だけ true。離す・ウィンドウが非アクティブになるとロックに戻る。保存はしない(ページを開き直すとロック)。
+//   文字入力欄(input/textarea/select/contentEditable)にフォーカスがある間は無視(文字入力と衝突させない)。
+(function _devUnlockInit(){
+  window._devUnlock=false;
+  const down=new Set();
+  const sync=()=>{
+    const v=down.has('KeyT')&&down.has('KeyH');
+    if(v===window._devUnlock)return;
+    window._devUnlock=v;
+    if(typeof updateOutputButtons==='function')updateOutputButtons();
+  };
+  const isTyping=el=>!!el&&(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||el.isContentEditable);
+  document.addEventListener('keydown',e=>{
+    if(e.repeat||(e.code!=='KeyT'&&e.code!=='KeyH'))return;
+    if(isTyping(document.activeElement)||isTyping(e.target))return;
+    down.add(e.code);sync();
+  });
+  document.addEventListener('keyup',e=>{
+    if(e.code!=='KeyT'&&e.code!=='KeyH')return;
+    down.delete(e.code);sync();
+  });
+  const clear=()=>{down.clear();sync();};
+  window.addEventListener('blur',clear);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)clear();});
+})();
 function _outTipInit(){
   if(_outTipInited)return;_outTipInited=true;
   _OUT_TIP_IDS.forEach(id=>{
@@ -1668,11 +1693,19 @@ function showExportDialog(kind){
   _lxEl('lx-title').textContent=_lxName;
   _lxEl('lx-q').textContent=_lxName+'を行いますか？';
   const sel=_lxEl('lx-origin');sel.innerHTML='';
-  surveyPts.forEach((p,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent='測点 No.'+(i+1);sel.appendChild(o);});
-  const def=(typeof originSurveyIdx==='number'&&surveyPts[originSurveyIdx])?originSurveyIdx:0; // 既定は測点1(ノースアロー設定で選択済みならそれ)
-  sel.value=String(def);
-  sel.disabled=(surveyPts.length<=1);
-  _lxEl('lx-origin-note').textContent=(surveyPts.length<=1)?'（測点が1つのため自動）':'';
+  const _virt=(surveyPts.length===0); // 50回目(1A): 測点が0個=仮原点(オブジェクトの左上角)。毎回、確認の文を出す
+  if(_virt){
+    const o=document.createElement('option');o.value='-1';o.textContent='仮原点';sel.appendChild(o);
+    sel.value='-1';sel.disabled=true;
+    _lxEl('lx-origin-note').textContent=''; // 説明は下の確認文(#lx-virtual-note)に出す。ここを長くすると欄が横にはみ出した(v0168)
+  }else{
+    surveyPts.forEach((p,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent='測点 No.'+(i+1);sel.appendChild(o);});
+    const def=(typeof originSurveyIdx==='number'&&surveyPts[originSurveyIdx])?originSurveyIdx:0; // 既定は測点1(ノースアロー設定で選択済みならそれ)
+    sel.value=String(def);
+    sel.disabled=(surveyPts.length<=1);
+    _lxEl('lx-origin-note').textContent=(surveyPts.length<=1)?'（測点が1つのため自動）':'';
+  }
+  const vn=_lxEl('lx-virtual-note');if(vn)vn.style.display=_virt?'':'none';
   const deg=(typeof northAngleDeg==='number'&&!isNaN(northAngleDeg))?northAngleDeg:0;
   _lxEl('lx-north-rotor').setAttribute('transform','rotate('+deg+')');
   _lxEl('lx-north-val').textContent=degToDMSStr(deg)+'（'+(((deg%360)+360)%360).toFixed(4)+'°）';
@@ -1683,7 +1716,7 @@ async function _lxYes(){
   const kind=_lxKind;
   const sel=_lxEl('lx-origin');
   const idx=parseInt(sel.value);
-  if(!isNaN(idx)&&surveyPts[idx]){originSurveyIdx=idx;updateNorthArrowUI();} // ここで選んだ原点測点は、ノースアロー設定の原点にも反映(.vold保存にも入る)
+  if(!isNaN(idx)&&surveyPts[idx]){originSurveyIdx=idx;updateNorthArrowUI();} // ここで選んだ原点測点は、ノースアロー設定の原点にも反映(.vold保存にも入る)。50回目(1A): 仮原点(idx=-1)はここに入らない=.voldに保存しない
   _lxClose();
   const fn=(kind==='xml')?window._buildAndDownloadLandXML:(kind==='dxf')?window._buildAndDownloadLandLogicDXF:window._buildAndDownloadLandLogicGLB;
   if(typeof fn!=='function'){toast('⚠ 出力モジュール(voldia_landlogic.js)が読み込まれていません',4000);return;}

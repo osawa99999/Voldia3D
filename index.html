@@ -138,8 +138,8 @@ input.doboku-inp[type=text]{background:#1a1a2e;color:#e0e0e0;padding:3px 6px;
            background:linear-gradient(135deg,var(--accent),#ff8c42);
            border:none;border-radius:4px;cursor:pointer;
            color:#000;font-size:.8em;font-weight:700;letter-spacing:1px;
-           transition:opacity .2s;}
-#calc-btn:hover{opacity:.9;}
+           transition:opacity .2s,filter .2s,box-shadow .2s;}
+#calc-btn:hover{opacity:1;filter:brightness(1.18);box-shadow:0 0 8px rgba(255,160,60,.55);} /* v0166(50回目): 一般の button:hover より #calc-btn(ID)のほうが強く、ホバーで見た目が変わらなかった */
 
 /* キャンバスエリア */
 #cv-wrap{flex:1;position:relative;background:var(--cv);overflow:visible;}
@@ -497,12 +497,15 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #lx-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:16px 24px 18px;width:min(480px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
 #lx-dlg .lx-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
 #lx-dlg .lx-q{font-size:1.1em;font-weight:700;color:#fff;margin:6px 0 10px;}
-#lx-dlg .lx-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid #3a3a3a;min-height:40px;}
+#lx-dlg .lx-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:12px 0;border-top:1px solid #3a3a3a;min-height:40px;} /* v0168: 狭い画面でも欄が画面外へはみ出さないよう折り返し可 */
 #lx-dlg .lx-lab{font-weight:700;color:#fff;white-space:nowrap;}
-#lx-dlg .lx-ctl{display:flex;align-items:center;gap:8px;color:#d6e6ff;}
-#lx-dlg select{padding:7px 10px;font-size:1rem;border:1px solid #555;border-radius:8px;background:#2f2f2f;color:#e4e4e4;}
+#lx-dlg .lx-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;max-width:100%;color:#d6e6ff;}
+#lx-dlg select{max-width:100%;padding:7px 10px;font-size:1rem;border:1px solid #555;border-radius:8px;background:#2f2f2f;color:#e4e4e4;}
 #lx-dlg select:disabled{opacity:.7;cursor:not-allowed;}
 #lx-dlg .lx-note{font-size:.8em;color:#8a9bb0;}
+#lx-dlg .lx-virtual{color:#ffcc80;font-weight:700;font-size:.9em;text-align:center;margin:10px 0 4px;line-height:1.6;} /* v0166(50回目・1A): 測点0個=仮原点の確認文 */
+#lx-dlg .lx-ph{display:inline-block;max-width:100%;} /* v0168: 文は「まとまり」(句)の切れ目だけで折り返す。まとまりより狭い画面ではまとまりの中で折り返す */
+@media (max-height:720px){#lx-dlg{padding:10px 18px 12px;}#lx-dlg .lx-row{padding:6px 0;min-height:0;}#lx-dlg .lx-warn{margin:8px 0;padding-top:8px;line-height:1.5;}#lx-dlg .lx-q{margin:4px 0 6px;}} /* v0168: 縦が低い画面(ノートPC・拡大表示)では詰める */
 #lx-dlg .lx-warn{color:#f7e24a;font-weight:700;font-size:.82em;text-align:center;margin:14px 0 12px;line-height:1.7;border-top:1px solid #3a3a3a;padding-top:12px;}
 #lx-dlg .lx-foot{display:flex;gap:12px;margin-top:10px;}
 #lx-no{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
@@ -545,7 +548,7 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0161</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0171</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
@@ -639,7 +642,22 @@ D&D or クリックでロードしてください</p>
   <!-- 右パネル -->
   <div id="sb">
 
-    <div class="card">
+    <div class="card" style="position:relative;">
+<!-- r060: ノースアロー（方位角ウィジェット）。v0170: 右UIの「スケール」欄の中に置く(以前は画面に固定=position:fixedで、右UIをスクロールしてもノースアローだけ動かず他のボタンに重なっていた)。
+     v0136: 初期状態は非表示(display:none)。起動画面で回せてしまうため。測点が1つ以上になるとredraw()が表示する(従来どおり)。
+     ドラッグで回転／ダブルクリックで数値入力。作図・3D表示・配置モードには一切影響しない
+     （将来のLandXML出力時の回転・原点決定にのみ使用）。 -->
+<div id="north-arrow-wrap" title="ドラッグで回転／ダブルクリックで数値入力（LandXML出力用・作図には影響しません）"
+     style="display:none;position:absolute;top:14px;right:13px;z-index:5;width:60px;cursor:grab;user-select:none;touch-action:none;">
+  <svg id="north-arrow-svg" viewBox="0 8 100 108" width="60" height="65" style="display:block;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));">
+    <g id="north-arrow-rotor" style="transform-origin:50px 72px;transform:rotate(0deg);">
+      <text x="50" y="31" text-anchor="middle" font-size="26" font-weight="900" fill="var(--accent2)" font-family="sans-serif" letter-spacing="1">N</text>
+      <circle id="north-arrow-circle" cx="50" cy="72" r="36" fill="#1a1a1a" stroke="var(--accent2)" stroke-width="3.5"/>
+      <polygon points="50,42 68,96 50,86 32,96" fill="var(--accent)"/>
+    </g>
+  </svg>
+  <div id="north-angle-label" style="text-align:center;font-size:.62em;color:var(--accent2);margin-top:0;white-space:nowrap;">0°00'00.0"</div>
+</div>
       <h4>スケール</h4>
       <div class="sc-disp">
         <div class="sc-badge" id="sc-d">未設定</div>
@@ -1110,8 +1128,9 @@ D&D or クリックでロードしてください</p>
         <span id="lx-north-val"></span>
       </span>
     </div>
-    <div class="lx-note" style="margin:2px 0 4px;">画面上=0°・時計回りが正。北の向きは2D画面右上の🧭で変更できます。</div>
-    <div class="lx-warn" id="lx-warn">MG重機が確実に動作するデータを出力する保証はありません！<br>オブジェクト数が多かったり、面形状が破綻している場合は<br>MG重機側がデータを処理できなかったり、正常な形状を<br>認識できない場合もあります。作業前に重機メーカーなどに<br>出力したXMLデータを渡して、確認してください</div>
+    <div class="lx-note" style="margin:2px 0 4px;"><span class="lx-ph">画面上=0°・時計回りが正。</span><br><span class="lx-ph">北の向きは2D画面右上の🧭で変更できます。</span></div>
+    <div class="lx-virtual" id="lx-virtual-note" style="display:none;"><span class="lx-ph">測点が設置されていないので、</span><span class="lx-ph">原点（0,0）はオブジェクトの左上角に</span><span class="lx-ph">仮設定します。</span></div>
+    <div class="lx-warn" id="lx-warn"><span class="lx-ph">MG重機が確実に動作するデータを出力する保証はありません！</span><br><span class="lx-ph">オブジェクト数が多かったり、</span><span class="lx-ph">面形状が破綻している場合は</span><br><span class="lx-ph">MG重機側がデータを処理できなかったり、</span><span class="lx-ph">正常な形状を認識できない場合もあります。</span><br><span class="lx-ph">作業前に重機メーカーなどに</span><span class="lx-ph">出力したXMLデータを渡して、</span><span class="lx-ph">確認してください</span></div>
     <div class="lx-foot"><button id="lx-no">いいえ</button><button id="lx-yes">はい</button></div>
   </div>
 </div>
@@ -1142,6 +1161,16 @@ D&D or クリックでロードしてください</p>
      更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
      v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
      ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0165(49回目): js/voldia3d.js r137。5mm超で整えなかった図形の辺も、格子の位置の評価に入れる(CrackTorture_v02の下側に残った線2か所の修正)。アプリ内左上のバージョン表示を v0164→v0165 に更新。 -->
+<!-- v0164(49回目): js/voldia3d.js r136。入口の整えの主方向を、斜めの梁に引っ張られない求め方に変更(CrackTorture_v02で悪化した件の修正)。アプリ内左上のバージョン表示を v0163→v0164 に更新。 -->
+<!-- v0171(50回目): ノースアローの位置を角度の文字1行ぶん(約12px)下げた(top:2px→14px)。アプリ内左上のバージョン表示を v0170→v0171 に更新。前版=Voldia_v0170.html -->
+<!-- v0170(50回目): ノースアロー(#north-arrow-wrap)を右UIの「スケール」欄の中へ移し、右UIのスクロールと一緒に動くようにした(position:fixed→absolute)。アプリ内左上のバージョン表示を v0169→v0170 に更新。前版=Voldia_v0169.html -->
+<!-- v0169(50回目): 出力ダイアログ(GLB/3D_DXF/LANDXML共通)の北の向きの説明を、句点の位置で改行(中途半端な位置で折り返されていた)。アプリ内左上のバージョン表示を v0168→v0169 に更新。前版=Voldia_v0168.html -->
+<!-- v0168(50回目): ①出力ダイアログ(#lx-overlay・GLB/3D_DXF/LANDXML共通)の文字はみ出し対策(欄の折り返し可・確認文と警告文は句の切れ目で折り返す・縦が低い画面では詰める。js/voldia_main.js 仮原点の欄は「仮原点」だけに短縮) ②3Dイメージのホイール押しっぱなし後の十字ポインタ(js/voldia3d.js r138)。配置モードのiframe参照=voldia_placement_v0096.html。アプリ内左上のバージョン表示を v0167→v0168 に更新。前版=Voldia_v0167.html -->
+<!-- v0167(50回目): 起動画面の吹き出しを、Arecal A096の雲型SVG吹き出し「初めての人は／押してね？」に差し替え(マスター指示書)。上下浮遊+明滅・クリック素通し・ボタンを押したらその起動中は消える。アプリ内左上のバージョン表示を v0166→v0167 に更新。前版=Voldia_v0166.html -->
+<!-- v0166(50回目): 修正提案書v002の実装。①2D 「⚡３Dイメージ」ボタンのホバー(#calc-btn:hover=明るく+わずかに光る) ②1A 出力ダイアログ(#lx-overlay)に、測点0個の時だけ仮原点の確認文(#lx-virtual-note)を表示。js/voldia_main.js・js/voldia_landlogic.js r018 ③1B LANDXML出力の開発中ロック(T+H)。アプリ内左上のバージョン表示を v0165→v0166 に更新。前版=backup/Voldia_v0165.html -->
+<!-- v0163(49回目): js/voldia3d.js r135。r134の実機確認で残った『底面の裏返った細い三角形』(赤丸の線)を、格子の位相の候補を試して作り直す処理で解消。アプリ内左上のバージョン表示を v0162→v0163 に更新。 -->
+<!-- v0162(49回目): 床クラック問題の根本対策P0=js/voldia3d.js r134。①3D化の共通の入口(getAllFrustums)で、ほぼ同じ直線の辺を5mm以内でそろえる(_alignFrustumsMm。頂点の移動は最大5mm・超える図形は元のまま。体積・2Dの図形は世界座標のまま) ②3Dの生成は主方向の回転座標系で行い結果を戻す(buildManifoldUnionGeomのラッパー。山留・紫壁・グレーも対応)。切り戻し=window._alignEdges=false。②アプリ内左上のバージョン表示(#app-version-label)を v0161→v0162 に更新。 -->
 <!-- v0161(48回目): ①アプリ内左上のバージョン表示(#app-version-label)を v0152→v0161 に更新(v0153〜v0160で更新漏れしていた。ファイル名のバージョンを上げる時は必ず同じ値にする) ②2D左UIの一覧で、チェックボックスと色の丸の位置が行ごとにずれていたのを修正(.sh-header のCSS。原因=space-betweenで余白を均等配分していた) ③3D生成方法ダイアログの法面角度に建築向けの2ボタン(1:0.577=60°・1:1.732=30°)を既存6個の下の段に追加(js/voldia_main.js の SLOPE_INFO にホバー説明)。配置モード(voldia_placement_v0093.html)は変更なし・js/voldia_placement.js r147=ホイールのズーム限界トースト。 -->
 <!-- v0160(48回目): 問題7=3Dイメージの三角形の間引きを「許容5mm」つきに(js/voldia3d.js r130: _guardedDecimateMesh)。形が元から最大5mmまで動く代わりに三角形が減る(R1〜R8で約−21%・乱数60セットで約−10%)。Land Logic(LandXML)・欠陥スキャンは従来どおり誤差0。コンソールで window._planarDecimateTolMm=0 にすると誤差0(r129)に戻る(次の3D生成から有効)。 -->
 <!-- v0159(47回目): ①3D生成方法ダイアログに断面イラスト(左)を追加・設定項目に①〜④の番号・入力中は該当部分が光る・通常計算ではイラストが左へ収納(css/voldia_gm_intro.css・data/voldia_intro_img.js・js/voldia_gm_intro.js) ②右クリックで戻る/キャンセル(3D生成方法ダイアログ・測点設置) ③データ出力で掘削深さ10m超の警告 ④robots noindex ⑤voldia3d.js r129=形状クリーニング(許容差5mm)・合体の全体チェック・同一平面の三角形を形を変えずに間引き ⑥同一形状(同じ座標・同じ色)は作図時に除外・法面ボタンの点灯修正。配置モードは voldia_placement_v0093.html。 -->
@@ -1454,22 +1483,6 @@ In addition, if you combine or link compiled forms of this Software with softwar
 
 <!-- ClipperLib は冒頭の inline scriptに含まれています -->
 
-<!-- r060: ノースアロー（方位角ウィジェット）。画面右上に固定表示。
-     v0136: 初期状態は非表示(display:none)。起動画面で回せてしまうため。測点が1つ以上になるとredraw()が表示する(従来どおり)。
-     ドラッグで回転／ダブルクリックで数値入力。作図・3D表示・配置モードには一切影響しない
-     （将来のLandXML出力時の回転・原点決定にのみ使用）。 -->
-<div id="north-arrow-wrap" title="ドラッグで回転／ダブルクリックで数値入力（LandXML出力用・作図には影響しません）"
-     style="display:none;position:fixed;top:16px;right:26px;z-index:9500;width:60px;cursor:grab;user-select:none;touch-action:none;">
-  <svg id="north-arrow-svg" viewBox="0 8 100 108" width="60" height="65" style="display:block;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));">
-    <g id="north-arrow-rotor" style="transform-origin:50px 72px;transform:rotate(0deg);">
-      <text x="50" y="31" text-anchor="middle" font-size="26" font-weight="900" fill="var(--accent2)" font-family="sans-serif" letter-spacing="1">N</text>
-      <circle id="north-arrow-circle" cx="50" cy="72" r="36" fill="#1a1a1a" stroke="var(--accent2)" stroke-width="3.5"/>
-      <polygon points="50,42 68,96 50,86 32,96" fill="var(--accent)"/>
-    </g>
-  </svg>
-  <div id="north-angle-label" style="text-align:center;font-size:.62em;color:var(--accent2);margin-top:0;white-space:nowrap;">0°00'00.0"</div>
-</div>
-
 <!-- r060: ノースアロー方位角・原点測点 設定ダイアログ -->
 <div id="north-dialog" class="modal">
   <div class="modal-c" style="width:300px;">
@@ -1547,31 +1560,48 @@ window.HELPGUIDE_CFG = {
 (function () {
   var dh = document.getElementById('drop-hint');
   if (dh && window.HelpGuide && window.MutationObserver) new MutationObserver(function () { window.HelpGuide.syncStart(); }).observe(dh, { attributes: true, attributeFilter: ['style', 'class'] });
-  // v0150(46回目・マスター要望): 起動画面の「簡単な説明（F1）」ボタンの上に、ゆっくり上下に動く吹き出し「初めての人は押してね！」を出して、押すように促す。
-  // v0152(46回目): 毎回出す(「押したら以後出さない」記録は廃止)。ボタン(#hg-start-btn)が見えている間だけ出し、起動画面でなくなればボタンと一緒に消える。
-  //   動き: 控えめな上下。OSの「視覚効果を減らす/アニメーション効果オフ」の設定(prefers-reduced-motion)の時は、上下の代わりにゆっくり点滅(動かすと不快な人への配慮。吹き出し自体は出す)。
+  // v0167(50回目・マスター指示書): Arecal A095/A096 の雲型SVG吹き出し「初めての人は／押してね？」に差し替え。起動画面の「簡単な説明（F1）」ボタン(#hg-start-btn)の上に表示。
+  //   (v0150〜v0152の橙色の四角い吹き出し「初めての人は押してね！」は廃止。前版=backup/Voldia_v0166.html)
+  //   クリーム塗り(#fdf2eb)・サーモン枠(#e3a282)、ボタン実幅に合わせて真上中央に自動配置(左端は最小6pxでクランプ)。
+  //   軽い上下浮遊＋白飛びしない明滅(3.2秒周期)。prefers-reduced-motion時は浮遊なしの明滅のみ。クリックは素通し(pointer-events:none)。
+  //   ボタンを押したら、その起動中は吹き出しを消す(Arecal準拠=パターンA)。常時表示(Voldia v0152仕様)に戻すなら、下の btn.addEventListener('click',…) の1行を消す。
   //   ボタンの位置・HelpGuide本体(js/voldia_helpguide.js)は触らない
   (function () {
     var wrap = document.getElementById('cv-wrap'), btn = document.getElementById('hg-start-btn');
     if (!wrap || !btn) return;
     var st = document.createElement('style');
     st.textContent =
-      '#hg-start-bubble{display:none;position:absolute;left:14px;z-index:11;padding:7px 13px;border-radius:12px;background:#e8a020;color:#1a1200;font-size:.85em;font-weight:800;white-space:nowrap;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45);animation:hgBubbleBob 1.4s ease-in-out infinite;}' +
-      '#hg-start-bubble::after{content:"";position:absolute;left:24px;top:100%;border:7px solid transparent;border-top-color:#e8a020;border-bottom:0;}' +
-      '@keyframes hgBubbleBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}' +
-      '@keyframes hgBubbleBlink{0%,100%{opacity:1}50%{opacity:.4}}' +
-      '@media (prefers-reduced-motion:reduce){#hg-start-bubble{animation:hgBubbleBlink 1.8s ease-in-out infinite}}';
+      '#hg-start-bubble{display:none;position:absolute;left:14px;bottom:42px;z-index:11;width:174px;height:108px;box-sizing:border-box;padding:0 18px 8px;align-items:center;justify-content:center;text-align:center;pointer-events:none;animation:hgBubblePulse 3.2s ease-in-out infinite;will-change:transform,filter;}' +
+      '#hg-start-bubble .xp-bub-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;}' +
+      '#hg-start-bubble .xp-bub-txt{position:relative;z-index:1;font-size:.9em;font-weight:900;line-height:1.32;color:#1a1a1a;white-space:nowrap;}' +
+      '@keyframes hgBubblePulse{0%,100%{transform:translateY(0);filter:brightness(.88) drop-shadow(0 2px 6px rgba(0,0,0,.45));}50%{transform:translateY(-5px);filter:brightness(1.06) drop-shadow(0 4px 10px rgba(255,220,190,.42));}}' +
+      '@keyframes hgBubblePulseStatic{0%,100%{filter:brightness(.88) drop-shadow(0 2px 6px rgba(0,0,0,.45));}50%{filter:brightness(1.06) drop-shadow(0 2px 8px rgba(255,220,190,.35));}}' +
+      '@media (prefers-reduced-motion:reduce){#hg-start-bubble{animation-name:hgBubblePulseStatic;}}';
     document.head.appendChild(st);
-    var bub = document.createElement('div'); bub.id = 'hg-start-bubble'; bub.textContent = '初めての人は押してね！';
+
+    var bub = document.createElement('div');
+    bub.id = 'hg-start-bubble';
+    bub.innerHTML =
+      '<svg class="xp-bub-svg" viewBox="0 0 184 114" aria-hidden="true">' +
+      '<path d="M 25 65 A 15 15 0 0 1 25 38 A 16 16 0 0 1 48 21 A 17.5 17.5 0 0 1 79 16 A 18.5 18.5 0 0 1 112 17 A 17 17 0 0 1 141 25 A 15.5 15.5 0 0 1 160 44 A 15 15 0 0 1 156 70 A 20.5 20.5 0 0 1 122 82 Q 116 99 105 105 Q 109 93 102 83 A 17 17 0 0 1 72 83 A 16 16 0 0 1 44 78 A 13.5 13.5 0 0 1 25 65 Z" fill="#fdf2eb" stroke="#e3a282" stroke-width="4.2" stroke-linejoin="round"/>' +
+      '</svg><span class="xp-bub-txt">初めての人は<br>押してね？</span>';
     wrap.appendChild(bub);
-    function sync() {
-      var vis = btn.style.display !== 'none';
-      bub.style.display = vis ? 'block' : 'none';
-      if (vis) bub.style.bottom = (14 + btn.offsetHeight + 12) + 'px'; // ボタンの真上(ボタンの高さ+すき間)
+
+    var bubDone = false;
+    btn.addEventListener('click', function () { bubDone = true; bub.style.display = 'none'; }); // ←常時表示にするならこの1行を消す
+
+    function alignBub() {
+      if (bub.style.display === 'none') return;
+      var bw = btn.offsetWidth, pw = bub.offsetWidth || 174;
+      if (bw > 0) bub.style.left = Math.max(6, Math.round(btn.offsetLeft + (bw - pw) / 2)) + 'px';
     }
-    ['pointerdown', 'mousedown', 'touchstart', 'dblclick'].forEach(function (t) { bub.addEventListener(t, function (e) { e.stopPropagation(); }); }); // 起動画面のクリック(ファイルを開く等)を発火させない
-    bub.addEventListener('click', function (e) { e.stopPropagation(); if (window.HelpGuide) window.HelpGuide.toggle(); });
+    function sync() {
+      var vis = btn.style.display !== 'none' && !bubDone;
+      bub.style.display = vis ? 'flex' : 'none';
+      if (vis) { alignBub(); requestAnimationFrame(alignBub); }
+    }
     if (window.MutationObserver) new MutationObserver(sync).observe(btn, { attributes: true, attributeFilter: ['style'] });
+    window.addEventListener('resize', alignBub);
     sync();
   })();
   // v0148(45回目): モードごとにヘルプ画像のフォルダを切り替え、切り替わった時は1ページ目に戻す。

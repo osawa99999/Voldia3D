@@ -234,6 +234,27 @@
     padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
     display: none; z-index: 1000; width: 280px;
   }
+  /* v0095(50回目・2A): カラーコーンの個数入力UI。足場入力UIと同じ見た目(クラス・idは別名=足場側の処理と混線させない) */
+  #cone-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 260px;
+  }
+  #cone-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  #cone-input-row { display: flex; justify-content: space-between; align-items: center; background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
+  #cone-count { background: #1b2630; color: #fff; border: 1px solid #3a5a7a; border-radius: 4px; padding: 4px 8px; font-size: 1.1em; }
+  /* v0097(50回目): H鋼杭の天端高さ入力UI(配置前・右クリック修正の両方で使う)。見た目はカラーコーン個数UIと同じ */
+  #hpile-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #8d6e63; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 290px;
+  }
+  #hpile-input-title { font-size: 0.9em; color: #d7ccc8; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  #hpile-input-row { display: flex; justify-content: space-between; align-items: center; background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
+  #hpile-top { width: 110px; background: #1b2630; color: #fff; border: 1px solid #3a5a7a; border-radius: 4px; padding: 4px 8px; font-size: 1.1em; text-align: right; }
+  #hpile-input-range { font-size: 0.8em; color: #8a9bb0; text-align: center; margin: 8px 0 2px; }
   #scaffold-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
   .scf-input-group {
     display: flex; justify-content: space-between; align-items: center;
@@ -439,9 +460,9 @@
     <div class="pal-title">🚧 仮設（テスト機能）</div>
     <div class="pal-grid">
       <button class="pal-btn" data-type="kotai">🏗️ 構台</button>
-      <button class="pal-btn" data-type="h_pile">🔩 H鋼杭</button>
+      <button class="pal-btn" data-type="h_pile_input">🔩 H鋼杭</button>
       <button class="pal-btn" data-type="scaffold_input">🪜 足場</button>
-      <button class="pal-btn" data-type="conebar">カラーコーン</button>
+      <button class="pal-btn" data-type="conebar_input">カラーコーン</button>
     </div>
   </div>
 </div>
@@ -502,6 +523,30 @@
   <div class="text-ui-btns">
     <button id="box-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
     <button id="box-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+
+<!-- H鋼杭 天端高さ入力UI v0097(50回目): 「H鋼杭」ボタン→ここで天端高さを入力→「配置」で従来どおりクリック配置。配置済みのH鋼杭を右クリックした時は「変更」で高さだけ直す。Enter=決定・Esc/右クリック=キャンセル -->
+<div id="hpile-input-ui">
+  <div id="hpile-input-title">H鋼杭 天端高さ</div>
+  <div id="hpile-input-row"><span>天端高さ</span><span><input id="hpile-top" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="±0"> m</span></div>
+  <div id="hpile-input-range">最高 +5.00m ／ 最低 -0.00m</div>
+  <div class="text-ui-btns">
+    <button id="hpile-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="hpile-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+<div id="hpile-edit-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.8);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">📏 右クリックで高さ修正</div>
+
+<!-- カラーコーン個数入力UI v0095(50回目・2A): 「何個設置しますか？」2〜10。Enter=配置・Esc/右クリック=キャンセル -->
+<div id="cone-input-ui">
+  <div id="cone-input-title">カラーコーン 設置数</div>
+  <div id="cone-input-row"><span>何個設置しますか？</span>
+    <select id="cone-count"><option value="2" selected>2 個</option><option value="3">3 個</option><option value="4">4 個</option><option value="5">5 個</option><option value="6">6 個</option><option value="7">7 個</option><option value="8">8 個</option><option value="9">9 個</option><option value="10">10 個</option></select>
+  </div>
+  <div class="text-ui-btns">
+    <button id="cone-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="cone-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
   </div>
 </div>
 
@@ -569,10 +614,10 @@
 <!-- v0089(47回目): HTML書き出しの確認ダイアログ。メールで送れない苦情を避けるため、ZIPで出す旨を必ず見せる(Y/Enter=はい・N/Esc=いいえ) -->
 <div id="btn-help-tip"></div> <!-- v0093: ボタンの解説 -->
 <div id="vhtml-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;">
-  <div class="custom-confirm-box" style="max-width:460px;">
-    <div id="vhtml-confirm-msg" style="line-height:1.7;text-align:left;">
+  <div class="custom-confirm-box" style="width:max-content;max-width:min(640px,92vw);">
+    <div id="vhtml-confirm-msg" style="line-height:1.7;text-align:left;margin-bottom:1.7em;">
       Viewer一体型HTMLを出力します。<br>
-      ＺＩＰファイルで出力しますので、<b>解凍して使用してください。</b><br>
+      <span style="white-space:nowrap;">ＺＩＰファイルで出力しますので、<b>解凍して使用してください。</b></span><br>
       また解凍されたＨＴＭＬファイルは<b style="color:#ff8a80;">メールで送れません。</b><br>
       メールで送る際は<b style="color:#ff8a80;">ＺＩＰファイルのまま</b>送信してください。<br>
       <span style="color:#ffcc80;">※ iPhone・iPadなどのiOS端末では使用できません。</span>

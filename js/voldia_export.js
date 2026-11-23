@@ -1,3 +1,6 @@
+// r152(50回目): 配置モードのiframe参照を voldia_placement_v0097.html に変更(H鋼杭の天端高さ入力・右クリックで高さ修正)。
+// r151(50回目): 配置モードのiframe参照を voldia_placement_v0096.html に変更(HTML書き出し確認ダイアログの解説文とボタンの間を1行ぶん広げた)。
+// r150(50回目): 配置モードのiframe参照を voldia_placement_v0095.html に変更(HTML書き出し確認ダイアログの折り返し修正。HTMLの中身はこのダイアログの幅だけ)。
 // ============================================================
 // r149(48回目): 配置モードのiframe参照を voldia_placement_v0094.html に変更(左パネルのボタンの間隔・名称「保存(Vold出力)」)。
 // r147(47回目): 配置モードのiframe参照を voldia_placement_v0093.html に変更(ボタン解説・右クリックキャンセル・丸を白に)。掘削深さ10m超の警告(runEvidenceAnalysis)を追加。
@@ -957,7 +960,7 @@ async function openPlacementMode(){
       wrap.style.cssText='position:fixed;inset:0;z-index:99999;background:#000;';
       const iframe=document.createElement('iframe');
       iframe.id='placement-iframe';
-      iframe.src='voldia_placement_v0094.html'; // r149(48回目): v0093→v0094(左パネルのボタンの間隔・名称)。 r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
+      iframe.src='voldia_placement_v0097.html'; // r152(50回目): v0096→v0097(H鋼杭の天端高さ入力ダイアログ)。 r151(50回目): v0095→v0096(HTML書き出し確認ダイアログの解説文とボタンの間を文字1行ぶん広げた)。 r150(50回目): v0094→v0095(HTML書き出し確認ダイアログの折り返し修正)。 r149(48回目): v0093→v0094(左パネルのボタンの間隔・名称)。 r047(41回目): 左パネルに「範囲スクショ」を追加した版。 r044(40回目): v0078に残っていた古いscriptタグ(data/LOW_1TOKO_geo.js・data/voldia_worker_toko.js=r073で voldia_models.js に統合済み。404になっていた)を除去した版。r040(37回目)の「v0078のまま」はこれで更新
       iframe.style.cssText='width:100%;height:100%;border:none;';
       wrap.appendChild(iframe);
       document.body.appendChild(wrap);

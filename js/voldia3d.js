@@ -1,6 +1,21 @@
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (r104で旧単一ファイルから分離。以降の改修履歴は下の【rNNN】コメントと VOLDIA3D_VER を参照)
 // ============================================================
+// 【r137】(49回目。r136の実機確認でCrackTorture_v02の下側(地中梁X7・X8の付近)に線が2か所残った件)
+//   原因: 5mmを超えて動くため元のままにした図形(5.5〜6.2mmズレの梁)の辺が、格子の位置(位相)の評価から漏れていた。他の直線との5〜10mmの近接が格子の境目で割れて細い面になっても、位相の選択も作り直しの判定も気づけなかった。
+//   対策: 元のままにした図形の辺の両端の値も、位相の評価(割れる組の数)に入れる。CrackTorture_v02は不具合1→0。
+// 【r136】(49回目。マスター作のテスト図面Voldia_CrackTorture_v02.vold(地中梁の5.5〜6.2mmズレ・27°/53°の斜め梁・境界跨ぎ等を混ぜたもの)で、r135が不具合5→7件と悪化した件)
+//   原因: 入口の整えの主方向θを『全辺の円平均』で求めていたため、別方向の斜め梁(27°/53°)に平均が約0.2°引っ張られ、回転座標系が全体でずれた。長い辺が約30mm傾いて(5mmの上限を超え)整えがほぼ効かず、回転だけ掛かって悪化。
+//   対策: _alignDominantを、いまの主方向から3°以内の辺だけで求め直す繰り返し(最大8回)に変更=斜めの外れ値に引っ張られない。集中度は『主方向の軸から1.5°以内の辺の長さの割合』に変更。
+// 【r135】(49回目。r134の実機確認で、赤丸の位置(同じ図面Voldia_261121_2332.vold)に底面の『裏返った細い三角形1枚(幅6mm・長さ1.4m)』が線として残った件)
+//   原因: 10mm格子丸めと座標系の位相(平行移動)の組み合わせで、底面の三角形分割に細い三角形が出て裏返る(5mm以下の格子なら出ない=丸めが原因)。位相は直線の値だけでは決まらない。
+//   対策: 位相の候補を上位3×3から最大6通り用意し(_alignFrustumsMmの_alignPhases)、作った結果に不具合(細長い逆勾配・底面の裏返り=_alignDefectCount)が出たら次の候補の位相で作り直す(最初で0件なら1回だけ=通常は時間増なし)。最も不具合の少ない結果を採用。
+// 【r134】(49回目。床クラック問題=傾いた格子状基礎などで出る『幅2〜8mm・高さ約2.6mの細長い逆勾配の面』の根本対策P0。提案=Arecal担当 01_床クラック問題_解決提案_v001.md)
+//   原因: 別々の図形の『ほぼ同じ直線』が10mm格子丸めで数mmずれ、ほぼ重なる法面どうしの交線が細長い三角形になる(出口側の間引きでは3〜4割しか減らない)。
+//   対策: ①getAllFrustums(共有の入口)で_alignFrustumsMm: 主方向θ→ほぼ軸平行(1.5°以内)の辺を真っ直ぐに→図形をまたぐ同一直線を5mm以内で1本にそろえる(移動は頂点ごと・図形ごとに5mmまで。超える図形は元のまま)。
+//         そろえた輪郭は世界座標のまま持つ(体積側・2D・保存データには回転の影響なし)。各frustumに_alignTheta(θ)を付ける。
+//         ②buildManifoldUnionGeom(外側のラッパー): _alignThetaがあれば全frustum(とグレー・山留)を−θ回転した座標系で3D生成(10mm格子丸めがそろえた直線を壊さない)→結果(positions・山留/紫壁オーバーレイ)を+θで戻す。呼び出し側は変更不要。
+//   切り戻し: window._alignEdges=false で入口の整えを止める(従来どおり)。前版=backup/voldia3d_r133.js
 // 【r126】(44回目) ①紫の壁ハッチからグレー(既存躯体)と接する部分を除外(_buildGrayPrisms/_clipTriOutsideGrayPrisms。3Dイメージと配置モードの両方。
 //   Voldia_261029_1550.vold)。グレーを渡さない呼び出しは従来と完全に同じ。
 //   ②掃除(挙動不変): 未使用ローカル(origColors/epsilon/v0i,v1i,v2i)、『撤去予定』のまま残っていた[DIAG-B]診断ブロック(計算のたびに既存躯体の重なりメッシュを
@@ -172,11 +187,14 @@ let _purpleCalcWarnShown = false;
 //  するため、各深さスライスの法面オフセット後の輪郭に対してこれを適用する
 //  (深さで変わらない一定の山留ポリゴンとの交差を取るだけなので「垂直」になる)。
 // ────────────────────────────────────────────────────────────────
+// r134(49回目): 3D生成だけ回転・平行移動した座標系で行う間の座標系。null=通常(世界座標)。buildManifoldUnionGeomのラッパーだけが設定する。
+let _frame = null; // {th,tx,ty}: 回転(−th)してから(tx,ty)mm平行移動した座標系。null=世界座標
 function getYamadomeMmPolygon(offsetXmm, offsetYmm){
   offsetXmm = offsetXmm || 0; offsetYmm = offsetYmm || 0;
   if(typeof yamadome === 'undefined' || !yamadome || !yamadome.pts || yamadome.pts.length < 3) return null;
   const mmpx = (25.4/72) * scaleDenom / RS;
-  const pts = yamadome.pts.map(p => ({x: p.x*mmpx - offsetXmm, y: p.y*mmpx - offsetYmm}));
+  let pts = yamadome.pts.map(p => ({x: p.x*mmpx - offsetXmm, y: p.y*mmpx - offsetYmm}));
+  if(_frame){ const _c=Math.cos(-_frame.th), _s=Math.sin(-_frame.th); pts = pts.map(p => ({x: p.x*_c - p.y*_s + _frame.tx, y: p.x*_s + p.y*_c + _frame.ty})); } // r134: 回転した座標系の山留
   // r040: 巻き順をCCWに正規化する。_buildRingLoftMesh(蓋+側面のwatertight構築)は
   // 入力リングがCCWであることを暗黙に前提としており、CW(山留を時計回りに描いた場合)
   // だと蓋と側面の巻き順が噛み合わず非多様体(ManifoldError: Not manifold)になることが
@@ -2826,6 +2844,7 @@ function getAllFrustums(){
   // 突き合わせるには、同じだけシフトしてやる必要がある。呼び出し元がその差分を
   // 参照できるよう、戻り値の配列にオフセット値を生やしておく。
   _cleanFrustumsMm(result); // r128(47回目): 3D・体積・各種出力の共通の入口でクリーニング(2D上の図形は変えない)
+  _alignFrustumsMm(result); // r134(49回目): 床クラック問題P0=ほぼ同じ直線の辺をそろえる(世界座標のまま。3D生成は回転座標系=buildManifoldUnionGeomのラッパー)
   result._offsetX=minX;
   result._offsetY=minY;
   return result;
@@ -2942,6 +2961,130 @@ function _cleanFrustumsMm(frs, tol){
   if(removed || w.welded || w.projected || w.reverted) console.log(`[CLEAN] 形状のクリーニング(許容差${tol}mm): 一直線/近接の頂点を${removed}個除去・図形どうしの頂点を${w.welded}個合わせ・辺へ${w.projected}個寄せ・やめた図形${w.reverted}個`);
   return frs;
 }
+// ============================================================
+// r134(49回目): 床クラック問題の根本対策P0 = 入口の整え(_alignFrustumsMm)と、回転した座標系での3D生成(buildManifoldUnionGeomのラッパー)
+// 設計の要点(提案MD 6章): そろえは「辺の方向と位置だけ」を見る一般的な整え(特定の形の特別扱いはしない)。移動は頂点ごと・図形ごとに5mmまで(超える図形は元のまま)。
+// 世界座標でそろえてそのまま10mm格子丸めに通すと効果が約1/4に落ちるため、3D生成は主方向θの回転座標系のまま行い、結果だけ戻す。
+// ============================================================
+const _ALIGN_AXIS_TOL_DEG = 1.5, _ALIGN_MOVE_CAP_MM = 5, _ALIGN_CLUSTER_MM = 5, _ALIGN_MIN_STRENGTH = 0.5;
+function _alignRot(p, th){ const c=Math.cos(th), s=Math.sin(th); return {x:p.x*c-p.y*s, y:p.x*s+p.y*c}; }
+// 辺の長さで重みを付けた主方向(0〜90°周期=4倍角の円平均)。斜めの辺(別方向の図形)に平均が引っ張られないよう、いまの主方向から3°以内の辺だけで求め直すのを繰り返す(最大8回)。
+// 戻り値の集中度 = 最終的な主方向の軸から1.5°以内にある辺の長さの割合(0〜1。小さい=辺の向きが散らばる)
+function _alignDominant(rings){
+  const E=[]; let tot=0;
+  for(const R of rings) for(let k=0;k<R.length;k++){ const a=R[k], b=R[(k+1)%R.length], dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy); if(L>0){ E.push({L,t:Math.atan2(dy,dx)}); tot+=L; } }
+  if(!(tot>0)) return {theta:0, strength:0};
+  const mean=(sel)=>{ let sx=0,sy=0; for(const e of sel){ sx+=e.L*Math.cos(4*e.t); sy+=e.L*Math.sin(4*e.t); } return Math.atan2(sy,sx)/4; };
+  const off=(t,th)=>{ let d=((t-th)%(Math.PI/2)+Math.PI/2)%(Math.PI/2); return Math.min(d,Math.PI/2-d)*180/Math.PI; };
+  let th=mean(E);
+  for(let it=0; it<8; it++){ const sel=E.filter(e=>off(e.t,th)<=3); if(!sel.length) break; const nt=mean(sel); const conv=Math.abs(off(nt,th))<1e-9; th=nt; if(conv) break; }
+  let inl=0; for(const e of E) if(off(e.t,th)<=_ALIGN_AXIS_TOL_DEG) inl+=e.L;
+  return { theta: th, strength: inl/tot };
+}
+// frs=getAllFrustums()の配列(ptsMm/holesMmを世界座標のまま書き換え、外接も更新)。グレー(既存躯体)は触らない。戻り値={theta,aligned,reverted,maxMoveMm,hLines,vLines}かnull
+function _alignFrustumsMm(frs){
+  if(window._alignEdges === false || !frs || frs.length < 2) return null;
+  const idx=[]; frs.forEach((f,i)=>{ if(f && f.color!=='gray' && f.ptsMm && f.ptsMm.length>=3 && !f._alignTheta) idx.push(i); });
+  if(idx.length < 2) return null;
+  const all=[]; idx.forEach(i=>{ all.push(frs[i].ptsMm); (frs[i].holesMm||[]).forEach(h=>all.push(h)); });
+  const dom=_alignDominant(all);
+  if(!(dom.strength >= _ALIGN_MIN_STRENGTH)){ console.log(`[ALIGN] 辺の向きが散らばる図面のため入口の整えは行いません(主方向の集中度${dom.strength.toFixed(2)}<${_ALIGN_MIN_STRENGTH})`); return null; }
+  const th=dom.theta;
+  // 1) −θ回転(元の位置をx0,y0に保持)
+  const S=idx.map(i=>[frs[i].ptsMm].concat(frs[i].holesMm||[]).map(r=>r.map(p=>{ const q=_alignRot(p,-th); return {x:q.x,y:q.y,x0:q.x,y0:q.y}; })));
+  // 2) 水平/垂直に近い辺(1.5°以内)のうち、端点の差の半分が移動上限以内のもの(丸めによるずれと見なせる辺)だけ集める
+  const H=[], V=[];
+  S.forEach((rings,si)=>rings.forEach((P,ri)=>{ const n=P.length;
+    for(let k=0;k<n;k++){ const a=P[k], b=P[(k+1)%n], ang=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI, m=((ang%90)+90)%90, off=Math.min(m,90-m);
+      if(off>_ALIGN_AXIS_TOL_DEG) continue;
+      const isH=Math.abs(Math.sin(ang*Math.PI/180))<0.5;
+      if((isH?Math.abs(b.y-a.y):Math.abs(b.x-a.x))/2 > _ALIGN_MOVE_CAP_MM) continue;
+      (isH?H:V).push({si,ri,a:k,b:(k+1)%n,v:isH?(a.y+b.y)/2:(a.x+b.x)/2}); } }));
+  // 3) 図形をまたいで、ほぼ同じ直線(値の幅が5mm以内)を1本にそろえる。
+  // 4) 図形ごとの移動上限: 元の位置から5mmを超えて動く頂点がある図形は、元のまま(何もしない)。元のままにした図形の辺は、そろえる直線の平均に加えない(平均を引っ張って他の図形を余計に動かさない)ので、
+  //    外してから組み直す(最大6回。外れる図形が増えなくなったら確定)。
+  const _clMm=(typeof window._alignClusterMm==='number')?window._alignClusterMm:_ALIGN_CLUSTER_MM; // 試験用に上書き可(既定5mm)
+  const cluster=arr=>{ const s2=arr.slice().sort((p,q)=>p.v-q.v); let i=0; while(i<s2.length){ let j=i; while(j+1<s2.length && s2[j+1].v-s2[i].v<=_clMm) j++; const m=s2.slice(i,j+1).reduce((u,e)=>u+e.v,0)/(j-i+1); for(let k=i;k<=j;k++) s2[k].v=m; i=j+1; } };
+  const avg=a=>a.reduce((u,v)=>u+v,0)/a.length;
+  const out=new Array(S.length).fill(null), worstOf=new Array(S.length).fill(0), dropped=new Set();
+  let Hc=[], Vc=[];
+  for(let iter=0; iter<6; iter++){
+    Hc=H.filter(e=>!dropped.has(e.si)).map(e=>({...e})); Vc=V.filter(e=>!dropped.has(e.si)).map(e=>({...e}));
+    cluster(Hc); cluster(Vc);
+    const acc=S.map(rings=>rings.map(P=>P.map(()=>({xs:[],ys:[]}))));
+    for(const e of Hc){ acc[e.si][e.ri][e.a].ys.push(e.v); acc[e.si][e.ri][e.b].ys.push(e.v); }
+    for(const e of Vc){ acc[e.si][e.ri][e.a].xs.push(e.v); acc[e.si][e.ri][e.b].xs.push(e.v); }
+    let changed=false;
+    S.forEach((rings,si)=>{ if(dropped.has(si)){ out[si]=null; return; }
+      const Q=rings.map((P,ri)=>P.map((p,k)=>({x:acc[si][ri][k].xs.length?avg(acc[si][ri][k].xs):p.x, y:acc[si][ri][k].ys.length?avg(acc[si][ri][k].ys):p.y})));
+      let worst=0; Q.forEach((R,ri)=>R.forEach((q,k)=>{ worst=Math.max(worst,Math.hypot(q.x-rings[ri][k].x0,q.y-rings[ri][k].y0)); }));
+      worstOf[si]=worst;
+      if(worst>_ALIGN_MOVE_CAP_MM){ dropped.add(si); out[si]=null; changed=true; } else out[si]=Q; });
+    if(!changed) break;
+  }
+  let maxMove=0, aligned=0; const reverted=dropped.size, moves=worstOf.map(w=>+w.toFixed(2));
+  out.forEach((Q,si)=>{ if(Q){ aligned++; maxMove=Math.max(maxMove,worstOf[si]); } });
+  const res=out;
+  if(aligned<2) return null; // 図形をまたぐそろえが成り立たない(1個だけ等)なら従来どおり
+  // 5) そろえた輪郭を世界座標(+θ)に戻して書き込む(外接も更新)。元のまま(null)の図形は触らない
+  res.forEach((Q,si)=>{ if(!Q) return; const f=frs[idx[si]];
+    _setFrustumPtsMm(f, Q[0].map(q=>_alignRot(q,th)));
+    if(f.holesMm && f.holesMm.length) f.holesMm = Q.slice(1).map(R=>R.map(q=>_alignRot(q,th))); });
+  // 6) 10mm格子の位相(座標系の平行移動)を選ぶ: ほぼ同じ(5mm以上10mm未満離れた)直線どうしが格子丸めの境目で別々のマスに割れると、10mmの細い面→細長い面になる。
+  //    割れる組が最も少なく、丸めの境目から最も遠い位相を、1/4mm刻みで探す(x・yは独立)。格子は_vertexQuantMm(=3D生成の入口の丸め)と同じ。
+  const Q=Math.max(window._vertexQuantMm||0,1);
+  // 候補は上位3つ(2mm以上離す)。実際に作った結果に不具合(細長い逆勾配・底面の裏返り)が出たら、次の候補の位相で作り直す(buildManifoldUnionGeomのラッパー)。
+  const phases=(vals)=>{ const u=[...new Set(vals.map(v=>Math.round(v*1e4)/1e4))].sort((a,b)=>a-b); const sc=[];
+    for(let t=0;t<Q;t+=0.25){ let split=0, marg=Infinity;
+      for(let i=0;i<u.length;i++){ const f=(((u[i]+t)/Q)%1+1)%1; marg=Math.min(marg,Math.abs(f-0.5)*Q); // 境目(k+0.5)までの距離
+        if(i+1<u.length && u[i+1]-u[i]<Q && Math.round((u[i]+t)/Q)!==Math.round((u[i+1]+t)/Q)) split++; }
+      sc.push({t,split,marg}); }
+    sc.sort((a,b)=>a.split-b.split || b.marg-a.marg);
+    const out=[]; for(const c of sc){ if(out.every(o=>Math.min(Math.abs(o.t-c.t),Q-Math.abs(o.t-c.t))>=2)) out.push(c); if(out.length>=3) break; }
+    return out; };
+  // 元のまま(5mm超で整えなかった)図形の辺も、格子の位置の評価に入れる: そのままだと他の直線との5〜10mmの近接が評価から漏れ、格子の境目で割れて細い面になる。両端の値を別々に入れる(傾いた辺は両端で値が違う)。
+  const xAll=Vc.map(e=>e.v), yAll=Hc.map(e=>e.v);
+  for(const e of H){ if(dropped.has(e.si)){ yAll.push(S[e.si][e.ri][e.a].y0, S[e.si][e.ri][e.b].y0); } }
+  for(const e of V){ if(dropped.has(e.si)){ xAll.push(S[e.si][e.ri][e.a].x0, S[e.si][e.ri][e.b].x0); } }
+  const pxL=phases(xAll), pyL=phases(yAll);
+  const px=pxL[0], py=pyL[0];
+  const combos=[]; for(let a=0;a<pxL.length;a++) for(let b=0;b<pyL.length;b++) combos.push({tx:pxL[a].t, ty:pyL[b].t, r:a+b});
+  combos.sort((u,v)=>u.r-v.r); const phaseList=combos.slice(0,6).map(c=>({tx:c.tx,ty:c.ty}));
+  frs.forEach(f=>{ if(f){ f._alignTheta = th; f._alignTx = px.t; f._alignTy = py.t; f._alignPhases = phaseList; } });
+  console.log(`[ALIGN] 入口の整え(r134): 主方向${(th*180/Math.PI).toFixed(2)}°(集中度${dom.strength.toFixed(2)})・${aligned}図形をそろえ・元のまま${reverted}図形・水平${H.length}/垂直${V.length}本・頂点の最大移動${maxMove.toFixed(1)}mm・格子の位相(${px.t},${py.t})mm(割れる組 x${px.split}/y${py.split}・候補${phaseList.length}個)`);
+  return { theta: th, tx: px.t, ty: py.t, phases: phaseList, aligned, reverted, maxMoveMm: maxMove, hLines: H.length, vLines: V.length, moves, strength: dom.strength, splitX: px.split, splitY: py.split };
+}
+// 回転の出入り(ラッパー用)。frustum・グレーを座標系(−θ回転→(tx,ty)平行移動)へ(外接は輪郭から作り直す=ODぶん広げる)。_alignThetaは0にして入れ子の呼び出しで二重に回さない
+function _alignFrameOf(frs){ if(_frame!==null || !frs) return null; for(const f of frs){ const t=f && f._alignTheta; if(typeof t==='number' && isFinite(t) && Math.abs(t)>1e-9){ const ph=(f._alignPhases && f._alignPhases.length) ? f._alignPhases : [{tx:f._alignTx||0, ty:f._alignTy||0}]; return {th:t, tx:ph[0].tx, ty:ph[0].ty, phases:ph}; } } return null; }
+// 作った結果の不具合を数える(回転座標系のまま・位置はm): ①細長い逆勾配の面(高さ1mm超・幅20mm未満・上向き成分0.05〜0.99) ②底面(水平・深さ5mm超)の裏返り(上向きの水平面)。0なら健全
+function _alignDefectCount(r){
+  if(!r || !r.positions) return 0; const P=r.positions; let bad=0;
+  for(const L of [r.cyanIndices, r.redIndices]){ if(!L) continue;
+    for(let t=0;t+2<L.length;t+=3){ const a=L[t]*3,b=L[t+1]*3,c=L[t+2]*3;
+      const ux=P[b]-P[a],uy=P[b+1]-P[a+1],uz=P[b+2]-P[a+2],wx=P[c]-P[a],wy=P[c+1]-P[a+1],wz=P[c+2]-P[a+2];
+      const nx=uy*wz-uz*wy, ny=uz*wx-ux*wz, nz=ux*wy-uy*wx, n=Math.hypot(nx,ny,nz); if(n<1e-12) continue;
+      const e=Math.max(Math.hypot(ux,uy,uz),Math.hypot(wx,wy,wz),Math.hypot(P[c]-P[b],P[c+1]-P[b+1],P[c+2]-P[b+2])), y=ny/n;
+      const hh=Math.max(P[a+1],P[b+1],P[c+1])-Math.min(P[a+1],P[b+1],P[c+1]);
+      if(y>0.05 && y<=0.99 && n/e<0.02 && hh>0.001) bad++;
+      else if(y>0.99 && hh<0.0005 && P[a+1]<-0.005) bad++; } }
+  return bad;
+}
+function _alignToFrame(f, fr){
+  const _rd=v=>Math.round(v*1e4)/1e4; // 往復の浮動小数点ノイズ(1e-11mm級)を0.1μmに丸めて消す=同じ直線の頂点が10mm格子丸めの境目で割れない
+  const rp=p=>{ const q=_alignRot(p,-fr.th); return {x:_rd(q.x+fr.tx), y:_rd(q.y+fr.ty)}; }, pts=f.ptsMm.map(rp), o=f.OD||0;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  return Object.assign({}, f, { ptsMm: pts, holesMm: (f.holesMm||[]).map(h=>h.map(rp)),
+    x1:Math.min(...xs)-o, x2:Math.max(...xs)+o, y1:Math.min(...ys)-o, y2:Math.max(...ys)+o, _alignTheta:0 });
+}
+// 結果の位置(x,z。単位m・原点は回転の中心=ローカル座標の原点)を元の座標系へ戻す(平行移動を引いて+θ回転)。同じ配列が複数のフィールドに入っていても1回だけ
+function _alignRotateResultBack(r, fr){
+  const c=Math.cos(fr.th), s=Math.sin(fr.th), tx=fr.tx*0.001, ty=fr.ty*0.001, done=new Set();
+  const rotArr=a=>{ if(!a || done.has(a) || typeof a.length!=='number') return; done.add(a);
+    for(let i=0;i+2<a.length;i+=3){ const x=a[i]-tx, z=a[i+2]-ty; a[i]=x*c-z*s; a[i+2]=x*s+z*c; } };
+  rotArr(r.positions);
+  for(const k of ['yamadomeOverlay','purpleWallOverlay','purpleWallsForPlacement']){ if(r[k]) rotArr(r[k].positions); }
+}
+
 // ============================================================
 // r100(36回目): 既存躯体(グレー)「底面∞」の共通関数群
 // 仕様(マスター合意): 3Dイメージの土量計算(doboku)系統のみ、既存躯体の下端を
@@ -4697,7 +4840,11 @@ function _initThreeBase(objects,frustums){
   try{ ensureShadowButton(); applyShadowState(); }catch(e){ console.warn('[SHADOW] 初期化で例外(影なしで続行):', e); }
   const cv=threeR.domElement;
   cv.addEventListener('contextmenu',e=>e.preventDefault());
+  // r138(50回目): ホイール(中ボタン)を押すと、ブラウザの「自動スクロール」(十字✥のポインタ)が始まり、動かさずに離すと残ったままになっていた。
+  //   中ボタンのmousedownの既定動作を止める(2Dの作図画面は元々 e.preventDefault 済み)。回転(中ボタンドラッグ)はそのまま。auxclickも止める。
+  cv.addEventListener('auxclick',e=>{ if(e.button===1) e.preventDefault(); });
   cv.addEventListener('mousedown',e=>{
+    if(e.button===1) e.preventDefault();
     if(e.button===2){pan3={x:e.clientX,y:e.clientY,cx:orCX,cy:orCY,cz:orCZ};return;}
     drag3={x:e.clientX,y:e.clientY,th:orTh,ph:orPh};
   });
@@ -5221,6 +5368,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // 【r111 削除】classifyPathsSafe(rawPaths,SF) — r036で「buildSimpleExtrudeGeom(通常計算)専用」として追加された、ClipperLib PolyTree版のouter/holes分類。
 //   全ファイル横断で呼び出し元ゼロ(コメントの意図と違い、実際には誰も呼んでいなかった)ので削除。
 //   現役は従来の classifyPaths()(複数箇所から使用中)。必要になったら r110 のファイルから復元できる。
+// r138(50回目): 3Dイメージで、ホイール(中ボタン)を押して何もせず離すと十字ポインタ(ブラウザの自動スクロール)が残る件を修正(中ボタンのmousedown/auxclickで既定動作を止める)。前版=backup/voldia3d_r137.js
 // ===== 改版履歴(新しい順・1行=1改版)。以前は下の VOLDIA3D_VER の行末に1行で続けて書いていた。48回目に1改版1行へ分割して整理(本文は元のまま・欠落なし) =====
 // r133(48回目): _guardedDecimateMesh の取りこぼし対策(テスト担当の破壊テスト報告): ①ずれの測定を2段(N=4→余裕×1.3→ぎりぎりだけN=32)。N=4だけだと許容5mmを最大+15%超えた(5.73mm)②元は逆勾配でなかった面が縮約で逆勾配(ny>0.05)になる縮約を拒否(山留の細い壁面で逆勾配が増えていた)。前版=backup/voldia3d_r132.js
 // r132(48回目): コード整理=挙動を変えない削除。①書き込みだけで誰にも読まれないwindow変数 _yamadomeBattOffsetMm・_yamadomePrismID ②後ろの同名関数に上書きされて使われなかった古い _ringSelfIntersects(ptsMm, SF) ③未使用の分割代入 ok。削除の一覧と残したものは引継ぎ書の「コード整理記録」。前版=backup/voldia3d_r131.js
@@ -5258,7 +5406,7 @@ function cleanupNearVertices(positions, cyanIndices, redIndices, threshM){
 // r100: 既存躯体の底面∞(doboku系統のみ)。
 // r099(35回目): frustum個別テーパーf.taperMm対応
 // ===== ここまで改版履歴 =====
-const VOLDIA3D_VER = "Voldia-3D-r133(base:VoldiaM r069)"; // 改版履歴は直上のコメント
+const VOLDIA3D_VER = "Voldia-3D-r138(base:VoldiaM r069)"; // 改版履歴は直上のコメント
 // ⚠️ 注記(セッション16): このVOLDIA3D_VER定数が示す通り、以下しばらくの区間には
 // 分岐元アプリ「VoldiaM」(開発版・姉妹アプリ)のコードとコメントがそのまま
 // 引き継がれている。コメント中の「rXX」「問題3/5」「Site A/Site C」「21〜27回目
@@ -6079,6 +6227,36 @@ function _guardedDecimateMesh(positions, lists, tolM, angDeg){
 }
 // r129(47回目): 本体(_buildManifoldUnionGeomRaw)の結果に、平面メッシュの間引き(同一平面の余分な三角形を、形を変えずに減らす)を通す。
 async function buildManifoldUnionGeom(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
+  // r134(49回目): 入口の整え(_alignFrustumsMm)で_alignThetaが付いていれば、−θ回転した座標系で3D生成して結果を+θで戻す(呼び出し側は変更不要)。
+  let fr = (opts && opts._noFrameRotate) ? null : _alignFrameOf(frustums);
+  if(!fr) return _buildManifoldUnionGeomDecimated(frustums, isDoboku, yamadomeOffsetX, yamadomeOffsetY, opts);
+  const fr2 = frustums.map(f=>_alignToFrame(f,fr));
+  if(frustums._offsetX!==undefined) fr2._offsetX = frustums._offsetX;
+  if(frustums._offsetY!==undefined) fr2._offsetY = frustums._offsetY;
+  const opts2 = Object.assign({}, opts||{});
+  if(opts2.grayFrustums) opts2.grayFrustums = opts2.grayFrustums.map(f=>_alignToFrame(f,fr));
+  // 位相の候補を順に試す: 最初の位相で不具合が0ならそれで確定(通常はここで終わり=1回だけ)。不具合が出たら次の候補で作り直し、最も不具合の少ない結果を採用する。
+  let best=null, bestBad=Infinity, bestFr=fr;
+  for(let k=0; k<fr.phases.length; k++){
+    const fk={th:fr.th, tx:fr.phases[k].tx, ty:fr.phases[k].ty};
+    const frK = k===0 ? fr2 : frustums.map(f=>_alignToFrame(f,fk));
+    if(frustums._offsetX!==undefined) frK._offsetX = frustums._offsetX;
+    if(frustums._offsetY!==undefined) frK._offsetY = frustums._offsetY;
+    const optsK = Object.assign({}, opts2);
+    if(opts && opts.grayFrustums && k>0) optsK.grayFrustums = opts.grayFrustums.map(f=>_alignToFrame(f,fk));
+    let rk=null; _frame=fk;
+    try{ rk = await _buildManifoldUnionGeomDecimated(frK, isDoboku, yamadomeOffsetX, yamadomeOffsetY, optsK); }
+    finally{ _frame=null; }
+    const bad=_alignDefectCount(rk);
+    if(k>0) console.log(`[ALIGN] 位相の候補${k+1}/${fr.phases.length}(${fk.tx},${fk.ty})mmで作り直し: 不具合 ${bestBad}→${bad}`);
+    if(bad<bestBad){ best=rk; bestBad=bad; bestFr=fk; }
+    if(bestBad===0) break;
+  }
+  const r = best; fr = bestFr;
+  if(r) _alignRotateResultBack(r, fr);
+  return r;
+}
+async function _buildManifoldUnionGeomDecimated(frustums, isDoboku=true, yamadomeOffsetX, yamadomeOffsetY, opts){
   const r = await _buildManifoldUnionGeomRaw(frustums, isDoboku, yamadomeOffsetX, yamadomeOffsetY, opts);
   if(r && r.positions && window._planarDecimate !== false){
     try{

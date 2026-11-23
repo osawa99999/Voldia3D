@@ -1,3 +1,6 @@
+// r157(50回目・マスター要望): H鋼杭の天端高さを入力式に。①「H鋼杭」ボタン(h_pile_input)→天端高さダイアログ(#hpile-input-ui。既定±0・最高+5m・最低=地形の最深点(0.01m単位で切り上げ)。範囲外は最高/最低に直して「使用できない値です」)→「配置」→従来どおりクリック配置(h_pile) ②配置済みのH鋼杭を右クリック(動かさずに離す)→同じダイアログで高さ修正(_hpileSetTop=杭を作り直して置き換え) ③H鋼杭にマウスオーバーで「右クリックで高さ修正」。天端はuserData.topYで持ち、.vold保存(topY)・復元(なし=従来のGL+0.4)・ドラッグ移動後の高さ(_hpileTopOf)に反映。HTML=voldia_placement_v0097.html。前版=orig/voldia_placement_r156.js
+// r156(50回目・修正提案書v002 2B): 矢印を平らな板に作り直したことに合わせ、①縦ビルボード=_updateArrowBillboards()(毎フレーム・描画直前。矢印の向き(方位)はそのまま、板だけカメラのほうへ倒す) ②倍率(ダブルクリック1→2→3→1)=_applyArrowScale に一本化(重複していた処理を統合。ポールも伸ばす)。当たり判定・HTML書き出しは変更なし。前版=orig/voldia_placement_r155.js
+// r155(50回目・修正提案書v002 2A): カラーコーン(conebar)の個数(2〜10)を選べるように。パレットのボタン(conebar_input)→個数ダイアログ(#cone-input-ui。足場の入力と同じ流れ)→配置待ち(conebar)→クリックでspawnObject。個数はuserData.coneCountで持ち、.vold保存(coneCount)・復元・Enterの繰り返し(前回の個数を初期値)に対応。旋回(●=最後のコーン・芯=最初のコーン)は従来のロジックのまま。モデルは data/voldia_models.js の createConeBar(n)。前版=orig/voldia_placement_r154.js
 // ============================================================
 // voldia_placement.js — 配置モード操作ロジック本体 (voldia_placement_v0075.htmlインラインscriptより分離)
 // 41回目: ①左パネルに「📷 範囲スクショ」(範囲をドラッグ→PNG保存。背景変更なし) ②印刷PDF名・範囲スクショ名の日付を yymmdd_hhmm に統一(_fileStamp) ③showToastに表示時間の引数。※配置モードHTMLは voldia_placement_v0080.html
@@ -795,20 +798,49 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
       if(u.type === 'custom_box'){
         d.boxW = u.boxW; d.boxD = u.boxD; d.boxH = u.boxH; d.boxColor = u.boxColor;
       }
+      if(u.type === 'conebar') d.coneCount = u.coneCount || 2; // r155: カラーコーンの個数(古い保存データ=coneCountなしは2個)
       if(u.type === 'scaffold'){ d.scfSteps = u.scfSteps; d.scfSpans = u.scfSpans; d.scfWidth = u.scfWidth; d.scfOpen = u.scfOpen || []; } // r128: 足場
       if(u.type === 'kotai') d.kotaiPoints = u.kotaiPoints || [];
-      if(u.type === 'h_pile') d.heightM = u.heightM || 0;
+      if(u.type === 'h_pile'){ d.heightM = u.heightM || 0; d.topY = (typeof u.topY === 'number') ? u.topY : HPILE_TOP_Y; } // r157: 天端高さ(古い保存データ=topYなしは従来のGL+0.4)
       return d;
     });
   }
 
+  // r156(50回目・2B): 矢印の倍率(1〜3)。ダブルクリックと復元の両方がこの1つを使う。
+  //   upper(旋回+倍率)の高さ H(m)=1.0+(m-1)*0.7(板の下端が地面側に沈まないための従来の式。板の下端=H-0.7m が常に0.3)。
+  //   ポール(isPole・元の高さ1.0)は先端が矢印の中心(=H)になるまで伸ばす。→ 倍率を上げても「矢印だけが浮く」ことはない。
+  const ARROW_HEAD_RADIUS = 0.7; // createArrowMesh() の ARROW_HEAD_HALF_W と同じ値
   function _applyArrowScale(mesh, m){
-    let upper = null;
-    mesh.traverse(c => { if (c.userData.isUpper) upper = c; });
+    let upper = null, pole = null;
+    mesh.traverse(c => { if (c.userData.isUpper) upper = c; if (c.userData.isPole) pole = c; });
+    const H = 1.0 + (m - 1) * ARROW_HEAD_RADIUS;
     if(upper){
       upper.scale.set(m, m, m);
-      const ARROW_HEAD_RADIUS = 0.7; // createArrowMesh()のheadRadiusと同じ値
-      upper.position.y = 1.0 + (m - 1) * ARROW_HEAD_RADIUS;
+      upper.position.y = H;
+    }
+    if(pole){
+      pole.scale.y = H;      // 元の高さ1.0 × H
+      pole.position.y = H / 2; // 下端は地面(0)のまま
+    }
+  }
+
+  // r156(50回目・2B): 矢印の縦ビルボード。矢印の向き(upperのローカルZ軸)は動かさず、板をZ軸まわりに回してカメラのほうへ倒す。
+  //   upperのローカル座標でのカメラ位置 (cx,cy,cz) のうち、Z軸に垂直な成分 (cx,cy) の向きに板の法線をそろえる:
+  //   角度 = (cx<0 ? -1 : 1) * atan2(max(cy,0), |cx|)。真横(cy=0)=0=垂直に立つ / 真上(cx=0)=±90°=水平に寝る。
+  //   (板は左右対称なので、真上付近で符号が入れ替わっても見た目は変わらない。カメラが地面より下に回っても cy=0 に丸めて立てる)
+  const _abVec = new THREE.Vector3();
+  function _updateArrowBillboards(){
+    for (let i = 0; i < placedObjects.length; i++) {
+      const obj = placedObjects[i];
+      if (obj.userData.type !== 'arrow') continue;
+      let upper = null, tilt = null;
+      obj.traverse(c => { if (c.userData.isUpper) upper = c; if (c.userData.isTilt) tilt = c; });
+      if (!upper || !tilt) continue;
+      upper.updateWorldMatrix(true, false);
+      _abVec.copy(camera.position);
+      upper.worldToLocal(_abVec);
+      const ang = (_abVec.x < 0 ? -1 : 1) * Math.atan2(Math.max(_abVec.y, 0), Math.abs(_abVec.x));
+      if (Math.abs(tilt.rotation.z - ang) > 1e-5) tilt.rotation.z = ang;
     }
   }
 
@@ -843,23 +875,25 @@ console.log('%c[Voldia] ' + location.pathname.split('/').pop() + ' 読み込み�
         if(pts.length >= 3){ _buildKotaiMesh(pts); mesh = placedObjects[placedObjects.length - 1]; }
         else return;
       } else if(d.type === 'h_pile'){
-        const heightM = d.heightM || (HPILE_TOP_Y - terrainMinY);
+        const topY = (typeof d.topY === 'number') ? d.topY : HPILE_TOP_Y; // r157: 天端高さ(なし=従来のGL+0.4)
+        const heightM = d.heightM || Math.max(topY - terrainMinY, 0.01);
         mesh = createHPileMesh(heightM);
-        mesh.position.set(d.x, HPILE_TOP_Y, d.z);
-        mesh.userData = { isRoot: true, type: 'h_pile', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true, heightM, color: '#8d6e63' };
+        mesh.position.set(d.x, topY, d.z);
+        mesh.userData = { isRoot: true, type: 'h_pile', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true, heightM, topY, color: '#8d6e63' };
         addEdgeLines(mesh);
         scene.add(mesh);
         placedObjects.push(mesh);
       } else {
-        const prevType = currentType, prevBoxParams = boxParams, prevBoxColor = boxColor, prevScfParams = scaffoldParams;
+        const prevType = currentType, prevBoxParams = boxParams, prevBoxColor = boxColor, prevScfParams = scaffoldParams, prevConeCount = coneCountParam;
         if(d.type === 'custom_box'){
           boxParams = { boxW:d.boxW, boxD:d.boxD, boxH:d.boxH };
           boxColor = d.boxColor;
         }
         if(d.type === 'scaffold'){ scaffoldParams = { steps:String(d.scfSteps), spans:String(d.scfSpans), width:String(d.scfWidth), open: (d.scfOpen || []).slice() }; } // r128: 足場
+        if(d.type === 'conebar'){ coneCountParam = String(d.coneCount || 2); } // r155: カラーコーンの個数
         currentType = d.type;
         spawnObject(d.x, d.z);
-        currentType = prevType; boxParams = prevBoxParams; boxColor = prevBoxColor; scaffoldParams = prevScfParams;
+        currentType = prevType; boxParams = prevBoxParams; boxColor = prevBoxColor; scaffoldParams = prevScfParams; coneCountParam = prevConeCount;
         mesh = placedObjects[placedObjects.length - 1];
       }
       mesh.rotation.y = d.rotY || 0;
@@ -1331,6 +1365,8 @@ window.addEventListener('message', function(ev) {
     if (shown('scaffold-edit-ui')) return click('scf-edit-close'); // 足場の編集画面(開口)。※_scfIsOpen()は「設定画面」が開いているかなので、ここでは使わない
     if (shown('numpad-ui')) return click('numpad-cancel');
     if (shown('scaffold-input-ui')) return click('scf-btn-cancel');
+    if (shown('cone-input-ui')) return click('cone-btn-cancel'); // r155
+    if (shown('hpile-input-ui')) return click('hpile-btn-cancel'); // r157
     if (shown('box-input-ui')) return click('box-btn-cancel');
     if (shown('text-input-ui')) return click('text-btn-cancel');
     return null;
@@ -1857,6 +1893,130 @@ window.addEventListener('message', function(ev) {
   //   当たり判定は箱形(r141: 開口がある足場だけ小箱の集合)・選択は全面。保存はuserData.scfSteps/scfSpans/scfWidth/scfOpen。
   // ==========================================
   const SCF = { H_STEP: 1.7, W_SPAN: 1.8, H_BASE: 0.2, MAX_STEPS: 30, MAX_SPANS: 50, SHADOW_POST: { w: 0.15, h: 1.2 }, FLOAT_TOL: 0.3 };
+  // --- r157(50回目): H鋼杭の天端高さダイアログ。「新規配置」と「配置済みの高さ修正(右クリック)」の両方で使う。
+  const HPILE_TOP_MAX = 5.0;       // 最高 +5m
+  let _hpileMode = 'new';          // 'new' | 'edit'
+  let _hpileEditObj = null;
+  function _hpileUi() { return document.getElementById('hpile-input-ui'); }
+  function _hpileIsOpen() { const u = _hpileUi(); return !!u && u.style.display === 'block'; }
+  function _hpileMin() { return Math.min(HPILE_TOP_MAX, Math.ceil(terrainMinY * 100 - 1e-9) / 100); } // 最低=地形の一番深い所の高さ(0.01m単位で切り上げ。表示と判定を同じ値にする)
+  function _hpileFmt(v) { const r = Math.round(v * 1000) / 1000; return r === 0 ? '±0' : (r > 0 ? '+' : '-') + String(Math.abs(r)); }
+  function _hpileRangeText() { const mn = _hpileMin(); return '最高 +' + HPILE_TOP_MAX.toFixed(2) + 'm ／ 最低 ' + (mn === 0 ? '±0.00' : (mn > 0 ? '+' : '-') + Math.abs(mn).toFixed(2)) + 'm'; }
+  // 全角・±・＋−ーなどを受け付ける。数値にならなければ NaN
+  function _hpileParse(str) {
+    let s = String(str).normalize('NFKC').replace(/[−ー‐–—]/g, '-').replace(/\s/g, '').replace(/m$/i, '');
+    if (s === '±' || s === '±0') return 0;
+    s = s.replace(/^±/, '');
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s)) return NaN;
+    return parseFloat(s);
+  }
+  function _hpileTopOf(o) { const t = o.userData.topY; return (typeof t === 'number') ? t : HPILE_TOP_Y; } // 天端高さ(古い保存データ=topYなしは従来のGL+0.4)
+  function _hpileOpenDialog(mode, obj) {
+    _hpileMode = mode; _hpileEditObj = obj || null;
+    const inp = document.getElementById('hpile-top');
+    inp.value = _hpileFmt(mode === 'edit' && obj ? _hpileTopOf(obj) : 0); // 既定は±0。修正の時は今の天端高さ
+    document.getElementById('hpile-input-title').textContent = mode === 'edit' ? 'H鋼杭 高さ修正' : 'H鋼杭 天端高さ';
+    document.getElementById('hpile-btn-ok').textContent = mode === 'edit' ? '変 更' : '配 置';
+    document.getElementById('hpile-input-range').textContent = _hpileRangeText();
+    _hpileUi().style.display = 'block';
+    controls.enabled = false;
+    inp.focus(); inp.select();
+  }
+  // 入力値を検査して返す。数値でない→null(ダイアログは閉じない)。範囲外→最高/最低に書き換えて「使用できない値です」→null(直した値で、もう一度ボタンを押す)
+  function _hpileReadValue() {
+    const inp = document.getElementById('hpile-top');
+    let v = _hpileParse(inp.value);
+    if (!isFinite(v)) { showToast('⚠ 数値で入力してください（例: ±0・+0.4・-1.5）'); inp.focus(); inp.select(); return null; }
+    const mx = HPILE_TOP_MAX, mn = _hpileMin();
+    if (v > mx || v < mn) { v = v > mx ? mx : mn; inp.value = _hpileFmt(v); showToast('使用できない値です'); inp.focus(); inp.select(); return null; }
+    return Math.round(v * 1000) / 1000;
+  }
+  function _hpileCloseDialog() { _hpileUi().style.display = 'none'; _hpileEditObj = null; }
+  document.getElementById('hpile-btn-cancel').addEventListener('click', () => {
+    if (_hpileMode === 'edit') { _hpileCloseDialog(); controls.enabled = true; return; }
+    _hpileCloseDialog(); exitPlacementMode();
+  });
+  document.getElementById('hpile-btn-ok').addEventListener('click', () => {
+    const top = _hpileReadValue(); if (top === null) return;
+    if (_hpileMode === 'edit') {
+      const obj = _hpileEditObj; _hpileCloseDialog(); controls.enabled = true;
+      if (obj && placedObjects.includes(obj)) { _hpileSetTop(obj, top); showToast('H鋼杭の天端高さを ' + _hpileFmt(top) + 'm に変更しました'); }
+      return;
+    }
+    hpileTopParam = top;
+    _hpileCloseDialog();
+    currentType = 'h_pile'; // ここから先は従来のH鋼杭の配置と同じ(3Dビューをクリックして配置)
+    document.getElementById('placement-mode-msg').style.display = 'block';
+    document.getElementById('placement-msg-text').innerText = "3Dビュー上の配置位置をクリックしてください（天端 " + _hpileFmt(top) + "m）";
+    document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+    document.getElementById('line-color-picker').style.display = "none";
+    document.getElementById('finish-line-btn').style.display = "none";
+    _hpileEnter();
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    setTimeout(() => { controls.enabled = true; }, 10);
+  });
+  // ダイアログ中のキー: Enter=決定。Esc以外はほかのキー操作(配置モードのショートカット等)に渡さない(入力欄への文字入力そのものは通る)
+  window.addEventListener('keydown', (e) => {
+    if (!_hpileIsOpen()) return;
+    if (e.key === 'Escape') return;
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('hpile-btn-ok').click(); }
+  }, true);
+  // 配置済みのH鋼杭を右クリック(5px以内=動かさずに離す。右ドラッグ=パンの邪魔をしない)→高さ修正。作図中・ドラッグ中・ほかのダイアログ表示中は対象外
+  const _hpRc = new THREE.Raycaster();
+  function _hpilePickAt(cx, cy) {
+    _hpRc.setFromCamera(new THREE.Vector2((cx / window.innerWidth) * 2 - 1, -(cy / window.innerHeight) * 2 + 1), camera);
+    const hits = _hpRc.intersectObjects(placedObjects, true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard);
+    if (!hits.length) return null;
+    let o = hits[0].object; while (o && !o.userData.isRoot) o = o.parent;
+    return (o && o.userData.type === 'h_pile') ? o : null;
+  }
+  let _hpRcDown = null;
+  window.addEventListener('pointerdown', e => { if (e.button === 2) _hpRcDown = { x: e.clientX, y: e.clientY }; }, true);
+  window.addEventListener('pointerup', e => {
+    if (e.button !== 2 || !_hpRcDown) return;
+    const d = _hpRcDown; _hpRcDown = null;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
+    if (e.target !== renderer.domElement || currentType || dragObj) return;
+    if (_topDialogCancel()) return; // 何かダイアログが開いている間は開かない
+    const pile = _hpilePickAt(e.clientX, e.clientY); if (!pile) return;
+    setTimeout(() => _hpileOpenDialog('edit', pile), 0);
+  });
+
+  // --- r155(50回目・2A): カラーコーンの個数ダイアログ。「何個設置しますか？」2〜10(既定2・前回の値を覚える)。Enter=配置・Esc/右クリック=キャンセル(_topDialogCancel)
+  let coneCountParam = "2";
+  let hpileTopParam = 0; // r157: 配置待ちのH鋼杭の天端高さ(m)
+  function _coneUi() { return document.getElementById('cone-input-ui'); }
+  function _coneIsOpen() { const u = _coneUi(); return !!u && u.style.display === 'block'; }
+  function _coneOpenDialog() {
+    const sel = document.getElementById('cone-count');
+    sel.value = coneCountParam;
+    _coneUi().style.display = 'block';
+    controls.enabled = false;
+    sel.focus(); // 数字キーでも選べる(ドロップダウンの先頭文字ジャンプ)。Enterで配置
+  }
+  document.getElementById('cone-btn-cancel').addEventListener('click', () => { exitPlacementMode(); });
+  document.getElementById('cone-btn-ok').addEventListener('click', () => {
+    const n = parseInt(document.getElementById('cone-count').value, 10);
+    if (!(n >= 2 && n <= 10)) { showToast('⚠ 個数は2〜10で選んでください'); return; }
+    coneCountParam = String(n);
+    _coneUi().style.display = 'none';
+    currentType = 'conebar';
+    document.getElementById('placement-mode-msg').style.display = 'block';
+    document.getElementById('placement-msg-text').innerText = "カラーコーン(" + n + "個)の配置場所をクリックしてください";
+    document.getElementById('placement-msg-sub').innerText = "（右クリックでキャンセル）";
+    document.getElementById('line-color-picker').style.display = "none";
+    document.getElementById('finish-line-btn').style.display = "none";
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    setTimeout(() => { controls.enabled = true; }, 10);
+  });
+  // ダイアログ中のキーボード: Enter=配置。矢印キーはカメラを動かさない(ドロップダウン自体の操作は通す)。Escは _topDialogCancel が処理する。キャプチャ段階で受ける。
+  window.addEventListener('keydown', (e) => {
+    if (!_coneIsOpen()) return;
+    if (e.key.startsWith('Arrow')) { e.stopPropagation(); return; }
+    if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); document.getElementById('cone-btn-ok').click(); }
+  }, true);
+
   let scaffoldParams = { steps: "2", spans: "3", width: "0.9", open: [] }; // 前回の入力値を覚えておく(ダイアログを開き直した時の初期値)
   let activeScfParam = null;
   let scfFresh = false;
@@ -2677,6 +2837,8 @@ window.addEventListener('message', function(ev) {
     cancelTextInput(); 
     document.getElementById('box-input-ui').style.display = 'none';
     { const _su = document.getElementById('scaffold-input-ui'); if(_su) _su.style.display = 'none'; } // r128: 足場ダイアログ
+    { const _cu = document.getElementById('cone-input-ui'); if(_cu) _cu.style.display = 'none'; } // r155: カラーコーン個数ダイアログ
+    if (_hpileMode === 'new') { const _hu = document.getElementById('hpile-input-ui'); if(_hu) _hu.style.display = 'none'; } // r157: H鋼杭の天端高さダイアログ(新規配置の時だけ。高さ修正中は閉じない)
     controls.enabled = true;
     
     document.querySelectorAll('.pal-btn').forEach(b => b.classList.remove('active'));
@@ -2813,6 +2975,14 @@ window.addEventListener('message', function(ev) {
         _scfOpenDialog();
         return;
       }
+      if (currentType === 'conebar_input') { // r155: カラーコーンの個数ダイアログ
+        _coneOpenDialog();
+        return;
+      }
+      if (currentType === 'h_pile_input') { // r157: H鋼杭の天端高さダイアログ
+        _hpileOpenDialog('new');
+        return;
+      }
 
       const msg = document.getElementById('placement-mode-msg');
       msg.style.display = 'block';
@@ -2862,7 +3032,7 @@ window.addEventListener('message', function(ev) {
     const boxUiOpen = document.getElementById('box-input-ui') && document.getElementById('box-input-ui').style.display !== 'none';
     const confirmOverlayOpen = document.getElementById('custom-confirm-overlay') && document.getElementById('custom-confirm-overlay').style.display !== 'none';
     const kotaiConfirmOpen = document.getElementById('kotai-confirm-overlay') && document.getElementById('kotai-confirm-overlay').style.display !== 'none';
-    if (isFormFocus || textUiOpen || boxUiOpen || _scfIsOpen() || confirmOverlayOpen || kotaiConfirmOpen) return;
+    if (isFormFocus || textUiOpen || boxUiOpen || _scfIsOpen() || _coneIsOpen() || _hpileIsOpen() || confirmOverlayOpen || kotaiConfirmOpen) return;
     e.preventDefault();
     _lastPalBtnForRepeat.click();
     showToast(`↩ リピート: ${_lastPalBtnForRepeat.textContent.trim()}`);
@@ -2987,7 +3157,7 @@ window.addEventListener('message', function(ev) {
     }
     else if (currentType === 'worker') mesh = createWorker(false);
     else if (currentType === 'guard') mesh = createWorker(true);
-    else if (currentType === 'conebar') mesh = createConeBar();
+    else if (currentType === 'conebar') mesh = createConeBar(parseInt(coneCountParam, 10) || 2); // r155: 個数
 
     mesh.traverse(child => {
       if (child.isMesh && child.material) {
@@ -2997,6 +3167,7 @@ window.addEventListener('message', function(ev) {
 
     mesh.position.set(wx, 50, wz); 
     mesh.userData = { isRoot: true, type: currentType, color: getTypeColor(currentType), yaw: 0, isFallen: false, radiusValue: 0, isPlaced: false };
+    if(currentType === 'conebar') mesh.userData.coneCount = parseInt(coneCountParam, 10) || 2; // r155: カラーコーンの個数
     if(currentType === 'scaffold'){ // r128
       mesh.userData.scfSteps = parseInt(scaffoldParams.steps, 10) || 1;
       mesh.userData.scfSpans = parseInt(scaffoldParams.spans, 10) || 1;
@@ -3060,7 +3231,7 @@ window.addEventListener('message', function(ev) {
         }
         updateCurrentLineMesh();
       }
-    } else if (currentType !== 'kotai' && currentType !== 'h_pile' && currentType !== 'text_balloon' && currentType !== 'custom_box_input' && currentType !== 'scaffold_input') {
+    } else if (currentType !== 'kotai' && currentType !== 'h_pile' && currentType !== 'text_balloon' && currentType !== 'custom_box_input' && currentType !== 'scaffold_input' && currentType !== 'conebar_input' && currentType !== 'h_pile_input') {
       spawnObject(wx, wz);
       exitPlacementMode(); 
     }
@@ -3075,16 +3246,32 @@ window.addEventListener('message', function(ev) {
   const HPILE_TOP_Y = 0.4; // r062: 鋼材柱の天端固定値(GL+0.4)。配置時・ドラッグ移動後・復元時で共有
 
   function placeHPile(wx, wz) {
-    const topY = HPILE_TOP_Y;
-    const heightM = topY - terrainMinY;
-    if (heightM <= 0) { showToast('⚠️ 地形の高さが不正なため鋼材柱を配置できません'); return; }
+    const topY = hpileTopParam; // r157: ダイアログで入力した天端高さ(従来は固定のGL+0.4)
+    const heightM = Math.max(topY - terrainMinY, 0.01); // 下端=地形の最深点。天端が最低値ちょうどでも長さ0にならないよう最小1cm
+    if (topY < terrainMinY) { showToast('⚠️ 地形の高さが不正なため鋼材柱を配置できません'); return; }
     const mesh = createHPileMesh(heightM);
     mesh.position.set(wx, topY, wz);
-    mesh.userData = { isRoot: true, type: 'h_pile', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true, heightM, color: '#8d6e63' };
+    mesh.userData = { isRoot: true, type: 'h_pile', yaw: 0, isFallen: true, radiusValue: 0, isPlaced: true, heightM, topY, color: '#8d6e63' };
     addEdgeLines(mesh);
     scene.add(mesh);
     placedObjects.push(mesh);
     renderer.shadowMap.needsUpdate = true;
+  }
+
+  // r157: 配置済みH鋼杭の天端高さを変える。長さが変わるので杭を作り直して置き換える(位置x,z・保存用のuserDataは引き継ぐ)。
+  function _hpileSetTop(old, topY) {
+    const heightM = Math.max(topY - terrainMinY, 0.01);
+    const m = createHPileMesh(heightM);
+    m.position.set(old.position.x, topY, old.position.z);
+    m.userData = Object.assign({}, old.userData, { topY, heightM });
+    addEdgeLines(m);
+    scene.add(m);
+    const i = placedObjects.indexOf(old);
+    if (i >= 0) placedObjects[i] = m; else placedObjects.push(m);
+    scene.remove(old);
+    old.traverse(c => { if (c.geometry) c.geometry.dispose(); });
+    renderer.shadowMap.needsUpdate = true;
+    return m;
   }
 
   // r064: 鋼材柱は3Dビューを直接クリックして配置する(PLAN-VIEW/レーダー配置は廃止)。
@@ -3586,21 +3773,10 @@ window.addEventListener('message', function(ev) {
           _kotaiShowConfirm('構台を削除しますか？', () => deleteKotaiMesh(obj));
           return;
         } else if (obj.userData.type === 'arrow') {
-          let upper = null;
-          obj.traverse(c => { if (c.userData.isUpper) upper = c; });
-          if (upper) {
-            let currentM = obj.userData.scaleMultiplier || 1;
-            currentM = (currentM % 3) + 1;
-            obj.userData.scaleMultiplier = currentM;
-            upper.scale.set(currentM, currentM, currentM);
-            // r011: upperGroupはローカル原点(headRadius=0.7だけ下に張り出した
-            // 円錐形状の中心)を基準に拡大されるため、倍率を上げるほど矢印の
-            // 下端がポール高さ(1.0)より下、最悪地面下まで沈む
-            // （headRadius×倍率が沈み込み量）。ポール高さはそのままに、
-            // 沈んだ分だけ上に持ち上げて元の見た目の高さを維持する。
-            const ARROW_HEAD_RADIUS = 0.7; // createArrowMesh()のheadRadiusと同じ値
-            upper.position.y = 1.0 + (currentM - 1) * ARROW_HEAD_RADIUS;
-          }
+          // r156(2B): 倍率 1→2→3→1。ポールも一緒に伸ばす(_applyArrowScale に一本化)
+          const currentM = ((obj.userData.scaleMultiplier || 1) % 3) + 1;
+          obj.userData.scaleMultiplier = currentM;
+          _applyArrowScale(obj, currentM);
           renderer.shadowMap.needsUpdate = true;
           return; 
         } else if (obj.userData.type === 'text_balloon') {
@@ -3697,6 +3873,8 @@ window.addEventListener('message', function(ev) {
     if (document.getElementById('text-input-ui').style.display === 'block') return; 
     if (document.getElementById('box-input-ui').style.display === 'block') return;
     if (_scfIsOpen()) return; // r128: 足場ダイアログ中
+    if (_coneIsOpen()) return; // r155: カラーコーン個数ダイアログ中
+    if (_hpileIsOpen()) return; // r157: H鋼杭の天端高さダイアログ中
     
     if (e.button !== 0 && e.button !== 2) return; 
 
@@ -3820,6 +3998,14 @@ window.addEventListener('message', function(ev) {
       kotaiDeleteTip.style.display = 'none';
     }
 
+    // r157(50回目・マスター要望): H鋼杭にマウスが乗っている間は「右クリックで高さ修正」を出す(作図中・ドラッグ中・ダイアログ表示中は出さない)
+    {
+      let pTip = document.getElementById('hpile-edit-tip');
+      let on = false;
+      if (pTip && !currentType && !dragObj && e.target === renderer.domElement && !_hpileIsOpen() && placedObjects.some(o => o.userData.type === 'h_pile')) on = !!_hpilePickAt(cx, cy);
+      if (pTip) { if (on) { pTip.style.display = 'block'; pTip.style.left = (cx + 14) + 'px'; pTip.style.top = (cy - 28) + 'px'; } else pTip.style.display = 'none'; }
+    }
+
     // r149/r154(48回目・マスター要望): 線にマウスが乗っている間も、構台と同じ「ダブルクリックで削除」を出す。
     //   r154: 「文字が出ている=ダブルクリックで必ず消える」にそろえる(以前は表示とダブルクリックが別々にレイを飛ばし、表示は60msに1回に間引いていたため、
     //   最後の動きが評価されず、文字は出ているのに実際の位置は線から外れている、が起きた)。今はマウスが動くたびに判定し、乗っている線(一番手前)を _hoverFence に覚える。
@@ -3863,7 +4049,7 @@ window.addEventListener('message', function(ev) {
     // r149(48回目): コメント・矢印を選んでいる間もマウス位置に白丸を出す(以前は出ず、普通の矢印カーソルのままだった)。コメントは物体の上にも置けるので、クリックと同じ物体+地面のレイで位置を決める。
     let _mkHits = terrainHits;
     if (currentType === 'text_balloon') _mkHits = raycaster.intersectObjects([...placedObjects, ...terrainMeshes], true).filter(h => h.object.isMesh && !h.object.userData.isRadiusMesh && !h.object.userData.isBillboard && !h.object.userData.isDragMarker && !h.object.userData.isDragHitbox);
-    if (currentType && !dragObj && currentType !== 'custom_box_input' && currentType !== 'scaffold_input' && currentType !== 'kotai') {
+    if (currentType && !dragObj && currentType !== 'custom_box_input' && currentType !== 'scaffold_input' && currentType !== 'conebar_input' && currentType !== 'h_pile_input' && currentType !== 'kotai') {
       if (_mkHits.length > 0) {
         placementMarker.visible = true;
         placementMarker.position.copy(_mkHits[0].point);
@@ -3928,7 +4114,7 @@ window.addEventListener('message', function(ev) {
         } else if (dragObj.userData.type === 'h_pile') {
           // r062: ドラッグ中プレビューも天端をHPILE_TOP_Y固定のままにする
           // (release時と挙動を揃え、ドラッグ中だけ一瞬地形面まで沈んで見える違和感を防ぐ)
-          newPos.y = HPILE_TOP_Y;
+          newPos.y = _hpileTopOf(dragObj); // r157: 入力した天端高さ
           dragObj.position.copy(newPos);
         } else {
           // r133: 作業員は、マウスが指している最初の面が足場の床板なら、その段に載る(newPos.x/zもその点に合わせる)
@@ -3994,7 +4180,7 @@ window.addEventListener('message', function(ev) {
               controls.enabled = false;
               return;
             }
-          } else if (currentType === 'custom_box_input' || currentType === 'scaffold_input') {
+          } else if (currentType === 'custom_box_input' || currentType === 'scaffold_input' || currentType === 'conebar_input' || currentType === 'h_pile_input') {
             // ダイアログ操作中のためスキップ
           } else {
             const terrainHits = raycaster.intersectObjects(_floorsForType(currentType), true).filter(h => h.object.isMesh); // r133: 作業員は足場の床板も指せる
@@ -4108,7 +4294,7 @@ window.addEventListener('message', function(ev) {
         } else {
           resolveOverlap(dragObj);
           if (!kotaiVisible) resolveKotaiOverlap(dragObj);
-          dragObj.position.y = HPILE_TOP_Y;
+          dragObj.position.y = _hpileTopOf(dragObj); // r157: 入力した天端高さ
           dragObj.userData.isPlaced = true;
         }
       } else {
@@ -4184,7 +4370,7 @@ window.addEventListener('message', function(ev) {
   let _moveAnim = null;
 
   function _moveBlocked() {
-    if (_kotaiSavedCam || currentType === 'kotai' || dragObj || _scfIsOpen()) return true;
+    if (_kotaiSavedCam || currentType === 'kotai' || dragObj || _scfIsOpen() || _coneIsOpen() || _hpileIsOpen()) return true;
     for (const id of ['numpad-ui', 'text-input-ui', 'box-input-ui']) {
       const el = document.getElementById(id); if (el && el.style.display === 'block') return true;
     }
@@ -4486,6 +4672,7 @@ window.addEventListener('message', function(ev) {
     // 直後のこの呼び出しで上書きされ、「平面ではない変な角度」になっていた。
     // 構台モード中(_kotaiSavedCamが非null)はこの再計算をスキップする。
     if (!_kotaiSavedCam) controls.update();
+    _updateArrowBillboards(); // r156(2B): カメラが決まった後・描画の直前に、矢印板をカメラのほうへ倒す
     renderer.render(scene, camera);
   }
 
