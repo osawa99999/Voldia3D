@@ -1,3 +1,4 @@
+// r155(51回目・続き): 通常計算の既存躯体別ノードをやめた(色を完全に無視して全部合成)。
 // r153(51回目): 配置モードのiframe参照を voldia_placement_v0098.html に変更(全ボタンのホバー共通化。HTMLの中身はCSSのみ)。
 // r152(50回目): 配置モードのiframe参照を voldia_placement_v0097.html に変更(H鋼杭の天端高さ入力・右クリックで高さ修正)。
 // r151(50回目): 配置モードのiframe参照を voldia_placement_v0096.html に変更(HTML書き出し確認ダイアログの解説文とボタンの間を1行ぶん広げた)。
@@ -637,7 +638,8 @@ async function buildVoldiaGLBBytes(progressCb, excludeExistingStruct){
   // 通常計算後(structure解析等)は従来通り。最深値の算出は共通関数に一本化(voldia3d.js r100)。
   const _siteBotEs = (window._lastCalcModeForPlacement === 'doboku')
     ? computeDobokuSiteBottomFromRaw(fs, _concVal, window._glOffsetMm||0) : null;
-  existingStructGeoms = excludeExistingStruct ? [] : fs.filter(f=>f.color==='gray')
+  // 51回目: 通常計算は色を無視して全部合成(グレーも掘削体として_lastGeomsに入っている)ので、既存躯体を別ノードで重ねて出さない(二重になる)
+  existingStructGeoms = (excludeExistingStruct || window._lastCalcModeForPlacement === 'normal') ? [] : fs.filter(f=>f.color==='gray')
     .map(f => {
       let g = {...f, D: f.D - _concVal, noSlope:true, OD:0};
       // r036(37回目): 土量計算(doboku)でGL≠0の時は、runCalc本体(voldia3d.js r107)と同じ手順で
@@ -856,7 +858,8 @@ async function buildNormalCalcPlacementGLB(){
   // (_lastExistingStructGeoms)には依存せず、ここでfsから直接作り直す。
   // r011: 捨てコン厚さの除外漏れ修正(理由はbuildVoldiaGLBBytes側のr011コメント参照)
   const _concVal2 = ( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
-  const _existingStructGeomsFresh = fs.filter(f=>f.color==='gray')
+  // 51回目: 通常計算は色を無視して全部合成。グレーも_lastGeomsに入っているので、既存躯体を別ノードで重ねない(二重になる)
+  const _existingStructGeomsFresh = fs.filter(f=>false/*51回目: 通常計算にグレーの特別扱いは無い*/)
     .map(f => buildFrustumGeometry({...f, D: f.D - _concVal2, noSlope:true, OD:0}))
     .filter(g => g.positions && g.positions.length);
   if(_existingStructGeomsFresh.length){
@@ -887,7 +890,13 @@ async function exportGLB(){
   epSet(0,'Union水密メッシュを準備中...');
   await new Promise(r=>setTimeout(r,20));
   try{
-    const {glb, totalVerts, totalTris} = await buildVoldiaGLBBytes(epSet);
+    const built = await buildVoldiaGLBBytes(epSet);
+    const {totalVerts, totalTris} = built;
+    // r154(51回目・マスター要望): 通常計算のGLBは、全オブジェクトの面を「外向き」にそろえる。
+    //   従来は掘削(buildSimpleExtrudeGeom)は外向きだが、既存躯体(グレー。buildFrustumGeometry製)は上面だけ外向き・底面と側面が内向きで、
+    //   Blender等で「天端は外向き・それ以外は内向き」に見えていた(3D_DXFは出力側で_dxfOrientOutwardを通して外向きにそろえていたが、GLBは通していなかった)。
+    //   3D_DXFと同じ _dxfOrientOutward(辺のつながりで向きをそろえ、体積の符号で外向きに決める)を各メッシュに通す。通常計算専用(GLBは通常計算の時だけこの関数を通る。土量計算はLand Logic側)。
+    const glb = encodeMultiGLB(built.meshes.map(m => ({...m, indices: _dxfOrientOutward(m.positions, m.indices).indices})));
     epSet(100,'完了！');
     const blob=new Blob([glb],{type:'model/gltf-binary'});
     const url=URL.createObjectURL(blob);

@@ -1,3 +1,4 @@
+// 51回目(続き): ①Escで3D生成方法ダイアログを閉じられない件(Esc処理の登録が_lxInit内だった)を修正 ②通常計算の時は捨てコン＋砕石・余掘り・法面角度を非表示にして説明文を出す。
 // 51回目: ①ノースアローの数字(角度)を、矢印が下半分を向く間は上側へ(Nマークと重なる件) ②測点が0個になったらノースアローの向き・原点測点を初期化(redraw内) ③出力ダイアログ: 測点が無い時は「北の向きは2D画面右上の🧭で変更できます」を出さない。
 // 50回目(v0168): 出力ダイアログの仮原点の欄を「仮原点」だけに短縮(説明は確認文に集約)。ダイアログ自体のはみ出し対策はHTML側(#lx-dlg)。
 // 50回目: 修正提案書v002 ①1B LANDXML出力に開発中ロック(Tキー+Hキーを同時に押している間だけ有効。ページを開き直すとロックに戻る。保存しない) ②1C 3D_DXFのホバー文を「AUTOCAD」表記に ③1A 測点が0個でもGLB・3D_DXF・LANDXMLを出せるように(原点=仮原点=オブジェクトの左上角。確認は出力ダイアログ内に毎回表示。本体はvoldia_landlogic.js r018)。前版=orig/voldia_main_r48d.js
@@ -1513,9 +1514,12 @@ function _gmApplyMode(mode){
   _gmEl('gm-mode-doboku').classList.toggle('on',mode==='doboku');
   const off=(mode!=='doboku');
   document.querySelectorAll('#gm-dlg .gm-doboku-only').forEach(row=>{
-    row.classList.toggle('gm-off',off);
+    row.classList.toggle('gm-off',off); // 51回目: グレーアウトをやめて非表示(.gm-off{display:none})。不要な情報は出さない
     row.querySelectorAll('input,button').forEach(c=>{c.disabled=off;});
   });
+  // 51回目: 通常計算の説明。グレー(既存躯体)を含む図面では注意書きも出す。
+  const info=_gmEl('gm-normal-info'); if(info) info.style.display=off?'block':'none';
+  const gi=_gmEl('gm-normal-gray'); if(gi) gi.style.display=(off&&shapes.some(s=>s&&s.color==='gray'&&s.enabled!==false))?'block':'none';
 }
 window._gmApplyMode=_gmApplyMode; // voldia_export.js(.vold読込)から呼ぶ
 function _gmShowTip(el,key){
@@ -1660,7 +1664,10 @@ function _lxInit(){
   if(_lxInited)return;_lxInited=true;
   _lxEl('lx-no').addEventListener('click',_lxClose);
   _lxEl('lx-yes').addEventListener('click',_lxYes);
-  // 48回目(マスター要望): Escキー=「とにかくキャンセルして入力待ちに戻る」(AutoCADと同じ)。いま一番手前のダイアログを閉じ、何も開いていなければ、
+  }
+// 51回目(マスター指摘「3D生成方法ダイアログがESCでキャンセルできない」): 下のEsc処理は以前 _lxInit() の中にあり、LANDXML/GLB出力の確認ダイアログを一度開くまで登録されなかった。
+//   そのため起動直後の3D生成方法ダイアログ(#gm-overlay)ではEscが効かなかった(右クリックは別の登録なので効いていた)。_lxInit の外=読み込み時に登録する。中身は変更なし。
+// 48回目(マスター要望): Escキー=「とにかくキャンセルして入力待ちに戻る」(AutoCADと同じ)。いま一番手前のダイアログを閉じ、何も開いていなければ、
 //   3Dイメージ画面が開いている時だけ「✕ 閉じる」(=Voldia 2Dへ戻る。closeCalcModal)。
 //   専用のEsc処理がある画面(LandXMLの確認=lx-overlay・スクショ=ss-overlay・出力パネル=io-float-panel・配置モード=placement-overlay・計算中)は、その処理に任せる(ここでは何もしない)。
 //   2Dの作図・編集のEsc(山留編集・測点・距離・選択合成・部分削除・作図中・選択解除・修正モード)は従来のまま(下の keydown)。
@@ -1686,7 +1693,6 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('keydown',e=>{ // Escは「いいえ」。3D画面側のEsc処理より先に取る
     if(e.key==='Escape'&&_lxEl('lx-overlay').style.display==='flex'){e.stopPropagation();e.preventDefault();_lxClose();}
   },true);
-}
 function showExportDialog(kind){
   _lxInit();_lxKind=kind;
   const isXml=(kind==='xml');
@@ -3463,7 +3469,7 @@ function updateNorthArrowUI(){
     // 数字は絶対配置にして、円の位置(=ドラッグの回転中心)が数字の移動で動かないようにする。
     const a=((northAngleDeg%360)+360)%360, down=(a>90&&a<270);
     label.style.position=down?'absolute':'';
-    label.style.left=down?'0':''; label.style.right=down?'0':''; label.style.top=down?'-13px':'';
+    label.style.left=down?'0':''; label.style.right=down?'0':''; label.style.top=down?'-7px':''; // 51回目: -13px→-7px(マスター指摘「上に離れすぎ」。角度の文字半分ほど下げた)
   }
 }
 function openNorthDialog(){

@@ -1424,7 +1424,8 @@ window.addEventListener('message', function(ev) {
         const a = Object.assign(document.createElement('a'), { href: url, download: 'Voldia_Viewer_' + stamp + '.zip' });
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 2000);
-        showToast('🌐 Viewer一体型HTMLをZIPで出力しました（' + (zip.length / 1048576).toFixed(1) + 'MB・物体' + col.objects + '個・線' + col.lines + '本・作業半径' + col.rings + '個・吹き出し' + col.annotations.length + '個）', 5000);
+        showToast('🌐 Viewer一体型HTMLをZIPで出力しました\n（' + (zip.length / 1048576).toFixed(1)  // r159(51回目): 改行位置を「…出力しました/（サイズ他…）」にした(以前は途中で折り返していた)
+           + 'MB・物体' + col.objects + '個・線' + col.lines + '本・作業半径' + col.rings + '個・吹き出し' + col.annotations.length + '個）', 5000);
       } catch (e) {
         console.error('[HTML書き出し]', e);
         showToast('⚠ HTML書き出しに失敗しました: ' + (e && e.message ? e.message : e), 6000);

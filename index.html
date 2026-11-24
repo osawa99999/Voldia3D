@@ -446,7 +446,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 #gm-dlg .gm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid #3a3a3a;min-height:40px;}
 #gm-dlg .gm-row.gm-gl{border-bottom:1px solid #2196f3;}
 #gm-dlg .gm-row.gm-last{border-bottom:none;}
-#gm-dlg .gm-row.gm-off{opacity:.35;}
+#gm-dlg .gm-row.gm-off{display:none;} /* v0172(51回目): 通常計算の時は使わない行(捨てコン＋砕石・余掘り・法面角度)を非表示に */
+#gm-dlg .gm-normal-info{display:none;padding:14px 0 4px;color:#cfd8dc;font-size:.84em;line-height:1.7;text-align:center;}
+#gm-dlg .gm-normal-info .gm-normal-gray{display:none;margin-top:10px;color:#f7e24a;font-weight:700;}
 #gm-dlg .gm-lab{font-weight:700;font-size:1.05em;color:#fff;white-space:nowrap;}
 #gm-dlg .gm-ctl{display:flex;align-items:center;gap:8px;}
 #gm-dlg .gm-unit{color:#8a9bb0;min-width:2.2em;}
@@ -1109,6 +1111,9 @@ D&D or クリックでロードしてください</p>
           <button type="button" class="slope-ang-btn" data-ang="30">1:1.732</button>
         </div>
       </div>
+    </div>
+    <div class="gm-normal-info" id="gm-normal-info">通常計算は、全てのオブジェクトを<br>形状・天端・下端の情報のみで3Dにします。
+      <div class="gm-normal-gray" id="gm-normal-gray">この図面にはグレー（既存躯体）オブジェクトが含まれていますが、<br>通常計算ではグレーも他のオブジェクトと同じ扱いになります。<br>（下端は、そのオブジェクトの値のままです）</div>
     </div>
     <div class="gm-note">※体積は層別スライスＵＮＩＯＮ法（ClipperLib）を使用した概算値です</div>
     <div class="gm-foot">

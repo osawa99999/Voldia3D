@@ -1,3 +1,5 @@
+// 51回目(続き): 通常計算はオブジェクトの色を完全に無視して全部合成(グレーも掘削体として扱う)。3Dオブジェクトの色は全部薄めのグレー。
+// 51回目(マスター新規問題・Arecal担当の指摘で確定): _calcExistingStructureOverlapVolume の交差面積を abs() で全pathを正に足していたため、既存躯体がロの字(中庭=穴)の時に穴の面積まで重複体積に足され、差引後の体積が過小(例: 1948.05 → 正しくは1972.93=Excelと一致)だった。符号を保ったまま足す(_calcVolumeFallbackと同じ)ように修正。
 // ============================================================
 // voldia3d.js — 3D変換・体積計算ロジック本体 (r104で旧単一ファイルから分離。以降の改修履歴は下の【rNNN】コメントと VOLDIA3D_VER を参照)
 // ============================================================
@@ -1837,12 +1839,15 @@ function _calcExistingStructureOverlapVolume(excavFrustums, structFrustums, offs
     const solInt = new ClipperLib.Paths();
     clInt.Execute(ClipperLib.ClipType.ctIntersection, solInt, ClipperLib.PolyFillType.pftPositive, ClipperLib.PolyFillType.pftPositive);
 
+    // 51回目: 交差の結果は「外周(+)」と「穴(−)」が逆巻きで別々のpathに入る(例: 既存躯体がロの字=中庭が穴)。以前はabs()で全pathを正で足していたため、
+    //   穴の面積まで足して重複体積が過大になり(差引後の正味が過小)、_calcVolumeFallbackとズレていた。_calcVolumeFallbackと同じく、符号を保ったまま足して穴を相殺する。
     let sliceArea = 0;
     solInt.forEach(path=>{
       let a=0;
       for(let i=0;i<path.length;i++){ const j=(i+1)%path.length; a += path[i].X*path[j].Y - path[j].X*path[i].Y; }
-      sliceArea += Math.abs(a)/2/(SF*SF);
+      sliceArea += a/2/(SF*SF); // 符号を保持(穴を相殺)
     });
+    sliceArea = Math.abs(sliceArea);
 
     overlapVol += sliceArea * sliceH;
   }
@@ -3597,7 +3602,10 @@ async function runCalc(mode){
   const concVal=( v => isNaN(v) ? 110 : v)(parseInputNum(document.getElementById('conc-thick')));
   // Voldia版: 個別「垂直/法面」「余掘」UIを廃止し、計算モードで全オブジェクト一律に統一
   if(mode==='normal'){
-    fs = fs.map(f=>({...f, noSlope:true}));
+    // 51回目(マスター要望): 通常計算はオブジェクトの色を完全に無視して、全部を同じ掘削体として合成する。
+    //   以前はグレー(既存躯体)が「掘削から引く対象」になり、青とグレーを重ねて描くと体積が変わっていた。色は'blue'にそろえる(法面・余掘りは通常計算では既に無し)。
+    //   以降(既存躯体の分離・重複差引・GLB/配置モードの既存躯体ノード)は、グレーが無いので自然に通らなくなる。
+    fs = fs.map(f=>({...f, noSlope:true, color:'blue'}));
   } else if(mode==='doboku'){
     const globalOD=( v => isNaN(v) ? 200 : Math.max(0,v))(parseInputNum(document.getElementById('global-overdig')));
     // 6C(2026-08-28 引継ぎ18回目→26回目セッションで紫に移設): 従来は全オブジェクト
@@ -4334,6 +4342,9 @@ async function initThree_watertight(unionGeoms, indivGeoms, frustums, isDoboku, 
     _heightColors[i+1] = _colLow[1] + (_colHigh[1]-_colLow[1]) * t;
     _heightColors[i+2] = _colLow[2] + (_colHigh[2]-_colLow[2]) * t;
   }
+  // 51回目(マスター要望): 通常計算は色を使わない計算なので、3Dオブジェクトは全部「薄めのグレー」にする(高さのグラデーションは土量計算だけ)。
+  //   面ごとの陰影(flatShading)はそのままなので、形は見分けられる。
+  if (!isDoboku) { _heightColors.fill(0.80); }
 
   // (A) 元コーナー頂点のみの面 — 薄いウォームオレンジ
   const cyanGeo = new THREE.BufferGeometry();
