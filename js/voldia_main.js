@@ -1,3 +1,4 @@
+// 51回目: ①ノースアローの数字(角度)を、矢印が下半分を向く間は上側へ(Nマークと重なる件) ②測点が0個になったらノースアローの向き・原点測点を初期化(redraw内) ③出力ダイアログ: 測点が無い時は「北の向きは2D画面右上の🧭で変更できます」を出さない。
 // 50回目(v0168): 出力ダイアログの仮原点の欄を「仮原点」だけに短縮(説明は確認文に集約)。ダイアログ自体のはみ出し対策はHTML側(#lx-dlg)。
 // 50回目: 修正提案書v002 ①1B LANDXML出力に開発中ロック(Tキー+Hキーを同時に押している間だけ有効。ページを開き直すとロックに戻る。保存しない) ②1C 3D_DXFのホバー文を「AUTOCAD」表記に ③1A 測点が0個でもGLB・3D_DXF・LANDXMLを出せるように(原点=仮原点=オブジェクトの左上角。確認は出力ダイアログ内に毎回表示。本体はvoldia_landlogic.js r018)。前版=orig/voldia_main_r48d.js
 // 48回目: ④Escキー=一番手前のダイアログを閉じる。何も開いていなければ3Dイメージ画面を閉じてVoldia 2Dへ戻る(_escTopDialog。2Dの作図・編集のEscは従来のまま)。前版=backup/voldia_main_r48c.js
@@ -1706,6 +1707,7 @@ function showExportDialog(kind){
     _lxEl('lx-origin-note').textContent=(surveyPts.length<=1)?'（測点が1つのため自動）':'';
   }
   const vn=_lxEl('lx-virtual-note');if(vn)vn.style.display=_virt?'':'none';
+  { const nh=_lxEl('lx-north-hint'); if(nh)nh.style.display=_virt?'none':''; } // 51回目: 測点が無い時は北の向きを変えられないので「2D画面右上の🧭で変更できます」を出さない
   const deg=(typeof northAngleDeg==='number'&&!isNaN(northAngleDeg))?northAngleDeg:0;
   _lxEl('lx-north-rotor').setAttribute('transform','rotate('+deg+')');
   _lxEl('lx-north-val').textContent=degToDMSStr(deg)+'（'+(((deg%360)+360)%360).toFixed(4)+'°）';
@@ -3455,7 +3457,14 @@ function updateNorthArrowUI(){
   const rotor=document.getElementById('north-arrow-rotor');
   const label=document.getElementById('north-angle-label');
   if(rotor)rotor.style.transform=`rotate(${northAngleDeg}deg)`;
-  if(label)label.textContent=degToDMSStr(northAngleDeg);
+  if(label){
+    label.textContent=degToDMSStr(northAngleDeg);
+    // 51回目(マスター案B): 矢印が下半分(90°超〜270°未満)を向く間、Nマークが円の下に回り込んで角度の数字と重なる。その間は数字を矢印の上側へ出す。
+    // 数字は絶対配置にして、円の位置(=ドラッグの回転中心)が数字の移動で動かないようにする。
+    const a=((northAngleDeg%360)+360)%360, down=(a>90&&a<270);
+    label.style.position=down?'absolute':'';
+    label.style.left=down?'0':''; label.style.right=down?'0':''; label.style.top=down?'-13px':'';
+  }
 }
 function openNorthDialog(){
   const deg=((northAngleDeg%360)+360)%360;
@@ -4041,6 +4050,9 @@ function redraw(mx,my){
   // ほぼ必ず呼ばれるため、ここに置けば追加・削除・全消去・undo/redo・
   // ファイル読込のいずれのタイミングでも自動的に追従する。
   { const _naWrap=document.getElementById('north-arrow-wrap'); if(_naWrap) _naWrap.style.display = surveyPts.length>0 ? '' : 'none'; }
+  // 51回目(マスター指摘): 測点を設置→ノースアローの向きを設定→測点を消す、の後も北の向き・原点測点が残り、測点が無いのに出力(GLB/3D_DXF/LANDXML)へ反映されていた。
+  //   測点が0個になったら、ノースアロー(向き)と原点測点を初期状態に戻す。測点の削除は右クリック・元に戻す・全消去・Vold読込など経路が多いので、表示を決めるここ(redraw)で一括して見る。
+  if(surveyPts.length===0 && (northAngleDeg!==0 || originSurveyIdx!==null)){ northAngleDeg=0; originSurveyIdx=null; updateNorthArrowUI(); }
   // r059(作図エリア拡張): drawCvは用紙よりdcOffX/dcOffYぶん大きい。まず
   // identity(平行移動なし)に戻してからラスタ全体をclearRectする(前回の
   // setTransformが残ったままclearRectすると余白部分が消え残るため要注意)。

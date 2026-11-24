@@ -1,0 +1,1649 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow"> <!-- 47回目: 検索エンジンに載せないでほしいというお願い(守らないクローラーもいる。アクセス制限ではない) -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voldia v0004</title>
+<!-- Voldia v0067系
+     旧・詳細変更履歴(v0001〜v0067)は Voldia_変更履歴_v0001-v0067.md へ移設済み。
+     v0002以降の更新は各セッション引継ぎ書で管理。
+
+     ⚠️⚠️ 新しいチャットで修正を開始する前や、新しいギミック(機能)を組み込む前には、
+     必ず最新の引継ぎファイル(引継ぎ書 + 過去ログファイル)を確認すること！ ⚠️⚠️ -->
+<script src="lib/clipper.js"></script>
+<script src="data/voldia_assets.js"></script>
+<!-- r070: エビル(Evidence Builder)統合用ライブラリ（配置モードと同じr128系GLTFLoaderで統一） -->
+<!-- ⚠️⚠️ r023(30回目セッション、マスター指示・著作権クリアランス対応):
+     上記CDN読込ライブラリ、および lib/earcut.js・lib/clipper.js(同梱ファイル)の著作権表記・
+     ライセンス種別一覧は、免責ダイアログ下部の「使用ライブラリのライセンス表記(Credits)」
+     モーダル(id="license-modal")にまとめてある。
+     ★★★ 新しいライブラリをCDN追加・lib/へ同梱する時は、必ずlicense-modalの一覧にも
+     一項目追加すること。ここを更新し忘れると表記自体が不正確になり、著作権対応の
+     意味が無くなる。忘れずに！ ★★★ -->
+<style>
+:root{
+  --bg:#1a1a1a;--text:#e0e0e0;--panel:#242424;--btn:#333;
+  --blue:#2196f3;--blue-hov:#1565c0;--btn-hov:#4a4a4a;--cv:#111;--bdr:#3a3a3a;
+  --accent:#e8a020;--accent2:#4fc3f7;--success:#66bb6a;--danger:#ef5350;--warn:#ffa726;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Meiryo','Yu Gothic UI','Segoe UI',sans-serif;background:var(--bg);color:var(--text);
+     user-select:none;overflow:hidden;height:100vh;}
+.app{display:flex;height:100vh;}
+
+/* 左パネル */
+#sb-left{width:260px;background:var(--panel);border-right:1px solid var(--bdr);
+  display:flex;flex-direction:column;z-index:100;overflow:hidden;}
+
+#logo-area{
+  background:#111;border-bottom:1px solid var(--bdr);
+  padding:5px 8px;display:flex;align-items:center;flex-shrink:0;
+}
+#logo-area .logo-row{display:flex;align-items:center;gap:8px;width:100%;}
+#logo-area .app-ver{font-size:.7em;color:var(--accent);line-height:1.25;text-align:left;font-weight:600;transition:color .25s;}
+#logo-area .app-ver b{color:inherit;display:block;font-size:1.5em;letter-spacing:.04em;font-weight:800;filter:brightness(1.35);}
+
+#list-area{flex:1;overflow-y:auto;padding:6px;}
+#sh-list{list-style:none;display:flex;flex-direction:column;gap:3px;}
+#sh-list li{
+  background:#2a2a2a;border-left:3px solid var(--blue);border-radius:4px;
+  padding:6px 8px;cursor:pointer;transition:background .12s;
+}
+#sh-list li:hover{background:#333;}
+/* r0127(37回目): オブジェクト一覧の青の行は青っぽいグレーの地色にして、他の色の行と見分けやすくする */
+#sh-list li.sh-col-blue{background:#27323f;}
+#sh-list li.sh-col-blue:hover{background:#314051;}
+#sh-list li.selected{background:#1a3a5c;border-left-color:#64b5f6;}
+#sh-list li.noslope-item{border-left-color:var(--warn);}
+#sh-list li.geo-error-item{border-left-color:#ff1744 !important;box-shadow:0 0 0 1px rgba(255,23,68,.5) inset;}
+/* v0161(48回目): 以前は justify-content:space-between で、余った幅を「つまみ・チェック・色の丸・名前・面積・×」の間に均等に配っていたため、
+   面積の桁数(331.13 と 28.11 など)や名前の長さで、左のチェックと丸の位置が行ごとにずれていた。左の部品は一定の間隔(gap)で詰め、余りは名前(flex:1)が受ける。 */
+.sh-header{display:flex;justify-content:flex-start;gap:8px;align-items:center;margin-bottom:4px;}
+.sh-name{font-weight:600;color:#ccc;font-size:.78em;flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sh-header>input[type=text]{flex:1 1 0;min-width:0;} /* 名前の編集中の入力欄(_startNameEdit)も同じ幅の受け方にする */
+.sh-area{color:#90caf9;font-size:.72em;white-space:nowrap;flex-shrink:0;}
+.delbtn{background:transparent!important;border:1px solid #555!important;
+        padding:2px 5px!important;font-size:.7em!important;flex-shrink:0;cursor:pointer;
+        border-radius:3px;color:#aaa;}
+.delbtn:hover{background:var(--danger)!important;border-color:var(--danger)!important;color:#fff!important;}
+
+/* 垂直/法面トグルボタン */
+.noslope-toggle{
+  display:inline-flex;border-radius:4px;overflow:hidden;
+  border:1px solid #444;flex-shrink:0;font-size:.68em;cursor:pointer;
+}
+.noslope-toggle .tog-opt{
+  padding:2px 7px;background:#2a2a2a;color:#888;transition:background .12s,color .12s;
+  white-space:nowrap;user-select:none;
+}
+.noslope-toggle .tog-opt.active-hamen{background:#0288d1;color:#fff;}
+.noslope-toggle .tog-opt.active-vertical{background:#f57c00;color:#fff;}
+.noslope-btn{border:1px solid #555;background:#2a2a2a;color:#888;}
+.noslope-btn.active-hamen{background:#0288d1!important;border-color:#0288d1!important;color:#fff!important;}
+.noslope-btn.active-vertical{background:#f57c00!important;border-color:#f57c00!important;color:#fff!important;}
+
+/* 深さ入力 */
+.depth-block{display:flex;flex-direction:column;gap:3px;margin-top:2px;}
+.depth-row{display:flex;align-items:center;gap:4px;}
+.depth-row label{font-size:.68em;color:#888;flex-shrink:0;min-width:68px;}
+.depth-inp{flex:1;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:3px;
+           color:var(--text);font-size:.72em;padding:2px 5px;text-align:right;
+           font-family:'Consolas',monospace;}
+.depth-inp:focus{outline:none;border-color:var(--accent);}
+.depth-unit{font-size:.68em;color:#666;}
+.depth-total{font-size:.68em;color:var(--accent2);text-align:right;margin-top:1px;}
+.slab-check{display:flex;align-items:center;gap:4px;margin-top:2px;}
+.slab-check label{font-size:.68em;color:var(--warn);}
+.slab-check input{accent-color:var(--warn);}
+
+/* 合計エリア */
+#tot-wrap{
+  background:rgba(33,150,243,.1);border-top:1px solid var(--blue);
+  padding:8px 10px;flex-shrink:0;
+}
+#tot-sum{font-weight:700;font-size:.8em;color:#fff;margin-bottom:3px;}
+#tot-union{font-size:.74em;color:#90caf9;margin-bottom:5px;display:none;}
+
+/* 捨コン入力 */
+/* 新5(2026-08-24 引継ぎ16回目): 「捨コン+砕石」「余掘り」「法面角度」の3項目
+   （土量計算のみ適用の注意書き配下）の見た目統一用の共通クラス。
+   ラベルを左寄せ、値側(数値入力 or ボタン群)を右寄せで一列に揃える。
+   引継ぎ17回目マスター指摘対応: ①文字サイズを.78em→.88emに拡大 ②法面角度
+   ボタンの縦幅を広げる(padding 2px→5px) ③数値入力欄、6ch指定でも実際は
+   type="number"のブラウザ内部余白等で5桁目が欠けていたため、9ch(約1.5倍)に拡幅。 */
+.doboku-row{display:flex;align-items:center;justify-content:space-between;
+            margin-bottom:6px;font-size:.88em;color:#aaa;}
+.doboku-row label{white-space:nowrap;}
+.doboku-inp-wrap{display:flex;align-items:center;gap:4px;}
+.doboku-inp{width:9ch;background:#1a1a2e;color:#e0e0e0;border:1px solid #2a2a3e;
+            border-radius:3px;padding:3px 6px;font-size:.95em;text-align:right;
+            font-family:'Consolas',monospace;}
+.doboku-inp:focus{outline:none;border-color:var(--accent);}
+/* v0091(新4色ズレ対策): 汎用の input[type=text]{background:#333;padding:5px 8px;flex:1;...}
+   (243行目)が属性セレクタのぶんだけ.doboku-inpより詳細度が高く、type="text"の
+   gl-offset-mmだけ捨てコン+砕石/余掘り(type="number")と見た目が食い違っていた。
+   詳細度を上げて.doboku-inp本来の見た目を確実に勝たせる。 */
+input.doboku-inp[type=text]{background:#1a1a2e;color:#e0e0e0;padding:3px 6px;
+            flex:none;width:9ch;}
+.doboku-unit{color:#888;}
+.doboku-ang-group{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;flex:1;margin-left:10px;}
+.doboku-ang-group .slope-ang-btn{flex:1;padding:5px 0;font-size:.72em;border-radius:3px;
+            border:1px solid #3a3a3a;background:#2a2a2a;color:#aaa;cursor:pointer;}
+.doboku-ang-group .slope-ang-btn.active{border-color:var(--accent);background:var(--accent);
+            color:#000;font-weight:bold;}
+
+
+#calc-btn{width:100%;padding:7px;
+           background:linear-gradient(135deg,var(--accent),#ff8c42);
+           border:none;border-radius:4px;cursor:pointer;
+           color:#000;font-size:.8em;font-weight:700;letter-spacing:1px;
+           transition:opacity .2s,filter .2s,box-shadow .2s;}
+#calc-btn:hover{opacity:1;filter:brightness(1.18);box-shadow:0 0 8px rgba(255,160,60,.55);} /* v0166(50回目): 一般の button:hover より #calc-btn(ID)のほうが強く、ホバーで見た目が変わらなかった */
+
+/* キャンバスエリア */
+#cv-wrap{flex:1;position:relative;background:var(--cv);overflow:visible;}
+/* r126: 起動時の読み込み画面 */
+#boot-loading{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2000000;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;color:#ddd;font-size:1.3em;letter-spacing:.12em;transition:opacity .35s;}
+#boot-loading.hide{opacity:0;pointer-events:none;}
+#boot-loading .bl-spin{width:46px;height:46px;border:5px solid #333;border-top-color:#ffcc33;border-radius:50%;animation:blspin 1s linear infinite;}
+@keyframes blspin{to{transform:rotate(360deg);}}
+#drop-overlay{
+  position:fixed;inset:0;z-index:100000; /* r126: 3Dイメージ(z-index:20000)の上にも「読み込めません」の案内を出すため */display:none;
+  background:rgba(33,150,243,.18);
+  border:4px dashed var(--blue);pointer-events:none;
+}
+#drop-overlay.active{display:flex;align-items:center;justify-content:center;}
+#drop-overlay span{font-size:2em;color:var(--blue);}
+#drop-hint{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  border:2px dashed var(--blue);border-radius:10px;
+  padding:32px 68px;text-align:center;min-width:480px;
+  background:rgba(33,150,243,.07);z-index:10;cursor:pointer;
+  overflow:hidden;
+  /* v0091: Windowが狭い時、テキストが改行されて見た目が崩れる不具合対策。
+     折り返さず(white-space:nowrapを各行に強制)、はみ出た分は見切れさせる仕様にする
+     (改行よりましというマスター判断)。 */
+}
+#drop-hint p{font-size:1.1em;margin-bottom:6px;white-space:nowrap;}
+#drop-hint small{color:#888;}
+
+/* r062: 起動時「PDFをドロップorクリック」表示中、左右パネルのボタンが
+   操作できてしまう問題対策。左右パネルの上に暗いブロック用オーバーレイを重ねる。
+   drop-hint自体(中央のPDFドロップ領域)はcv-wrap内にあり、このオーバーレイの対象外。 */
+.ui-block-overlay{position:fixed;top:0;bottom:0;z-index:150;
+  background:rgba(0,0,0,.55);pointer-events:all;cursor:not-allowed;display:none;}
+.ui-block-overlay.show{display:block;}
+#ui-block-left{left:0;width:260px;}
+#ui-block-right{right:0;width:280px;}
+
+#pdf-cv{position:absolute;top:0;left:0;z-index:1;transform-origin:0 0;
+        image-rendering:pixelated;pointer-events:none;}
+#draw-cv{position:absolute;top:0;left:0;z-index:10;transform-origin:0 0;cursor:crosshair;}
+
+.sdot{position:fixed;pointer-events:none;z-index:9000;transform:translate(-50%,-50%);display:none;}
+#sd-endpoint {width:10px;height:10px;border-radius:50%;background:rgba(255,50,50,.95);}
+/* r025(マスター指示⑩): 測点専用スナップドット。端点(赤丸)と区別できる色・形にする */
+#sd-survey   {width:11px;height:11px;border-radius:50%;background:rgba(0,180,255,.95);border:2px solid #fff;box-shadow:0 0 6px rgba(0,180,255,.8);}
+#sd-midpoint {width:9px;height:9px;border-radius:50%;background:transparent;border:2px solid rgba(255,150,0,.95);}
+#sd-online   {width:9px;height:9px;border-radius:50%;background:rgba(0,220,120,.9);}
+#sd-intersect{width:13px;height:13px;background:transparent;border:2px solid rgba(255,220,0,.95);border-radius:50%;}
+#sd-vector   {width:12px;height:12px;border-radius:50%;background:rgba(50,255,50,.9);border:1px solid #000;}
+#sd-first    {width:15px;height:15px;border-radius:50%;background:rgba(255,220,0,.95);border:2px solid #fff;box-shadow:0 0 8px rgba(255,220,0,.8);}
+#loading{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+         background:rgba(0,0,0,.75);color:var(--blue);padding:12px 22px;
+         border-radius:8px;font-size:1em;display:none;z-index:30;}
+
+/* 右パネル */
+#sb{width:264px;background:var(--panel);border-left:1px solid var(--bdr);
+    padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:7px;z-index:100;}
+.card{background:#2a2a2a;border:1px solid var(--bdr);border-radius:6px;padding:9px 11px;}
+.card h4{font-size:.82em;color:#bbb;margin-bottom:7px;letter-spacing:.03em;}
+label{font-size:.78em;color:#999;}
+.row{display:flex;align-items:center;gap:6px;margin-top:5px;}
+input[type=text]{flex:1;padding:5px 8px;background:#333;color:var(--text);
+                 border:1px solid var(--bdr);border-radius:4px;font-size:.83em;}
+button{background:var(--btn);color:var(--text);border:1px solid #555;
+       padding:5px 10px;border-radius:4px;cursor:pointer;font-size:.78em;
+       transition:background .15s,border-color .15s;white-space:nowrap;}
+button:hover{background:var(--btn-hov);border-color:var(--btn-hov);}
+button.on{background:var(--blue);border-color:var(--blue);}
+button.on:hover{background:var(--blue-hov);border-color:var(--blue-hov);}
+.bgrp{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px;}
+.bgrp button{width:100%;}
+.sc-disp{display:flex;align-items:center;gap:8px;margin-top:5px;}
+.sc-badge{background:rgba(33,150,243,.2);border:1px solid var(--blue);
+  border-radius:4px;padding:4px 10px;font-size:.85em;font-weight:700;
+  color:#90caf9;white-space:nowrap;}
+#sc-change{font-size:.72em;padding:3px 8px;}
+#sc-dropdown-wrap{margin-top:6px;display:none;}
+select#sc-select{width:100%;background:#333;color:var(--text);border:1px solid var(--bdr);
+  border-radius:4px;padding:5px 7px;font-size:.82em;cursor:pointer;}
+#sc-custom-row2{display:none;margin-top:5px;}
+#sc-custom-row2 .row{margin-top:3px;}
+.srow{display:flex;justify-content:space-between;font-size:.74em;color:#777;margin-top:5px;}
+.srow b{color:var(--blue);}
+.snap-toggle{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
+.snap-toggle button{font-size:.7em;padding:3px 6px;}
+
+/* モーダル共通 */
+/* v0.0022: align-items/justify-contentが無かったため、display:flexで開く箇所
+   （confirm-modal、sc-modalの一部呼び出し）で.modal-cが縦方向にstretchして
+   縦長の空箱になるバグを修正。display:blockの箇所には影響なし */
+.modal{display:none;position:fixed;z-index:10000;inset:0;background:rgba(0,0,0,.78);
+       align-items:center;justify-content:center;}
+/* Voldia版: confirm-modalは#calc-modal(z-index:20000)の中から呼ばれることがあるため、常に最前面に来るよう個別に引き上げる */
+#confirm-modal{z-index:20500 !important;}
+/* 新2(2026-08-24 引継ぎ16回目): 山留の注意書きのように1行が長いメッセージ専用の拡幅クラス。
+   customConfirm(msg, true)で呼ばれた時だけ付与される。通常のconfirm-modalには影響しない。 */
+#confirm-modal .modal-c.wide{width:440px;}
+.modal-c{background:var(--panel);margin:10% auto;padding:22px;
+         border:1px solid var(--blue);width:340px;border-radius:8px;text-align:center;}
+.modal-c h3{margin-bottom:12px;}
+.modal-c p{color:#aaa;font-size:.85em;margin-bottom:10px;}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px;}
+.sbtn{padding:4px 2px;font-size:.74em;border-radius:3px;}
+.sbtn.on{background:var(--blue);border-color:var(--blue);}
+/* r041: #pg-btns / #pg-modal .modal-c のCSSを削除(ページ選択モーダルごと廃止。ページ数が多いPDFのスクロール対応(15回目)は起動ダイアログ側が受け持つ: #su-dlgにmax-height+overflow) */
+/* r023(30回目セッション、マスター指示・著作権クリアランス対応): 使用ライブラリの
+   ライセンス表記(Credits)モーダル。項目数が多く左寄せの長文になるため、
+   (旧pg-modalと同様に)スクロール対応させた上でtext-align/widthだけ個別指定する。 */
+#license-modal .modal-c{max-height:78vh;overflow-y:auto;width:540px;max-width:92vw;text-align:left;}
+
+/* トースト */
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+       background:#1a1a2e;color:#e0e8ff;font-size:.82em;font-weight:600;
+       padding:7px 18px;border-radius:16px;pointer-events:none;
+       border:1.5px solid #4488cc;
+       box-shadow:0 3px 14px rgba(0,0,0,.55);
+       z-index:99999;opacity:0;transition:opacity .25s;white-space:normal;text-align:center;max-width:80vw;}
+#toast.show{opacity:1;}
+#toast.large{bottom:26px;transform:translateX(-50%);background:#7a0000;color:#fff;
+       border:2px solid #ff4040;font-size:1.05em;padding:16px 26px;border-radius:10px;
+       white-space:nowrap;max-width:none;}
+/* 26回目セッション新規: 「既存躯体」(グレー)専用トースト。.largeと同じ視認性の
+   高いレイアウトを流用しつつ、配色のみ濃いグレー系背景・白文字にする */
+#toast.graystruct{bottom:26px;transform:translateX(-50%);background:#2b2b2b;color:#fff;
+       border:2px solid #6a6a6a;font-size:1.05em;padding:16px 26px;border-radius:10px;
+       white-space:nowrap;max-width:none;}
+/* ２(2026-08-25引継ぎ22回目マスター指示): B5のヒント用に画面上部専用のトースト枠を新設。
+   下部の共有#toastは他の操作トーストと同じタイマー/textContentを使い回すため、
+   直後に別のtoast()が呼ばれると即座に上書き消去されてしまう不具合があった。
+   完全に別要素・別タイマーにすることで衝突を避ける。 */
+#toast-top{position:fixed;top:14px;left:50%;transform:translateX(-50%);
+       background:#1a1a2e;color:#e0e8ff;font-size:.82em;font-weight:600;
+       padding:7px 18px;border-radius:16px;pointer-events:none;
+       border:1.5px solid #4488cc;
+       box-shadow:0 3px 14px rgba(0,0,0,.55);
+       z-index:99999;opacity:0;transition:opacity .25s;white-space:normal;text-align:center;max-width:80vw;}
+#toast-top.show{opacity:1;}
+
+/* スクロールバーの設定（濃いグレーだと黒背景に埋もれて見えないため、
+   既存のアクセントカラー--blueに変更） */
+#list-area, #sb {
+  scrollbar-width: thin;
+  scrollbar-color: var(--blue) transparent;
+}
+
+/* ══ BoolCalc モーダル ══ */
+#calc-modal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.88);
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+#calc-modal.show{
+  opacity: 1;
+  pointer-events: all;
+}
+.calc-inner{width:min(95vw,1080px);height:min(92vh,700px);background:var(--panel);
+            border:1px solid var(--bdr);border-radius:10px;display:flex;
+            flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.75);}
+.calc-hd{display:flex;align-items:center;justify-content:space-between;
+         padding:0 18px;height:42px;flex-shrink:0;background:#2a2a2a;
+         border-bottom:1px solid var(--bdr);}
+.calc-hd-title{font-size:.9em;font-weight:700;letter-spacing:2px;color:var(--accent);}
+.calc-hd-sub{font-size:.72em;color:#666;margin-left:10px;font-family:'Consolas',monospace;}
+.calc-body{display:flex;flex:1;overflow:hidden;}
+.c3d{flex:1;background:#06080c;position:relative;overflow:hidden;border-right:1px solid var(--bdr);}
+.c3d canvas{display:block;width:100%!important;height:100%!important;}
+.c3d-label{position:absolute;top:10px;left:12px;font-size:.65em;font-family:'Consolas',monospace;color:#555;letter-spacing:1px;}
+.c3d-hint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
+          background:rgba(13,15,20,.8);border:1px solid var(--bdr);border-radius:14px;
+          padding:4px 14px;font-size:.7em;color:#666;pointer-events:none;
+          white-space:nowrap;font-family:'Consolas',monospace;text-align:center;line-height:1.7;}
+.crp{width:320px;flex-shrink:0;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}
+.sec-ttl{font-size:.72em;font-weight:700;letter-spacing:2px;color:#666;text-transform:uppercase;}
+.csep{height:1px;background:var(--bdr);}
+.vox-presets{display:flex;gap:4px;flex-wrap:wrap;}
+.vox-preset{padding:3px 8px;background:#2a2a2a;border:1px solid var(--bdr);border-radius:3px;
+            font-size:.7em;font-family:'Consolas',monospace;color:#aaa;cursor:pointer;transition:all .15s;}
+.vox-preset:hover,.vox-preset.active{border-color:var(--accent);color:var(--accent);}
+.vox-preset.auto{border-color:var(--accent2);color:var(--accent2);}
+.vox-row{display:flex;align-items:center;gap:8px;margin-top:4px;}
+.vox-row label{font-size:.72em;color:#888;white-space:nowrap;}
+.vox-slider{flex:1;accent-color:var(--accent);}
+.vox-val{font-family:'Consolas',monospace;font-size:.8em;color:var(--accent);width:56px;text-align:right;flex-shrink:0;}
+.cell-est{font-size:.7em;color:#555;font-family:'Consolas',monospace;}
+.warn-box{border-radius:5px;padding:7px 9px;font-size:.7em;font-family:'Consolas',monospace;line-height:1.7;display:none;}
+.warn-box.show{display:block;}
+.warn-box.orange{background:rgba(255,167,38,.08);border:1px solid var(--warn);color:var(--warn);}
+.warn-box.red{background:rgba(239,83,80,.1);border:1px solid var(--danger);color:var(--danger);}
+.btn-calc{width:100%;padding:9px;background:var(--accent);border:none;border-radius:5px;
+          color:#000;font-size:.85em;font-weight:700;cursor:pointer;transition:background .15s;letter-spacing:1px;}
+.btn-calc:hover{background:#f0b030;}
+.btn-calc:disabled{opacity:.35;cursor:not-allowed;}
+.res-box{background:#2a2a2a;border:1px solid var(--bdr);border-radius:6px;padding:12px;display:none;}
+.res-box.show{display:block;}
+.vol-big{font-size:2.2em;font-weight:700;color:var(--accent);line-height:1;margin-bottom:2px;}
+.vol-big span{font-size:.4em;font-weight:400;color:#888;margin-left:4px;}
+.vol-label{color:#666;font-size:.72em;margin-bottom:6px;font-family:'Consolas',monospace;}
+.vol-detail{display:flex;flex-direction:column;gap:2px;font-family:'Consolas',monospace;
+            font-size:.7em;color:#666;border-top:1px solid var(--bdr);padding-top:6px;margin-top:4px;}
+.vol-detail .di{display:flex;justify-content:space-between;}
+.vol-detail .dv{color:#aaa;}
+.vol-detail .dv.hi{color:var(--success);}
+.vol-detail .dv.warn{color:var(--warn);}
+.vol-caution{color:var(--warn);font-size:.75em;font-weight:700;text-align:center;line-height:1.5;
+            margin:6px 0 8px;padding:6px 4px;border:1px solid var(--warn);border-radius:4px;
+            background:rgba(255,183,77,.08);}
+.vol-table{width:100%;border-collapse:collapse;font-size:.72em;}
+.vol-table th{text-align:left;color:#666;font-family:'Consolas',monospace;font-size:.85em;
+              font-weight:400;padding:3px 5px;border-bottom:1px solid var(--bdr);}
+.vol-table td{padding:4px 5px;color:#aaa;font-family:'Consolas',monospace;
+              border-bottom:1px solid rgba(58,58,58,.5);}
+.vol-table td:first-child{color:var(--accent);font-weight:700;}
+.vol-table td.rn{color:var(--text);text-align:right;}
+.vol-table tr.inc td{opacity:.4;font-style:italic;}
+.btn-glb{width:100%;padding:8px;background:transparent;border:1.5px solid var(--success);
+         border-radius:4px;color:var(--success);font-size:.8em;font-weight:500;cursor:pointer;
+         transition:all .15s;display:none;align-items:center;justify-content:center;gap:5px;}
+.btn-glb.show{display:flex;}
+.btn-glb:hover{background:rgba(102,187,106,.1);}
+.btn-glb:disabled{opacity:.4;cursor:not-allowed;}
+.exp-prog{background:#2a2a2a;border:1px solid var(--bdr);border-radius:5px;
+          padding:9px 11px;font-family:'Consolas',monospace;font-size:.72em;display:none;}
+.exp-prog.show{display:block;}
+.ep-title{color:var(--accent2);margin-bottom:4px;font-weight:500;}
+.ep-bar-wrap{background:#111;border-radius:3px;height:3px;margin:3px 0;overflow:hidden;}
+.ep-bar{height:100%;background:var(--accent2);border-radius:3px;transition:width .1s;width:0%;}
+.ep-msg{color:#666;font-size:.9em;}
+.btn-cls{padding:4px 12px;background:#2a2a2a;border:1px solid var(--bdr);border-radius:4px;
+         color:#aaa;font-size:.78em;cursor:pointer;transition:all .15s;}
+.btn-cls:hover{border-color:var(--danger);color:var(--danger);}
+.rot-step-btn{padding:5px 10px;font-size:.8em;border-radius:4px;background:#2a2a2a;border:1px solid #555;color:#e0e0e0;cursor:pointer;transition:background .1s;}
+.rot-step-btn:hover{background:#2196f3;border-color:#2196f3;}
+/* Fix9: スピンボタン非表示 */
+input[type=number]{-moz-appearance:textfield;}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+/* Fix13: Snapインジケーター */
+#snap-indicator{
+  position:fixed;pointer-events:none;z-index:9000;
+  background:rgba(255,230,0,.9);color:#111;
+  font-size:.72em;font-weight:700;padding:2px 5px;border-radius:3px;
+  display:none;white-space:nowrap;
+}
+/* 新1(2026-08-28 引継ぎ18回目マスター指示→26回目セッションで紫に移設):
+   紫(強制垂直)オブジェクトのマウスオーバー時に表示するツールチップ。
+   snap-indicatorと同じ固定ツールチップパターンを流用しつつ、紫系配色で
+   警告の意味合いを持たせる */
+#vertical-hover-tip{
+  position:fixed;pointer-events:none;z-index:9000;
+  background:rgba(150,60,220,.95);color:#fff;
+  font-size:.72em;font-weight:700;padding:3px 7px;border-radius:3px;
+  display:none;white-space:nowrap;
+}
+/* r068(20回目引継ぎ・マスター指摘): 法面角度ボタンのホバーツールチップ。
+   vertical-hover-tipと同じカーソル追従パターンを流用、配色のみ勾配用に変更 */
+#slope-hover-tip{
+  position:fixed;pointer-events:none;z-index:21000;
+  background:rgba(60,100,180,.95);color:#fff;
+  font-size:.72em;font-weight:700;padding:3px 7px;border-radius:3px;
+  display:none;white-space:nowrap;
+}
+</style>
+<!-- 【r041 削除一覧 / v0131(38回目)】起動フロー改造(v0129〜)で使われなくなった旧要素を整理。挙動は変えていない。
+     削除: #pg-modal(ページ選択モーダル)とそのCSS(#pg-btns, #pg-modal .modal-c) / #rot-modal(角度調整するか確認するモーダル)
+           / sc-modal内の方眼紙用ボタン(#sc-gridpaper-confirm-wrap) / sc-modal内の空だった用紙サイズ欄(#paper-size-info)
+     理由: ページ選択・角度調整の確認・方眼紙の縮尺設定は、すべて起動ダイアログ(#su-overlay)に統合したため。
+     残した: #sc-modal(縮尺の「変更」ボタン専用になった) -->
+<style id="su-style">
+/* r039(38回目): 起動ダイアログ。姉妹ソフトArecal(A040)の#su-*をそのまま移植。外部CSSには触れず、このブロックだけで完結させる */
+#su-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:8600;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#su-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:20px 24px 18px;width:min(470px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+#su-dlg .su-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0;min-height:40px;}
+#su-dlg .su-row.su-off{opacity:.35;pointer-events:none;}
+#su-dlg .su-lab{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;font-weight:700;font-size:1.05em;color:#fff;}
+#su-dlg .su-paper{font-weight:400;font-size:.72em;color:#6ea8ff;}
+#su-dlg select,#su-dlg input[type=number]{background:#2f2f2f;color:#e4e4e4;border:2px solid #555;border-radius:8px;padding:7px 10px;font-size:.95em;min-width:132px;}
+#su-dlg select:disabled{opacity:.6;}
+#su-dlg input[type=checkbox]{width:26px;height:26px;accent-color:#2196f3;cursor:pointer;flex:none;}
+#su-dlg .su-ic{flex:none;width:22px;height:22px;border-radius:50%;border:1px solid #6ea8ff;background:transparent;color:#6ea8ff;font-size:.8em;font-weight:700;line-height:1;padding:0;cursor:pointer;}
+#su-dlg .su-custom{display:none;align-items:center;justify-content:flex-end;gap:8px;margin:-6px 0 12px;color:#ddd;}
+#su-dlg .su-custom input{min-width:0;width:92px;text-align:center;}
+#su-dlg .su-err{min-height:1.2em;margin:0 0 6px;color:#ff7b7b;font-size:.85em;text-align:right;}
+#su-dlg .su-readwrap{text-align:center;margin:10px 0 12px;}
+#su-read{background:#fff;color:#111;border:2px solid #888;border-radius:10px;padding:8px 22px;font-size:.95em;font-weight:600;text-decoration:underline;cursor:pointer;}
+#su-dlg .su-agree{font-size:.88em;font-weight:700;line-height:1.7;margin:6px 0 14px;color:#f2f2f2;}
+#su-dlg .su-foot{text-align:right;}
+/* v0135: 方眼紙モード専用だった「戻る」(#su-back)のCSS・ボタンを削除(「キャンセル」#su-cancelに統一) */
+#su-start{background:#2196f3;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
+#su-start:active{filter:brightness(.9);}
+#su-tip{display:none;position:fixed;z-index:8700;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;white-space:pre-line;box-shadow:0 2px 12px rgba(0,0,0,.6);pointer-events:none;}
+</style>
+<style id="gm-style">
+/* v0134(40回目): 「3D生成方法」ダイアログ(#gm-*)と、3D結果画面の右UI整理用クラス(.rb-*, .out-row)。
+   起動ダイアログ(#su-*)と同じ見た目の作法。既存CSSには触れず、このブロックだけで完結させる。 */
+#gm-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:8600;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#gm-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:14px 24px 18px;width:min(500px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+#gm-dlg .gm-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid #3a3a3a;min-height:40px;}
+#gm-dlg .gm-row.gm-gl{border-bottom:1px solid #2196f3;}
+#gm-dlg .gm-row.gm-last{border-bottom:none;}
+#gm-dlg .gm-row.gm-off{opacity:.35;}
+#gm-dlg .gm-lab{font-weight:700;font-size:1.05em;color:#fff;white-space:nowrap;}
+#gm-dlg .gm-ctl{display:flex;align-items:center;gap:8px;}
+#gm-dlg .gm-unit{color:#8a9bb0;min-width:2.2em;}
+#gm-dlg .gm-mode-btn{padding:8px 16px;font-size:.95em;border-radius:8px;border:1px solid #555;background:#2f2f2f;color:#aaa;cursor:pointer;}
+#gm-dlg .gm-mode-btn.on{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
+#gm-dlg input.doboku-inp{width:112px;flex:none;padding:7px 10px;font-size:1rem;border:1px solid #555;border-radius:8px;background:#2f2f2f;color:#e4e4e4;text-align:right;}
+#gm-dlg input.doboku-inp:disabled{cursor:not-allowed;}
+#gm-dlg .gm-slope{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px;flex:1;max-width:310px;}
+#gm-dlg .gm-slope .slope-ang-btn{padding:8px 0;font-size:.95em;border-radius:8px;border:1px solid #555;background:#2f2f2f;color:#aaa;cursor:pointer;}
+#gm-dlg .gm-slope .slope-ang-btn.active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
+#gm-dlg .gm-slope .slope-ang-btn:disabled{cursor:not-allowed;}
+/* v0161(48回目): 建築向けの2つ(1:0.577・1:1.732)は既存6個(3列×2段)の下の段に2個横並び(全幅を2等分) */
+#gm-dlg .gm-slope .gm-slope-row2{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr;gap:8px 10px;}
+#gm-dlg .gm-note{color:#f7e24a;font-weight:700;font-size:.82em;text-align:center;margin:16px 0 14px;line-height:1.6;}
+#gm-dlg .gm-foot{display:flex;gap:12px;}
+#gm-back{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
+#gm-start{flex:1.6;background:#2196f3;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
+#gm-back:active,#gm-start:active{filter:brightness(.9);}
+#gm-tip{display:none;position:fixed;white-space:pre-line;z-index:21500;max-width:min(340px,92vw);background:rgba(20,20,35,.97);border:1px solid #4488cc;border-radius:8px;padding:9px 13px;font-size:.82em;line-height:1.7;color:#d6e6ff;pointer-events:none;}
+/* 起動ダイアログの「キャンセル」(「了解してはじめる」の右) */
+#su-cancel{background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:9px 18px;font-size:.95rem;cursor:pointer;}
+/* v0136: ボタン順を「キャンセル → 了解してはじめる」(マスター提示の画像どおり)。PDF/方眼紙/Voldの3モード共通 */
+#su-dlg .su-foot{display:flex;justify-content:flex-end;align-items:center;gap:28px;}
+#su-dlg .su-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
+#su-cancel:active{filter:brightness(.9);}
+/* 3D結果画面: メッシュ/影/色の3トグル(ON/OFFはボタン色)と、下段の出力ボタン行 */
+.rb-row{display:flex;gap:6px;margin-bottom:6px;}
+.rb-tgl{flex:1;padding:7px 0;border-radius:5px;border:1px solid #666;background:#3a3a3a;color:#999;font-size:.82em;cursor:pointer;text-align:center;white-space:nowrap;}
+.rb-tgl.on{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700;}
+.out-row{display:flex;flex-direction:column;gap:6px;margin-top:8px;} /* v0135: 横並び→縦3段(「3D配置モード」の文字数が多く窮屈だったため) */
+.out-row .btn-glb{width:100%;padding:8px 6px;font-size:.82em;}
+.btn-glb.is-off{opacity:.38;cursor:not-allowed;}
+.btn-glb.is-off:hover{background:transparent;}
+/* v0141(41回目): GLB出力/LANDXML出力の確認ダイアログ(#lx-*)。#calc-modal(z-index:20000)より前・#confirm-modal(20500)より後ろ */
+/* v0144(41回目): 3Dスクショの背景色選択ダイアログ(#ss-*)。#lx-overlayと同じ重なり順 */
+#ss-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20400;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#ss-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:16px 22px 18px;width:min(420px,100%);box-sizing:border-box;color:#eee;box-shadow:0 8px 40px rgba(0,0,0,.6);text-align:center;}
+#ss-dlg .ss-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
+#ss-dlg .ss-q{font-size:.88em;color:#cfd8e3;margin:4px 0 14px;}
+#ss-dlg .ss-btns{display:flex;gap:10px;}
+#ss-dlg .ss-btns button{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;padding:12px 6px 10px;background:#2f2f2f;color:#eee;border:1px solid #555;border-radius:10px;font-size:1rem;font-weight:700;cursor:pointer;}
+#ss-dlg .ss-btns button:hover{border-color:#4fc3f7;background:#363c44;}
+#ss-dlg .ss-btns button:active{filter:brightness(.9);}
+#ss-dlg .ss-sw{display:block;width:56px;height:36px;border:1px solid #888;border-radius:6px;}
+#ss-dlg .ss-sw-chk{background:conic-gradient(#ccc 25%,#fff 0 50%,#ccc 0 75%,#fff 0) 0 0/14px 14px;}
+#ss-dlg .ss-note{font-size:.75em;color:#8a9bb0;margin-top:12px;line-height:1.6;}
+#lx-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:20400;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+#lx-dlg{background:#232323;border:2px solid #2196f3;border-radius:14px;padding:16px 24px 18px;width:min(480px,100%);max-height:100%;overflow:auto;box-sizing:border-box;color:#eee;font-size:1rem;box-shadow:0 8px 40px rgba(0,0,0,.6);}
+#lx-dlg .lx-title{font-weight:700;font-size:1.05em;color:#fff;margin:0 0 4px;}
+#lx-dlg .lx-q{font-size:1.1em;font-weight:700;color:#fff;margin:6px 0 10px;}
+#lx-dlg .lx-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;padding:12px 0;border-top:1px solid #3a3a3a;min-height:40px;} /* v0168: 狭い画面でも欄が画面外へはみ出さないよう折り返し可 */
+#lx-dlg .lx-lab{font-weight:700;color:#fff;white-space:nowrap;}
+#lx-dlg .lx-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;max-width:100%;color:#d6e6ff;}
+#lx-dlg select{max-width:100%;padding:7px 10px;font-size:1rem;border:1px solid #555;border-radius:8px;background:#2f2f2f;color:#e4e4e4;}
+#lx-dlg select:disabled{opacity:.7;cursor:not-allowed;}
+#lx-dlg .lx-note{font-size:.8em;color:#8a9bb0;}
+#lx-dlg .lx-virtual{color:#ffcc80;font-weight:700;font-size:.9em;text-align:center;margin:10px 0 4px;line-height:1.6;} /* v0166(50回目・1A): 測点0個=仮原点の確認文 */
+#lx-dlg .lx-ph{display:inline-block;max-width:100%;} /* v0168: 文は「まとまり」(句)の切れ目だけで折り返す。まとまりより狭い画面ではまとまりの中で折り返す */
+@media (max-height:720px){#lx-dlg{padding:10px 18px 12px;}#lx-dlg .lx-row{padding:6px 0;min-height:0;}#lx-dlg .lx-warn{margin:8px 0;padding-top:8px;line-height:1.5;}#lx-dlg .lx-q{margin:4px 0 6px;}} /* v0168: 縦が低い画面(ノートPC・拡大表示)では詰める */
+#lx-dlg .lx-warn{color:#f7e24a;font-weight:700;font-size:.82em;text-align:center;margin:14px 0 12px;line-height:1.7;border-top:1px solid #3a3a3a;padding-top:12px;}
+#lx-dlg .lx-foot{display:flex;gap:12px;margin-top:10px;}
+#lx-no{flex:1;background:#333;color:#aaa;border:1px solid #555;border-radius:8px;padding:11px 18px;font-size:.95rem;cursor:pointer;}
+#lx-yes{flex:1.6;background:#2196f3;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:1rem;font-weight:700;cursor:pointer;}
+#lx-no:active,#lx-yes:active{filter:brightness(.9);}
+/* v0172(51回目): 全ボタンのホバー共通化。
+   原因=ボタンの背景色をID指定(#lx-yes等)やインラインstyleで書くと、一般の button:hover の background より強くて、ホバーしても見た目が変わらなかった(70個)。
+   filter は背景の指定と競合しないので、全ボタン共通の下地にする。専用のホバーがあるボタン(#calc-btn等)は従来どおり。
+   除外: disabled(押せない)・.is-off(グレーアウト中の出力ボタン。マウスオーバーのヘルプだけ出す)・色の丸(色が変わって見えるため別の合図=下の拡大)。 */
+button:not(:disabled):not(.is-off):not([title="色を変更"]):hover,summary:hover,#rect-table-toggle:hover{filter:brightness(1.3);}
+button[title="色を変更"]:hover,#draw-color-badge:hover,.cf-btn:hover{transform:scale(1.25);}
+/* v0172(51回目): 書き出しダイアログ(#lx-*)の「いいえ」は暗い灰色で、明るさだけでは変化が小さいので専用の色も付ける */
+#lx-no:hover{background:#444;color:#e6e6e6;border-color:#8a8a8a;}
+#lx-yes:hover{box-shadow:0 0 10px rgba(66,165,245,.55);}
+.btn-cls.btn-cls-main{padding:6px 16px;font-size:.88em;font-weight:700;background:#b71c1c;border-color:#e57373;color:#fff;}
+.btn-cls.btn-cls-main:hover{background:#d32f2f;border-color:#ef9a9a;color:#fff;}
+</style>
+<link rel="stylesheet" href="css/voldia_gm_intro.css"> <!-- 47回目: 3D生成方法ダイアログの2列レイアウト・イラスト連動(#gm-styleより後に読む) -->
+</head>
+<body>
+<div id="boot-loading" role="status" aria-live="polite"><div class="bl-spin"></div><div class="bl-text">読み込み中……</div></div>
+<noscript>
+  <div style="position:fixed;inset:0;z-index:999999;background:#1a1a2e;color:#ff6b6b;
+              display:flex;flex-direction:column;align-items:center;justify-content:center;
+              text-align:center;padding:20px;font-family:sans-serif;">
+    <h2 style="font-size:1.4em;margin-bottom:12px;">⚠️ JavaScriptが無効になっています</h2>
+    <p style="color:#e0e8ff;font-size:0.95em;line-height:1.6;">
+      Voldiaを利用するには、ブラウザの設定でJavaScriptを<br>
+      有効にしてから、ページを再読み込みしてください。
+    </p>
+  </div>
+</noscript>
+<div class="app">
+  <div id="ui-block-left" class="ui-block-overlay show"></div>
+  <div id="ui-block-right" class="ui-block-overlay show"></div>
+  <!-- r064: 保存パネル展開時に表示するボタン。#sbの外(.appの直接の子)に置くことで
+       #sbのスタッキングコンテキストに巻き込まれず、ui-block-overlayより確実に前面に出せる。
+       位置はtoggleIoPanel()でトグルボタンの位置を基準に毎回計算する。 -->
+  <div id="io-float-panel" style="display:none;position:fixed;z-index:300;background:#2a2a2a;border:1px solid var(--bdr);border-radius:6px;padding:8px;gap:4px;box-shadow:0 6px 20px rgba(0,0,0,.6);">
+    <button id="exp-btn" style="font-size:.72em;padding:5px 10px;display:block;width:100%;margin-bottom:4px;border-color:#888;color:#fff;">📤 Vold出力</button>
+    <button id="dxf-btn" style="font-size:.72em;padding:5px 10px;display:block;width:100%;border-color:#888;color:#fff;">📐 DXF出力</button>
+  </div>
+
+  <!-- 左パネル -->
+  <div id="sb-left">
+    <div id="logo-area">
+      <div class="logo-row">
+        <img id="logo-sidebar-img" alt="OSAKI Tech Lab" style="display:block;flex-shrink:0;height:34px;width:auto;border-radius:3px;">
+<script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
+        <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
+             このid="app-version-label"のテキストも必ず同じ値に更新すること -->
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0172</span></div>
+        <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
+      </div>
+    </div>
+    <div id="list-area">
+      <!-- v0145(41回目・マスター指示): オブジェクト名の上に小さな解説 -->
+      <div id="list-hint" style="font-size:.66em;color:#7f8c99;line-height:1.5;white-space:pre-line;margin:2px 4px 6px;">作図エリアでオブジェクトが重複して
+選択できない場合はオブジェクト名を
+クリックする事で選択できます</div>
+      <ul id="sh-list"></ul>
+    </div>
+    <div id="tot-wrap">
+      <!-- 47回目: 「並び」(ソート)ボタンは廃止。一覧の並び替えは各行のつまみ(⠿)をドラッグ -->
+      <!-- 色別フィルター -->
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:5px;flex-wrap:wrap;">
+        <span style="font-size:.68em;color:#888;">色別:</span>
+        <span class="cf-btn" data-c="blue"   style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#4fc3f7;cursor:pointer;border:2px solid #4fc3f7;opacity:1;" title="青"></span>
+        <span class="cf-btn" data-c="green"  style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#66bb6a;cursor:pointer;border:2px solid #66bb6a;opacity:1;" title="緑"></span>
+        <span class="cf-btn" data-c="yellow" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#ffeb3b;cursor:pointer;border:2px solid #ffeb3b;opacity:1;" title="黄"></span>
+        <span class="cf-btn" data-c="purple" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#ce93d8;cursor:pointer;border:2px solid #ce93d8;opacity:1;" title="紫"></span>
+        <span class="cf-btn" data-c="gray"   style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#9e9e9e;cursor:pointer;border:2px solid #9e9e9e;opacity:1;" title="グレー"></span>
+      </div>
+      <div id="tot-sum">合計面積: 0.0000 m²</div>
+      <div id="tot-union"></div>
+      <!-- Voldia版: 捨コン+砕石・法面角度・余掘は3D計算ウインドウ側（calc-select-panel）へ移設 -->
+      <!-- 互換性維持のため、旧IDのconc-thick/slope-angle-rowはcalc-modal内に移設して存在させる -->
+      <button id="calc-btn">⚡ ３Dイメージ</button>
+      <div style="display:flex;gap:5px;margin-top:5px;">
+        <button id="undo-btn" disabled title="元に戻す（Ctrl+Z）" style="flex:0.8;padding:5px;background:rgba(255,180,0,.12);border:1px solid #c8960040;border-radius:4px;cursor:pointer;color:#c8a000;font-size:.74em;transition:background .2s;" onmouseover="if(!this.disabled)this.style.background='rgba(255,180,0,.3)'" onmouseout="this.style.background='rgba(255,180,0,.12)'">↩ 元に戻す</button>
+        <!-- r025(マスター指示⑪): Redo（戻すを取消し）ボタン。ショートカット表記ははみ出すのでtitleに退避 -->
+        <button id="redo-btn" disabled title="戻すを取消し（Ctrl+Y）" style="flex:1.2;padding:5px;background:rgba(255,180,0,.12);border:1px solid #c8960040;border-radius:4px;cursor:pointer;color:#c8a000;font-size:.74em;transition:background .2s;" onmouseover="if(!this.disabled)this.style.background='rgba(255,180,0,.3)'" onmouseout="this.style.background='rgba(255,180,0,.12)'">↪ 戻すを取消し</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- キャンバス -->
+  <div id="cv-wrap">
+    <!-- Fix4: キャンバス上部ツールバー（画面中央） -->
+    <div id="canvas-tool-bar" style="position:absolute;top:0;left:0;right:0;z-index:200;background:rgba(8,15,28,.92);border-bottom:1px solid #1a3a5a;padding:4px 10px;display:flex;align-items:center;gap:8px;min-height:32px;pointer-events:none;flex-wrap:wrap;overflow:visible;">
+      <span id="tool-name" style="font-size:.78em;font-weight:600;color:#4fc3f7;letter-spacing:.04em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">— ツール未選択 —</span>
+      <span id="status-bar" style="display:none;font-size:.75em;color:#f0c040;white-space:nowrap;"></span>
+      <span id="dist-warn-bar" style="display:none;font-size:.75em;color:#4fc3f7;white-space:nowrap;">📏 2点をクリックして距離測定</span>
+      <div id="tool-actions" style="display:flex;gap:5px;flex-wrap:wrap;pointer-events:all;"></div>
+    </div>
+    <div id="drop-overlay"><span>📄 ここにドロップ</span></div>
+    <div id="drop-hint">
+      <!-- r039(38回目): 旧・起動時免責画面にあったロゴ/アプリ名/ブックマーク案内/Credits導線を、
+           起動画面(=このdrop-hint)へ移設。免責は起動ダイアログ(su-overlay)の「了解してはじめる」で同意する方式に変更 -->
+      <div style="display:flex;align-items:flex-end;justify-content:center;gap:10px;margin-bottom:18px;">
+        <img id="logo-splash-img" alt="OSAKI Tech Lab" style="height:42px;width:auto;border-radius:4px;display:block;">
+<script>document.getElementById('logo-splash-img').src = OSAKI_LOGO_B64;</script>
+        <div style="display:flex;flex-direction:column;align-items:center;line-height:1;">
+          <div style="font-size:.72em;color:#88aaff;letter-spacing:.2em;margin-bottom:4px;position:relative;top:4px;">ボルディア</div>
+          <div style="font-size:1.7em;font-weight:800;color:#fff;letter-spacing:.03em;text-shadow:0 0 12px rgba(33,150,243,.5);">Voldia</div>
+        </div>
+      </div>
+      <p style="white-space:pre;line-height:1.5;">📄 最初から作図する場合は「PDF」ファイルを
+前回の続きを行う場合は「Vold」ファイルを
+D&D or クリックでロードしてください</p>
+      <small>画面のどこにでもドロップできます</small>
+      <div style="color:#aab;font-size:.8em;margin-top:16px;display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;">
+        <span style="display:inline-flex;gap:4px;">
+          <kbd style="background:#333;border:1px solid #666;border-bottom:2px solid #555;border-radius:5px;padding:3px 9px;font-family:inherit;font-weight:700;color:#e8a020;box-shadow:0 1px 0 #000;">Ctrl</kbd>
+          <span style="color:#889;">+</span>
+          <kbd style="background:#333;border:1px solid #666;border-bottom:2px solid #555;border-radius:5px;padding:3px 9px;font-family:inherit;font-weight:700;color:#e8a020;box-shadow:0 1px 0 #000;">D</kbd>
+        </span>
+        <span>でブックマークしておくと、便利です</span>
+      </div>
+      <!-- r023(30回目、マスター指示): 使用ライブラリのライセンス表記への導線(r039でここへ移設) -->
+      <div style="margin-top:10px;">
+        <a id="open-license-modal" href="#" style="color:#7a95c9;font-size:.75em;text-decoration:underline;">使用ライブラリのライセンス表記 (Credits)</a>
+      </div>
+      <input type="file" id="file-in" accept=".pdf,.vold,.json" style="display:none">
+    </div>
+    <!-- r062: 方眼紙ボタンをdrop-hint内(画面中央、内容次第で高さがはみ出すことがあった)から
+         作図エリア左下の独立配置に変更。デバッグ用だったが好評につき正式運用として位置を固定化 -->
+    <button id="grid-paper-btn" style="position:absolute;right:16px;bottom:16px;z-index:11;background:#37474f;color:#cfd8dc;border:1px solid #546e7a;border-radius:6px;padding:8px 18px;font-size:.9em;cursor:pointer;letter-spacing:.05em;">
+      📐 方眼紙から作図する
+    </button>
+    <canvas id="pdf-cv"></canvas>
+    <canvas id="draw-cv"></canvas>
+    <div id="sd-endpoint"  class="sdot"></div>
+    <div id="sd-survey"    class="sdot"></div>
+    <div id="sd-midpoint"  class="sdot"></div>
+    <div id="sd-online"    class="sdot"></div>
+    <div id="sd-intersect" class="sdot"></div>
+    <div id="sd-vector"    class="sdot"></div>
+    <div id="sd-first"     class="sdot"></div>
+    <div id="loading">読み込み中...</div>
+  </div>
+
+  <!-- 右パネル -->
+  <div id="sb">
+
+    <div class="card" style="position:relative;">
+<!-- r060: ノースアロー（方位角ウィジェット）。v0170: 右UIの「スケール」欄の中に置く(以前は画面に固定=position:fixedで、右UIをスクロールしてもノースアローだけ動かず他のボタンに重なっていた)。
+     v0136: 初期状態は非表示(display:none)。起動画面で回せてしまうため。測点が1つ以上になるとredraw()が表示する(従来どおり)。
+     ドラッグで回転／ダブルクリックで数値入力。作図・3D表示・配置モードには一切影響しない
+     （将来のLandXML出力時の回転・原点決定にのみ使用）。 -->
+<div id="north-arrow-wrap" title="ドラッグで回転／ダブルクリックで数値入力（LandXML出力用・作図には影響しません）"
+     style="display:none;position:absolute;top:14px;right:13px;z-index:5;width:60px;cursor:grab;user-select:none;touch-action:none;">
+  <svg id="north-arrow-svg" viewBox="0 8 100 108" width="60" height="65" style="display:block;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));">
+    <g id="north-arrow-rotor" style="transform-origin:50px 72px;transform:rotate(0deg);">
+      <text x="50" y="31" text-anchor="middle" font-size="26" font-weight="900" fill="var(--accent2)" font-family="sans-serif" letter-spacing="1">N</text>
+      <circle id="north-arrow-circle" cx="50" cy="72" r="36" fill="#1a1a1a" stroke="var(--accent2)" stroke-width="3.5"/>
+      <polygon points="50,42 68,96 50,86 32,96" fill="var(--accent)"/>
+    </g>
+  </svg>
+  <div id="north-angle-label" style="text-align:center;font-size:.62em;color:var(--accent2);margin-top:0;white-space:nowrap;"> <!-- v0172: 矢印が下半分を向く時は updateNorthArrowUI が上側へ移す(Nマークと重なるため) -->0°00'00.0"</div>
+</div>
+      <h4>スケール</h4>
+      <div class="sc-disp">
+        <div class="sc-badge" id="sc-d">未設定</div>
+        <button id="sc-change">変更</button>
+      </div>
+      <!-- v0.0012: ドロップダウン廃止 → 変更ボタンでsc-modalを開く -->
+      <input type="hidden" id="sc-input" value="">
+      <!-- Fix7: スナップをスケール直下に -->
+      <div style="margin-top:8px;border-top:1px solid #1e2a3a;padding-top:7px;">
+        <div style="font-size:.7em;color:#888;margin-bottom:4px;">スナップグリッド</div>
+        <div style="display:flex;gap:3px;flex-wrap:wrap;">
+          <button class="sr-btn" data-r="0"  style="padding:2px 7px;font-size:.72em;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:3px;color:#aaa;cursor:pointer;">OFF</button>
+          <button class="sr-btn" data-r="1"  style="padding:2px 7px;font-size:.72em;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:3px;color:#aaa;cursor:pointer;">1mm</button>
+          <button class="sr-btn" data-r="5"  style="padding:2px 7px;font-size:.72em;background:var(--accent);border:1px solid var(--accent);border-radius:3px;color:#000;cursor:pointer;">5mm</button>
+          <button class="sr-btn" data-r="10" style="padding:2px 7px;font-size:.72em;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:3px;color:#aaa;cursor:pointer;">10mm</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h4>描画ツール</h4>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <span style="font-size:.72em;color:#888;">描画色:</span>
+        <div id="draw-color-badge" style="width:14px;height:14px;border-radius:50%;background:#0080c0;border:2px solid #4fc3f7;cursor:pointer;" title="クリックで色変更" onclick="cycleDrawColor()"></div>
+        <span id="draw-color-label" style="font-size:.72em;color:#4fc3f7;">青</span>
+      </div>
+      <div class="bgrp">
+        <button id="rect-btn">□ 四角形</button>
+        <button id="poly-btn">🔵 多角形</button>
+        <button id="yamadome-btn" title="仮想山留を1つ配置（土量計算でクリップ）">🏗 山留</button>
+        <button id="edit-btn" title="頂点をドラッグして図形を修正（四角形は直角のまま拡大縮小・辺の◆は平行移動／多角形は自由移動・自己交差は不可で元に戻る／オブジェクトスナップ対応）">✏ 修正</button>
+      </div>
+      <div class="bgrp" style="margin-top:5px;">
+        <button id="sel-union-btn" title="選択した図形を合成" style="display:none">🔗 選択合成</button>
+        <button id="sub-btn" title="図形から一部を削除" style="display:none">✂ 部分削除</button>
+        <button id="dist-btn" title="2点間の距離を計測">📏 距離測定</button>
+        <button id="survey-btn" title="任意の位置に番号付きの測点を設置">📍 測点設置</button>
+      </div>
+    </div>
+
+    <!-- r025(マスター指示⑧): 「入出力」と「オブジェクトスナップ」の表示順序を入替 -->
+    <div class="card">
+      <h4>オブジェクトスナップ</h4>
+      <div class="snap-toggle">
+        <button id="sn-endpoint" class="on">端点</button>
+        <!-- r025(マスター指示⑩): 測点を「端点」から独立した専用スナップに分離 -->
+        <button id="sn-survey" class="on" title="設置した測点への個別スナップ（最優先）">📍 測点</button>
+        <button id="sn-midpoint" class="on">中点</button>
+        <button id="sn-online"   class="on">線上</button>
+        <button id="sn-intersect" class="on">交点</button>
+        <button id="sn-yamadome" class="on" title="山留ラインへのスナップ・他図形との交点も対象にします">🏗 山留</button>
+        <button id="sn-vector" class="on" title="PDF原図の線から端点・交点をスナップ対象にします（端点/交点トグルの状態に従います）">🧷 元図線スナップ</button>
+        <button id="sn-grid" class="on" style="display:none;">方眼</button>
+      </div>
+      <div style="margin-top:6px;display:flex;align-items:center;gap:6px;">
+        <span style="font-size:.68em;color:#888;white-space:nowrap;">スナップ距離</span>
+        <input type="range" id="snap-px-slider" min="1" max="9" step="2" value="3"
+          style="flex:1;min-width:0;max-width:100px;accent-color:var(--accent);cursor:pointer;">
+        <span id="snap-px-label" style="font-size:.68em;color:#aaa;min-width:20px;">3px</span>
+      </div>
+      <div style="margin-top:4px;font-size:.68em;color:#888;">元図線読取り: <span id="vec-line-count">0</span>本</div>
+    </div>
+
+    <!-- 保存 -->
+    <!-- r064: 「Vold読込」「Excel出力」は今後の機能追加に関わるため一旦非表示化
+         (機能自体は残す。復帰する可能性あり)。表示中は「Vold出力」「DXF出力」の2つ。
+         r063で#sb自体のz-indexを一時的に上げる方式にしたが、それだと右パネル全体が
+         ブロック解除されてしまう(展開中の2ボタン以外も押せてしまう)不具合が発覚。
+         正しくは「展開中の2ボタンだけ」がブロックを免れればよいので、それらを
+         #io-float-panel という独立したfixed要素(.appの直接の子、z-index高め)に
+         分離し、#sb自体はブロック対象のまま常にz-index:100で据え置く方式に修正した。
+         位置は開くたびにtoggleIoPanel()内でトグルボタンのgetBoundingClientRect()を
+         基準に計算する。 -->
+    <div class="card">
+      <h4>保存</h4>
+      <button id="io-toggle-btn" onclick="toggleIoPanel()" style="width:100%;font-size:.78em;padding:7px 4px;margin-bottom:4px;">🔀 保存</button>
+      <!-- r064: 非表示ボタン(imp-btn/xlsx-btn)は機能保持のためDOMに残置。展開時に
+           操作可能にする必要が無いため、こちらは浮遊パネルへ移さずカード内のまま。 -->
+      <div style="display:none;">
+        <button id="imp-btn" style="font-size:.72em;padding:5px 4px;">📂 Vold読込</button>
+        <button id="xlsx-btn" style="font-size:.72em;padding:5px 4px;">📊 Excel出力</button>
+      </div>
+      <button id="clear-btn" style="border-color:#c0392b;color:#e88;width:100%;font-size:.72em;">🗑 全消去</button>
+      <input type="file" id="imp-in" accept=".vold,.json" style="display:none">
+    </div>
+
+    <!-- r025(マスター指示⑦再修正): 「深さ入力」の項は現状と合っていない項目が
+         あるとのマスター指摘により全削除。ESC行の色も暗すぎたため他行と統一。 -->
+    <div class="card" style="font-size:.72em;line-height:1.9;">
+      <b style="color:#4fc3f7;font-size:1.05em;">操作ガイド</b>
+      <div style="color:#aaa;margin-top:5px;">
+        🔍 <b style="color:#ccc;">ホイール</b>: ズーム<br>
+        🖱 <b style="color:#ccc;">中クリック / Space+ドラッグ</b>: パン<br>
+        🖱 <b style="color:#ccc;">中ダブルクリック</b>: 全体表示<br>
+        ⬛ <b style="color:#ccc;">四角形</b>: 対角の2点をクリックで確定（1つ描くと自動終了）<br>
+        🔵 <b style="color:#ccc;">多角形</b>: 頂点を順にクリック、始点クリック or Enter=確定（1つ描くと自動終了・Shiftで直交）<br>
+        🏗 <b style="color:#ccc;">山留</b>: 頂点を順にクリック、始点クリック or Enter=確定（1図面に1本のみ／再描画は要確認・Shiftで直交）<br>
+        <b style="color:#ccc;">ESC</b>: キャンセル<br>
+        ⌨ <b style="color:#ccc;">F1</b>: 操作説明
+      </div>
+    </div>
+  </div>
+
+  <!-- Fix13: スナップインジケーター -->
+  <div id="snap-indicator"></div>
+  <div id="vertical-hover-tip"></div>
+  <div id="slope-hover-tip"></div>
+  <!-- Fix9: 距離測定結果 固定表示（画面下部） -->
+   <div id="dist-result" style="display:none;position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:8000;padding:8px 20px;background:rgba(10,20,35,.92);border:1px solid #4fc3f7;border-radius:20px;font-size:.88em;color:#e0f7fa;font-weight:600;white-space:nowrap;box-shadow:0 2px 16px rgba(0,0,0,.6);"></div>
+
+<!-- r041: ページ選択モーダル(#pg-modal)を削除。起動ダイアログに統合 -->
+
+<!-- スケール選択 -->
+<!-- 新1(2026-08-24 引継ぎ16回目): Arecalとレイアウトを統一。1/60・1/1000を追加し、文言・数値入力欄の見た目をAreCal側に合わせた。
+     r041: 空のまま残っていた用紙サイズ欄(#paper-size-info)を削除。用紙サイズ表示は起動ダイアログ(#su-paper)に実装済み。
+     このモーダルは縮尺の「変更」ボタン専用。 -->
+<div id="sc-modal" class="modal">
+  <div class="modal-c">
+    <h3>スケール比を設定</h3>
+    <p>縮尺を選択してください</p>
+    <div class="sgrid" id="sc-grid-modal">
+      <button class="sbtn" data-sc="1/30">1/30</button>
+      <button class="sbtn" data-sc="1/40">1/40</button>
+      <button class="sbtn" data-sc="1/50">1/50</button>
+      <button class="sbtn" data-sc="1/60">1/60</button>
+      <button class="sbtn" data-sc="1/80">1/80</button>
+      <button class="sbtn" data-sc="1/100">1/100</button>
+      <button class="sbtn" data-sc="1/200">1/200</button>
+      <button class="sbtn" data-sc="1/250">1/250</button>
+      <button class="sbtn" data-sc="1/300">1/300</button>
+      <button class="sbtn" data-sc="1/400">1/400</button>
+      <button class="sbtn" data-sc="1/500">1/500</button>
+      <button class="sbtn" data-sc="1/1000">1/1000</button>
+    </div>
+    <p style="margin-top:8px;">数値入力:</p>
+    <!-- r062: 「1/」部分を固定表示にし、分母の数値のみ入力可能に変更。
+         入力欄と設定ボタンをコンパクトに1行で配置。 -->
+    <div class="row" style="justify-content:center;margin-top:4px;align-items:center;gap:4px;">
+      <span style="color:#CACACA;font-size:.9em;white-space:nowrap;">1 /</span>
+      <input type="number" id="sc-init-in" placeholder="75" min="1" step="0.1" style="width:48px;text-align:center;">
+      <button id="sc-confirm">設定</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0.0020: カスタム確認ダイアログ（ブラウザ標準confirmの「今後表示しない」チェックボックスを回避） -->
+<!-- r020: 幅を固定から内容に合わせた自動幅に変更(左右の余白は増えてもよいので、
+     一行のメッセージが不自然な位置で折り返されないようにする)。改行は\nのみを
+     尊重し(white-space:pre)、コンテナ幅による自動折り返しはさせない。
+     大きな警告アイコンを独立した要素として追加。 -->
+<div id="confirm-modal" class="modal">
+  <div class="modal-c" style="width:auto;max-width:90vw;padding:24px 36px;">
+    <div id="confirm-modal-icon" style="font-size:2em;line-height:1;margin-bottom:10px;">⚠</div>
+    <p id="confirm-modal-msg" style="white-space:pre;color:#e0f7fa;font-size:.9em;margin-bottom:16px;line-height:1.9;text-align:center;"></p>
+    <div class="row" style="justify-content:center;gap:10px;">
+      <button id="confirm-modal-yes" style="background:#2196f3;color:#fff;border:none;border-radius:6px;padding:8px 26px;cursor:pointer;font-weight:bold;">はい</button>
+      <button id="confirm-modal-no" style="background:#555;color:#fff;border:none;border-radius:6px;padding:8px 26px;cursor:pointer;">いいえ</button>
+    </div>
+  </div>
+</div>
+
+<!-- r025(AreCal移植): 測点 上下左右+距離入力ダイアログ -->
+<div id="survey-dialog" class="modal">
+  <div class="modal-c" style="width:290px;">
+    <h4 id="sv-title" style="color:#00eeff;margin:0 0 12px;font-size:.95em;">📍 クリック位置から測点を設置</h4>
+    <!-- B4(2026-08-25引継ぎ20回目マスター指示): 上下左右のボタンを「上/左右/下」の
+         十字配置・センタリングに変更(3行×グリッド、上下は横幅いっぱいの中央1列)。 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+      <button id="sv-up" style="grid-column:1/3;padding:8px;border-color:#00ccff;color:#00eeff;">↑ 上（+Y）</button>
+      <button id="sv-left" style="padding:8px;border-color:#00ccff;color:#00eeff;">← 左（-X）</button>
+      <button id="sv-right" style="padding:8px;border-color:#00ccff;color:#00eeff;">→ 右（+X）</button>
+      <button id="sv-down" style="grid-column:1/3;padding:8px;border-color:#00ccff;color:#00eeff;">↓ 下（-Y）</button>
+    </div>
+    <label style="font-size:.8em;color:#CACACA;">移動距離（m）</label>
+    <!-- r025(マスター指示⑥再修正): type="number"だと「.」だけを打った瞬間にブラウザが
+         不正な値として空文字にリセットしてしまい、テンキーの「.」がCと同じ「全消去」
+         のように見えるバグの原因だった。text+inputmode="decimal"に変更し、
+         数値としての妥当性チェックはOKボタン押下時のparseFloat側に任せる。 -->
+    <input type="text" inputmode="decimal" id="sv-dist" placeholder="例: 5.000" style="width:100%;box-sizing:border-box;margin:4px 0 8px;">
+    <!-- r025(マスター指示⑥): タッチ操作を意識したテンキーを追加 -->
+    <div id="sv-numpad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">7</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">8</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">9</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">4</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">5</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">6</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">1</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">2</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">3</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">0</button>
+      <button class="sv-num-btn" style="padding:9px;border:1px solid #00ccff40;background:#0a2a3a;color:#00eeff;border-radius:4px;">.</button>
+      <button id="sv-num-clear" style="padding:9px;border:1px solid #e7735040;background:#3a1a0a;color:#ff9070;border-radius:4px;">C</button>
+    </div>
+    <div class="row" style="justify-content:center;gap:8px;">
+      <button id="sv-cancel" style="flex:1;background:#333;">キャンセル</button>
+      <button id="sv-ok" style="flex:1;background:rgba(0,150,200,.4);border-color:#00ccff;color:#00eeff;" disabled>設置</button>
+    </div>
+    <!-- v0145(41回目・マスター指示): 新規設置・移動の両方に同じ解説を表示 -->
+    <div style="margin-top:10px;font-size:.7em;color:#8fa3b5;line-height:1.6;white-space:pre-line;text-align:center;">測点は一度の動作でXかYの１方向にしか
+移動できないので、再度動かす場合は
+設置後の測点を「左クリック」してください。
+また測点は右クリックで削除できます</div>
+  </div>
+</div>
+
+<!-- BoolCalc モーダル -->
+<div id="calc-modal">
+  <div class="calc-inner">
+    <div class="calc-hd">
+      <div style="display:flex;align-items:center;">
+        <span class="calc-hd-title">Voldia_３Dイメージ</span>
+        <span class="calc-hd-sub" id="calc-hd-sub"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="btn-cls" id="btn-calc-back-gm" onclick="backToGenDialog()">◀ 戻る</button>
+        <button class="btn-cls btn-cls-main" onclick="closeCalcModal()">✕ 閉じる</button>
+      </div>
+    </div>
+    <div class="calc-body">
+      <div class="c3d" id="c3d-pane">
+        <div class="c3d-label">3D PREVIEW</div>
+        <!-- v0151(46回目): 3Dイメージの操作説明を2行に。配置モードの画面下の説明と言い回しをそろえてある。v0152: 「ホイールドラッグ:回転」の表記は消した(機能は残してある=ホイールドラッグでも回転する。AutoCADに慣れた人が自然に使うため) -->
+        <div class="c3d-hint">🖱 左ドラッグ:回転 ｜ 🖱 右ドラッグ:パン<br>⚙️ ホイール:ズーム ｜ ⌨️ F1:操作説明</div>
+      </div>
+<div class="crp">
+        <!-- 【v0134(40回目) 3D右UIの整理・削除/移設一覧】挙動は変えていない(体積計算・runCalcは無改造)。
+             削除: 「計算方法 📐層別スライスUNION法」の解説ブロック(注記は新ダイアログ#gm-overlayの下部へ) /
+                   「◀ 戻る」ボタン(#btn-calc-back。画面右上の「✕ 閉じる」に一本化) / 計算前の解説文・方式ボタン前の説明ボックス
+             移設: 「現状地盤GL」「捨コン+砕石」「余掘り」「法面角度ボタン」は#gm-overlay(3D生成方法ダイアログ)へ。
+                   idは据え置き(gl-offset-mm / conc-thick / global-overdig / .slope-ang-btn)なのでJS側の参照は無改造。
+                   「メッシュ」「影」「色」は上段の横並び3トグルへ。「スクショ」「3D配置モード」「データ出力」は下段の1行へ。
+             残した: #btn-calc-run / #btn-calc-doboku は画面に出さない(display:none)。runCalc()が実行中表示のために
+                   document.getElementById(...)で参照しているため(消すとnullエラー)。方式の選択と実行は新ダイアログが行う。
+             ※「影」ボタンはr101以来JSが動的に複製していたが、ここに常設した(ensureShadowButtonは既存ボタンがあれば何もしない)。 -->
+        <div id="calc-select-panel">
+          <div style="display:none;" aria-hidden="true">
+            <button class="btn-calc" id="btn-calc-run" tabindex="-1">⚡ 通常計算</button>
+            <button class="btn-calc" id="btn-calc-doboku" tabindex="-1">⚡ 土量計算</button>
+          </div>
+        </div>
+        <!-- 計算後パネル(runCalcが表示する。体積表示・透過・出力ボタンもこの中) -->
+        <div id="calc-result-panel" style="display:none;">
+          <div class="rb-row">
+            <button id="btn-base-grid-toggle" class="rb-tgl" onclick="toggleBaseGridVisibility()" title="基準メッシュ(GL面の方眼)の表示ON/OFF">メッシュ</button>
+            <button id="btn-shadow-toggle" class="rb-tgl" onclick="toggleShadowVisibility()" title="影の表示ON/OFF(グラデ表示時のみ有効)">影</button>
+            <button id="btn-solid-toggle" class="rb-tgl on" onclick="toggleMeshSolid()" title="色: ON=グラデ(高さで色分け) / OFF=ソリッド(単色)">色</button>
+          </div>
+          <div class="csep"></div>
+        <div class="res-box" id="res-box">
+          <div class="vol-big" id="res-vol">—<span>m³</span></div>
+          <div class="vol-label" id="res-vol-label">切土量（ブール和）</div>
+          <div class="vol-caution">⚠ このアプリの値は参考値です<br>値を使用する際は必ず<br>自分で確認をしましょう</div>
+          <div class="vol-detail" id="res-detail"></div>
+        </div>
+        <div id="rect-table-wrap" style="display:none">
+          <!-- 新8(2026-08-24 引継ぎ19回目マスター指示): クリックで開閉可能にし、
+               デフォルトは畳んだ状態(表示件数が多いと縦に伸びて邪魔という趣旨)。 -->
+          <div class="sec-ttl" id="rect-table-toggle" onclick="toggleRectTable()"
+               style="margin-bottom:5px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px;">
+            <span id="rect-table-arrow" style="display:inline-block;transition:transform .15s;">▶</span>
+            <span>図形別（単独体積）</span>
+          </div>
+          <div id="rect-table-body" style="display:none">
+            <table class="vol-table">
+              <thead><tr><th>No.</th><th>面積 m²</th><th>深さ mm</th><th style="text-align:right">単独 m³</th></tr></thead>
+              <tbody id="rect-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="csep" id="sep-glb" style="display:none"></div>
+        <!-- 透過スライダー -->
+        <div id="opacity-ctrl" style="display:none;margin:8px 0 4px;padding:6px 8px;background:rgba(255,255,255,0.05);border-radius:6px;">
+          <div style="display:flex;align-items:center;gap:8px;font-size:.78em;color:#aaa;">
+            <span>透過</span>
+            <input type="range" id="mesh-opacity" min="10" max="100" value="100" step="2"
+              style="flex:1;height:4px;accent-color:#ffcc77;"
+              oninput="updMeshOpacity(this.value)">
+            <span id="opacity-val" style="min-width:28px;text-align:right;">100%</span>
+          </div>
+        </div>
+          <div class="out-row">
+            <!-- Voldia版: オブジェクト配置モード(通常計算・土量計算どちらの結果画面でも表示) -->
+            <button class="btn-glb" id="btn-placement" onclick="openPlacementMode()" data-gmtip="out-placement"
+              style="border-color:#ffb74d;color:#ffb74d;">🏗 3D配置モード</button>
+            <!-- r059/r062: スクショ(SHIFT+CTRL+クリックでGLB保存の隠しデバッグ機能はJS側handleCalc3DScreenshotClickで判定) -->
+            <button class="btn-glb show" id="btn-calc-screenshot" onclick="handleCalc3DScreenshotClick(event)" data-gmtip="out-shot"
+              style="border-color:#888;color:#ccc;">📷 スクショ</button>
+            <!-- r070: エビル統合。「データ出力」は通常計算の結果画面では躯体解析、土量計算の結果画面では掘削土量解析を呼ぶ
+                 (どちらを出すかはrunCalcがmodeで切替え済み=従来どおり。ボタンは同時に1つしか出ない) -->
+            <button class="btn-glb" id="btn-analyze-structure" onclick="runEvidenceAnalysis('structure')" data-gmtip="out-data"
+              style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
+            <button class="btn-glb" id="btn-analyze-earthwork" onclick="runEvidenceAnalysis('earthwork')" data-gmtip="out-data"
+              style="border-color:#4fc3f7;color:#4fc3f7;">📊 データ出力</button>
+            <!-- 47回目: 3D_DXF出力(データ出力ボタンの下=47回目に入れ替え)。通常計算=外向きの3DFACE / 土量計算=Land Logic(上面が表・原点=測点)。表示とグレーアウトは updateOutputButtons()が制御 -->
+            <button class="btn-glb" id="btn-dxf3d" onclick="exportDxf3dClick()" data-gmtip="out-dxf3d"
+              style="border-color:#80cbc4;color:#80cbc4;">🧊 3D_DXF出力</button>
+            <!-- v0141(41回目): GLB出力(通常計算=従来のGLB保存 / 土量計算=Land Logic)とLANDXML出力(土量計算のみ)。表示とグレーアウトは updateOutputButtons()(voldia_main.js)が制御 -->
+            <button class="btn-glb" id="btn-glb" onclick="exportGlbClick()" data-gmtip="out-glb">📦 GLB出力</button>
+            <button class="btn-glb" id="btn-landxml" onclick="exportLandXmlClick()" data-gmtip="out-xml"
+              style="border-color:#ffd54f;color:#ffd54f;">🗺 LANDXML出力</button>
+          </div>
+        <div class="exp-prog" id="exp-prog">
+          <div class="ep-title">⚙ GLB 生成中...</div>
+          <div class="ep-bar-wrap"><div class="ep-bar" id="ep-bar"></div></div>
+          <div class="ep-msg" id="ep-msg"></div>
+        </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 免責ダイアログ -->
+<!-- r039(38回目): 「起動時に最初に出る画面」から「起動ダイアログのリンクで開く別窓」に変更(Arecal A040と同じ)。
+     初期は非表示。表示はJS(_showDisclaimer)がstyle.display='flex'にして行う。
+     同意は起動ダイアログの「了解してはじめる」ボタン。.voldを直接開く場合はこの窓が「了解してはじめる」モードで開く。 -->
+<div id="disclaimer-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;">
+  <div style="background:#1a1a2e;border:1px solid #446;border-radius:12px;padding:28px 32px;max-width:540px;width:90%;max-height:92vh;overflow:auto;box-sizing:border-box;box-shadow:0 8px 40px rgba(0,0,0,.7);">
+    <h3 style="color:#88aaff;margin:0 0 16px;font-size:1em;text-align:center;letter-spacing:.05em;">⚠ ご利用前にお読みください</h3>
+    <!-- Voldia版: 開発中止告知は一旦非表示（マスター指示・28回目フィードバック）。再表示依頼が来たらここへ戻す -->
+    <!-- r042(38回目 v0132): 本文をマスター承認の見直し案に差し替え。旧文言の「当社社員による社内利用を前提/外部への提供、共有、持ち出しは禁止」は、他社の人が使う現場運用と矛盾するため削除し、
+         Arecalと同じ「当社および関連プロジェクトの業務関係者の利用を想定」に変更。現状有姿・MG/出来形/精算での別途検算・図面データの権利・仕様変更や停止の可能性・間接損害の免責を追加。 -->
+    <p style="color:#ccc;font-size:.82em;line-height:1.85;margin:0 0 20px;white-space:pre-line;">本ツールは簡易的な補助ツールとして、現状有姿で提供されます。
+当社および関連プロジェクトの業務関係者の利用を想定していますが、
+不特定多数への公開や無断再配布、複製、改造などは固く禁止します。
+
+本ツールはPDF等の図面を元に計測・体積計算を行うため、元図面の作成方法・
+解像度・スケール等により、結果に誤差が生じる場合があります。
+計算結果および出力データ(LandXML・GLB等)は参考値であり、正確性・完全性・
+特定目的への適合性は保証されません。
+
+出来形管理、数量の精算、構造・安全の検討、重機の制御(MG)等に使用する場合は、
+必ず利用者自身で別途検算・確認を行ってください。
+読み込む図面等のデータの権利・取扱い(守秘義務を含む)は利用者の責任です。
+予告なく仕様の変更や提供の停止を行う場合があり、サポートや修正を約束するものではありません。
+
+最終的な判断および業務への利用は、利用者の完全な自己責任となります。
+本ツールの使用によって生じたいかなる損害(間接的な損害を含む)やトラブルについても、
+制作者および所属組織は一切の責任を負いません。
+
+「了解してはじめる」をクリックした時点で、上記すべての
+免責事項および、完全な自己責任での利用に同意したものとみなします。</p>
+    <button id="disclaimer-ok" style="display:block;width:100%;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.95em;cursor:pointer;font-weight:700;letter-spacing:.05em;">閉じる</button>
+  </div>
+</div>
+
+<!-- r039(38回目): 起動ダイアログ(ページ選択・元図の線・スケール比・角度調整を1画面に統合)。Arecal A040の移植 -->
+<div id="su-overlay">
+  <div id="su-dlg" role="dialog" aria-modal="true">
+    <div class="su-title" id="su-title" style="display:none;">Voldファイルを読み込みます。</div>
+    <div class="su-row" id="su-row-page">
+      <div class="su-lab">ページを選択</div>
+      <select id="su-page"></select>
+    </div>
+    <div class="su-row" id="su-row-vec">
+      <div class="su-lab"><span data-tip="vec">元図の線を読込む</span><button type="button" class="su-ic" data-tip="vec" aria-label="説明">?</button></div>
+      <input type="checkbox" id="su-vec" checked>
+    </div>
+    <div class="su-row" id="su-row-scale">
+      <div class="su-lab"><span data-tip="scale">スケール比を設定</span><span class="su-paper" id="su-paper"></span><button type="button" class="su-ic" data-tip="scale" aria-label="説明">?</button></div>
+      <select id="su-scale">
+        <option value="1/30">1/30</option><option value="1/40">1/40</option><option value="1/50">1/50</option>
+        <option value="1/60">1/60</option><option value="1/80">1/80</option><option value="1/100">1/100</option>
+        <option value="1/200">1/200</option><option value="1/250">1/250</option><option value="1/300">1/300</option>
+        <option value="1/400">1/400</option><option value="1/500">1/500</option><option value="1/1000">1/1000</option>
+        <option value="custom">任意入力</option>
+      </select>
+    </div>
+    <div class="su-custom" id="su-custom-row">1 / <input type="number" id="su-custom" value="100" min="1" step="0.1"></div>
+    <div class="su-row" id="su-row-rot">
+      <div class="su-lab"><span data-tip="rot">図面の角度を調整する</span><button type="button" class="su-ic" data-tip="rot" aria-label="説明">?</button></div>
+      <input type="checkbox" id="su-rot">
+    </div>
+    <div class="su-err" id="su-err"></div>
+    <div class="su-readwrap"><button type="button" id="su-read">⚠ ご利用前にお読みください</button></div>
+    <p class="su-agree">「了解してはじめる」をクリックした時点で、すべての免責事項および完全な自己責任での利用に同意したものとみなします。</p>
+    <div class="su-foot"><button type="button" id="su-cancel">キャンセル</button><button type="button" id="su-start">了解してはじめる</button></div>
+  </div>
+  <div id="su-tip"></div>
+</div>
+
+<!-- v0134(40回目): 「3D生成方法」ダイアログ。Voldia本体の「3Dイメージ」ボタンで開く。
+     作成方法(通常計算/土量計算)・現状地盤GL・捨コン+砕石・余掘り・法面角度を、3D表示の前に1画面で確認・設定する。
+     入力欄のidは旧3D右UIから据え置き(gl-offset-mm / conc-thick / global-overdig / .slope-ang-btn)。
+     「作図開始」は選択中の方式でrunCalc('normal'|'doboku')を呼ぶだけ(計算ロジックは無改造)。
+     捨コン+砕石・余掘り・法面角度は土量計算のときだけ有効(通常計算ではグレーアウト+disabled)。値は保持される。
+     設定値と作成方法は.voldに保存される(作成方法=calcMode)。 -->
+<div id="gm-overlay">
+  <div id="gm-dlg" role="dialog" aria-modal="true">
+    <!-- 47回目: 左のイラスト(断面図)。データは data/voldia_intro_img.js、動きは js/voldia_gm_intro.js -->
+    <aside class="gm-intro" id="gm-intro" aria-hidden="true">
+      <div class="gm-intro-inner">
+        <div class="gm-intro-fig" id="gm-intro-fig">
+          <img id="gm-intro-img" alt="断面図: ①現状地盤GL ②捨てコン+砕石 ③余掘り ④法面角度" draggable="false">
+          <i class="gm-hl" id="gm-hl" aria-hidden="true"></i>
+        </div>
+      </div>
+    </aside>
+    <div class="gm-main"><!-- 既存の行・注記・フッタをここで包む(中身・id・クラスは従来のまま) -->
+    <div class="gm-row">
+      <div class="gm-lab">作成方法</div>
+      <div class="gm-ctl">
+        <button type="button" class="gm-mode-btn" id="gm-mode-normal" data-gmtip="mode-normal">通常計算</button>
+        <button type="button" class="gm-mode-btn on" id="gm-mode-doboku" data-gmtip="mode-doboku">土量計算</button>
+      </div>
+    </div>
+    <div class="gm-row gm-gl" data-gmtip="gl">
+      <div class="gm-lab">現状地盤 GL</div>
+      <div class="gm-ctl">
+        <input type="text" class="doboku-inp" id="gl-offset-mm" value="+0" placeholder="-200" autocomplete="off" inputmode="numeric" onchange="onGlOffsetChange()">
+        <span class="gm-unit">mm</span>
+      </div>
+    </div>
+    <div class="gm-row gm-doboku-only" data-gmtip="conc">
+      <div class="gm-lab">捨てコン＋砕石</div>
+      <div class="gm-ctl">
+        <input type="text" class="doboku-inp" id="conc-thick" value="110" inputmode="decimal" autocomplete="off">
+        <span class="gm-unit">mm</span>
+      </div>
+    </div>
+    <div class="gm-row gm-doboku-only" data-gmtip="overdig">
+      <div class="gm-lab">余掘り</div>
+      <div class="gm-ctl">
+        <input type="text" class="doboku-inp" id="global-overdig" value="300" inputmode="decimal" autocomplete="off">
+        <span class="gm-unit">mm</span>
+      </div>
+    </div>
+    <div class="gm-row gm-doboku-only gm-last" id="slope-angle-row">
+      <div class="gm-lab">法面角度</div>
+      <div class="gm-slope">
+        <button type="button" class="slope-ang-btn" data-ang="73.3">1:0.3</button>
+        <button type="button" class="slope-ang-btn" data-ang="51.34">1:0.8</button>
+        <button type="button" class="slope-ang-btn active" data-ang="45">1:1.0</button>
+        <button type="button" class="slope-ang-btn" data-ang="39.81">1:1.2</button>
+        <button type="button" class="slope-ang-btn" data-ang="33.69">1:1.5</button>
+        <button type="button" class="slope-ang-btn" data-ang="26.57">1:2.0</button>
+        <div class="gm-slope-row2"><!-- v0161(48回目): 建築向けの2つ。説明文は js/voldia_main.js の SLOPE_INFO(キー=data-ang) -->
+          <button type="button" class="slope-ang-btn" data-ang="60">1:0.577</button>
+          <button type="button" class="slope-ang-btn" data-ang="30">1:1.732</button>
+        </div>
+      </div>
+    </div>
+    <div class="gm-note">※体積は層別スライスＵＮＩＯＮ法（ClipperLib）を使用した概算値です</div>
+    <div class="gm-foot">
+      <button type="button" id="gm-back">戻る</button>
+      <button type="button" id="gm-start">作図開始</button>
+    </div>
+    </div><!-- /.gm-main -->
+  </div>
+</div><!-- v0141: #gm-overlay をここで閉じる。従来は#gm-tipの後ろまで開いたままで、#gm-tip・#lx-overlayが「非表示の#gm-overlayの子」になっていた -->
+<!-- v0141(41回目): GLB出力/LANDXML出力の確認ダイアログ。原点測点(複数ある時だけ選べる)と北の向きを見せてから出力する。 -->
+<div id="lx-overlay">
+  <div id="lx-dlg">
+    <div class="lx-title" id="lx-title">LANDXML出力</div>
+    <div class="lx-q" id="lx-q">LANDXML出力を行いますか？</div>
+    <div class="lx-row">
+      <span class="lx-lab">原点測点（0，0）</span>
+      <span class="lx-ctl"><select id="lx-origin"></select><span class="lx-note" id="lx-origin-note"></span></span>
+    </div>
+    <div class="lx-row">
+      <span class="lx-lab">北の向き</span>
+      <span class="lx-ctl">
+        <svg width="54" height="54" viewBox="-30 -30 60 60" style="overflow:visible" aria-hidden="true">
+          <g id="lx-north-rotor"><text y="-18.5" text-anchor="middle" font-size="12" font-weight="900" fill="#d6e6ff" font-family="sans-serif">N</text><circle r="16" fill="#1b2430" stroke="#4488cc" stroke-width="1.5"/><path d="M0,-13.5 L8,11 L0,7 L-8,11 Z" fill="#ff5252"/></g>
+        </svg>
+        <span id="lx-north-val"></span>
+      </span>
+    </div>
+    <div class="lx-note" style="margin:2px 0 4px;"><span class="lx-ph">画面上=0°・時計回りが正。</span><span id="lx-north-hint"><br><span class="lx-ph">北の向きは2D画面右上の🧭で変更できます。</span></span></div>
+    <div class="lx-virtual" id="lx-virtual-note" style="display:none;"><span class="lx-ph">測点が設置されていないので、</span><span class="lx-ph">原点（0,0）はオブジェクトの左上角に</span><span class="lx-ph">仮設定します。</span></div>
+    <div class="lx-warn" id="lx-warn"><span class="lx-ph">MG重機が確実に動作するデータを出力する保証はありません！</span><br><span class="lx-ph">オブジェクト数が多かったり、</span><span class="lx-ph">面形状が破綻している場合は</span><br><span class="lx-ph">MG重機側がデータを処理できなかったり、</span><span class="lx-ph">正常な形状を認識できない場合もあります。</span><br><span class="lx-ph">作業前に重機メーカーなどに</span><span class="lx-ph">出力したXMLデータを渡して、</span><span class="lx-ph">確認してください</span></div>
+    <div class="lx-foot"><button id="lx-no">いいえ</button><button id="lx-yes">はい</button></div>
+  </div>
+</div>
+<!-- v0144(41回目): 3Dスクショの背景色選択。ボタンを押した時点で確定(その色で保存)。枠の外・Escで中止。 -->
+<div id="ss-overlay">
+  <div id="ss-dlg">
+    <div class="ss-title">📷 スクリーンショット</div>
+    <div class="ss-q">背景色を選んでください（押すと保存します）</div>
+    <div class="ss-btns">
+      <button type="button" data-bg="black"><span class="ss-sw" style="background:#06080c"></span>黒</button>
+      <button type="button" data-bg="white"><span class="ss-sw" style="background:#fff"></span>白</button>
+      <button type="button" data-bg="transparent"><span class="ss-sw ss-sw-chk"></span>透明</button>
+    </div>
+    <div class="ss-note">透明は、背景と方眼を除いたPNGになります。</div>
+  </div>
+</div>
+<div id="gm-tip"></div>
+
+<!-- ライセンス表記(Credits)モーダル -->
+<!-- r023(30回目セッション、マスター指示・著作権クリアランス対応):
+     本アプリが内蔵/CDN読込している主要ライブラリの著作権表記・ライセンス種別一覧。
+     ★新しいライブラリ(CDN追加・lib/への同梱問わず)を追加した時は、必ずこのリストにも
+     一項目追加すること。追加コード側だけ直してここを更新し忘れると、この表記自体が
+     嘘になってしまう(次回引継ぎプロンプトにも同様の注意書きを入れてあるので、
+     引継ぎを読んだ次回セッションのClaudeもこの点を確認すること)。 -->
+<!-- r042(38回目 v0132): Creditsを見直し。実際に読み込んでいる版のnpm公式パッケージ(LICENSE・ヘッダ)で裏を取って更新。
+     追加: manifold-3d(Apache-2.0、voldia3d.jsがjsDelivrから動的に読込。内部にClipper2=Boost 1.0を含む) / OrbitControls(配置モード。three.js付属・MIT)
+     更新: three.js r128の著作権年(2010-2021) / jsPDF・JSZipの著作権者 / xlsx-js-styleの説明(SheetJS Community Edition + セル書式)
+     v0133: JSBN(Clipper内蔵)の説明を「BSD系」から実際の許諾(MIT系+全文保持条件、npm jsbnのLICENSEで確認)に修正。lib/clipper.jsの先頭にBoost全文とJSBN公式表記を追加(本体コード無改変)。
+     ※xlsx-js-styleの著作権者名・年は、パッケージ内にもGitHubのLICENSEにも記載が無く確認できなかったため書いていない -->
+<!-- v0165(49回目): js/voldia3d.js r137。5mm超で整えなかった図形の辺も、格子の位置の評価に入れる(CrackTorture_v02の下側に残った線2か所の修正)。アプリ内左上のバージョン表示を v0164→v0165 に更新。 -->
+<!-- v0164(49回目): js/voldia3d.js r136。入口の整えの主方向を、斜めの梁に引っ張られない求め方に変更(CrackTorture_v02で悪化した件の修正)。アプリ内左上のバージョン表示を v0163→v0164 に更新。 -->
+<!-- v0172(51回目): 全ボタンのホバーを点検して共通化(マスター要望: 3Dイメージの各種書き出しダイアログのボタンなど)。本物のChromiumでホバーを強制して測ると、70個がホバーで変わらなかった(原因=ID指定・インラインの背景色が button:hover に勝っていた)。共通のホバー(filter)を足し、書き出しダイアログの「いいえ」「はい」に専用のホバーも付けた。さらに50回目の実機確認の指摘: ①ノースアローが下向きだと角度の数字がNと重なる→下半分を向く間は数字を上側へ(B案) ②測点が0個になったらノースアローの向き・原点測点を初期化(js/voldia_main.js) ③出力ダイアログ: 測点が無い時は「北の向きは2D画面右上の🧭で変更できます」を出さない・Nを矢印の先(円の外)へ(2Dのノースアローと同じ並び)。アプリ内左上のバージョン表示を v0171→v0172 に更新。 -->
+<!-- v0171(50回目): ノースアローの位置を角度の文字1行ぶん(約12px)下げた(top:2px→14px)。アプリ内左上のバージョン表示を v0170→v0171 に更新。前版=Voldia_v0170.html -->
+<!-- v0170(50回目): ノースアロー(#north-arrow-wrap)を右UIの「スケール」欄の中へ移し、右UIのスクロールと一緒に動くようにした(position:fixed→absolute)。アプリ内左上のバージョン表示を v0169→v0170 に更新。前版=Voldia_v0169.html -->
+<!-- v0169(50回目): 出力ダイアログ(GLB/3D_DXF/LANDXML共通)の北の向きの説明を、句点の位置で改行(中途半端な位置で折り返されていた)。アプリ内左上のバージョン表示を v0168→v0169 に更新。前版=Voldia_v0168.html -->
+<!-- v0168(50回目): ①出力ダイアログ(#lx-overlay・GLB/3D_DXF/LANDXML共通)の文字はみ出し対策(欄の折り返し可・確認文と警告文は句の切れ目で折り返す・縦が低い画面では詰める。js/voldia_main.js 仮原点の欄は「仮原点」だけに短縮) ②3Dイメージのホイール押しっぱなし後の十字ポインタ(js/voldia3d.js r138)。配置モードのiframe参照=voldia_placement_v0096.html。アプリ内左上のバージョン表示を v0167→v0168 に更新。前版=Voldia_v0167.html -->
+<!-- v0167(50回目): 起動画面の吹き出しを、Arecal A096の雲型SVG吹き出し「初めての人は／押してね？」に差し替え(マスター指示書)。上下浮遊+明滅・クリック素通し・ボタンを押したらその起動中は消える。アプリ内左上のバージョン表示を v0166→v0167 に更新。前版=Voldia_v0166.html -->
+<!-- v0166(50回目): 修正提案書v002の実装。①2D 「⚡３Dイメージ」ボタンのホバー(#calc-btn:hover=明るく+わずかに光る) ②1A 出力ダイアログ(#lx-overlay)に、測点0個の時だけ仮原点の確認文(#lx-virtual-note)を表示。js/voldia_main.js・js/voldia_landlogic.js r018 ③1B LANDXML出力の開発中ロック(T+H)。アプリ内左上のバージョン表示を v0165→v0166 に更新。前版=backup/Voldia_v0165.html -->
+<!-- v0163(49回目): js/voldia3d.js r135。r134の実機確認で残った『底面の裏返った細い三角形』(赤丸の線)を、格子の位相の候補を試して作り直す処理で解消。アプリ内左上のバージョン表示を v0162→v0163 に更新。 -->
+<!-- v0162(49回目): 床クラック問題の根本対策P0=js/voldia3d.js r134。①3D化の共通の入口(getAllFrustums)で、ほぼ同じ直線の辺を5mm以内でそろえる(_alignFrustumsMm。頂点の移動は最大5mm・超える図形は元のまま。体積・2Dの図形は世界座標のまま) ②3Dの生成は主方向の回転座標系で行い結果を戻す(buildManifoldUnionGeomのラッパー。山留・紫壁・グレーも対応)。切り戻し=window._alignEdges=false。②アプリ内左上のバージョン表示(#app-version-label)を v0161→v0162 に更新。 -->
+<!-- v0161(48回目): ①アプリ内左上のバージョン表示(#app-version-label)を v0152→v0161 に更新(v0153〜v0160で更新漏れしていた。ファイル名のバージョンを上げる時は必ず同じ値にする) ②2D左UIの一覧で、チェックボックスと色の丸の位置が行ごとにずれていたのを修正(.sh-header のCSS。原因=space-betweenで余白を均等配分していた) ③3D生成方法ダイアログの法面角度に建築向けの2ボタン(1:0.577=60°・1:1.732=30°)を既存6個の下の段に追加(js/voldia_main.js の SLOPE_INFO にホバー説明)。配置モード(voldia_placement_v0093.html)は変更なし・js/voldia_placement.js r147=ホイールのズーム限界トースト。 -->
+<!-- v0160(48回目): 問題7=3Dイメージの三角形の間引きを「許容5mm」つきに(js/voldia3d.js r130: _guardedDecimateMesh)。形が元から最大5mmまで動く代わりに三角形が減る(R1〜R8で約−21%・乱数60セットで約−10%)。Land Logic(LandXML)・欠陥スキャンは従来どおり誤差0。コンソールで window._planarDecimateTolMm=0 にすると誤差0(r129)に戻る(次の3D生成から有効)。 -->
+<!-- v0159(47回目): ①3D生成方法ダイアログに断面イラスト(左)を追加・設定項目に①〜④の番号・入力中は該当部分が光る・通常計算ではイラストが左へ収納(css/voldia_gm_intro.css・data/voldia_intro_img.js・js/voldia_gm_intro.js) ②右クリックで戻る/キャンセル(3D生成方法ダイアログ・測点設置) ③データ出力で掘削深さ10m超の警告 ④robots noindex ⑤voldia3d.js r129=形状クリーニング(許容差5mm)・合体の全体チェック・同一平面の三角形を形を変えずに間引き ⑥同一形状(同じ座標・同じ色)は作図時に除外・法面ボタンの点灯修正。配置モードは voldia_placement_v0093.html。 -->
+<!-- v0158(47回目): ①形状破綻の対策 voldia3d.js r128=3D化の入口と合体した輪郭に「形状のクリーニング」(許容差5mm)・合体した全体の3Dを合体なしと比べて悪ければ合体を取りやめ ②同一形状(同じ座標・同じ色)は作図の時点で除外(M3) ③法面ボタンの点灯判定を小数の角度でも効くよう修正(P1)。配置モードは voldia_placement_v0092.html(HTML書き出しに線と作業半径を追加)。 -->
+<!-- v0157(47回目): 名前のダブルクリック編集が効かなかった不具合を修正(1回目のクリックで一覧が作り直され、dblclickの届き先が消えていた→クリックの2回目を検出して編集)。配置モードは voldia_placement_v0091.html(足場編集のトースト最前面・初期スクロール・HTML書き出しの修正)。 -->
+<!-- v0156(47回目): ①左UIの「並び」ソートを廃止(A3) ②オブジェクトをつまみ(⠿)のドラッグで並び替え(A1) ③名前のダブルクリック編集に重複チェック(A2) ④3D結果画面: グレーアウト時の説明をボタン別の2行に(B1)・3D_DXF出力ボタンをデータ出力の下へ(B2) ⑤voldia3d.js r127: 偽の床・逆勾配の修正(合体の安全チェック強化)。 -->
+<!-- v0155(47回目): ①ホバーの塗りを「元+0.27」に変更(0.45では元の.38と差が小さく濃くならなかった=実機指摘)。②配置モードのHTMLを v0089 に更新(「HTML書き出し」ボタン追加)。 -->
+<!-- v0154(47回目): ①2D平面の選択表示をAreCal方式に変更(自分の色のまま、選択は太い輪郭を重ねる)。②ホバー(塗りが濃く・輪郭が0.5秒周期で点滅)。③複数選択中の色変更を選択中の全図形に適用。ロジックは voldia_main.js(SHAPE_COLORSのselなど)。HTMLの構造は変更なし(v0153=3D_DXF出力ボタン)。 -->
+<!-- v0145(41回目): ①測点ダイアログのタイトル(#sv-title)出し分け・解説文・設置ボタンの初期グレーアウト ②左UIのオブジェクト一覧の上に解説(#list-hint)。ロジックは voldia_main.js r053。 -->
+<!-- v0144(41回目): 3Dスクショボタンで背景色(黒/白/透明)の選択ダイアログ(#ss-overlay)を出すようにした(voldia3d.js r116)。 -->
+<!-- v0143(41回目): ヘルプ吹き出し(#gm-tip)に white-space:pre-line を追加(ヘルプ文中の\nで改行できるように。文言の改行位置はvoldia_main.js r052)。 -->
+<!-- v0142(41回目): 出力ダイアログ(#lx-overlay)とヘルプ吹き出し(#gm-tip)が3D結果画面で見えなかった不具合を修正。
+     原因: この2つが、非表示の#gm-overlay(3D生成方法ダイアログ)の子要素になっていた(#gm-overlayの閉じタグが#gm-tipの後ろにあった)。
+     非表示の親の子は表示されず、さらに親の重なり順(z-index:8600)が3D画面(20000)より下だった。#gm-overlayを先に閉じ、2つをbody直下の兄弟にした。 -->
+<!-- v0141(41回目・修正): #lx-overlay(出力ダイアログ)と#gm-tip(ヘルプ吹き出し)が、非表示の#gm-overlay(3D生成方法ダイアログ)の子になっていたため、3D結果画面では表示されなかった。#gm-overlayを先に閉じてbody直下へ出した。 -->
+<!-- v0141(41回目): 3D結果画面に「📦 GLB出力」「🗺 LANDXML出力」ボタンと出力ダイアログ(#lx-overlay)を追加(旧・非表示の「GLB 保存」は撤去)。3Dの出力ボタン5個にマウスオーバーのヘルプ文。出力ファイル名の日付を yymmdd_hhmm に統一。 -->
+<!-- v0140(41回目): 3Dイメージ画面の右上、「✕ 閉じる」の左に「◀ 戻る」(#btn-calc-back-gm)を追加。押すと3D画面を閉じて3D生成方法ダイアログ(作成方法・GL等の設定)へ戻る(backToGenDialog=voldia_main.js r050)。「✕ 閉じる」は従来どおり。 -->
+<!-- v0139(40回目): 3D生成方法ダイアログの「捨てコン+砕石」「余掘り」を、負の値不可(「負の値は使用できません」をトースト表示して0に戻す)・桁区切り表示に変更。入力欄はtype=number→text(桁区切りのため)。値の読み取りはparseInputNum()経由(voldia_main.js r048)。 -->
+<!-- v0138(40回目): Credits(ライセンス表記)の追記(実ファイルの調査結果を反映)。内包物を明記: jsPDF→fflate(MIT)、JSZip→pako(MIT AND Zlib)・lie・immediate・setimmediate・readable-stream(MIT)、manifold.wasm→Emscripten・musl(MIT)・libc++/libc++abi(Apache 2.0 with LLVM Exceptions)。
+     xlsx-js-styleのバンドルにfflateは含まれていない(package.jsonの依存宣言のみ)ため書いていない。JSZipの依存は set-immediate-shim ではなく setimmediate(Barnesandnoble.com, llc, Donavon West, Domenic Denicola)。
+     全文欄にZlib License・LLVM Exceptionsの項を追加。three.jsの著作権者表記は配布ファイルのヘッダ(Three.js Authors)、PDF.jsは Copyright 2021 Mozilla Foundation に合わせた。 -->
+<!-- v0137(40回目): Credits(ライセンス表記)の追記。manifold-3d=Copyright The Manifold Authors(各ソースヘッダで確認)、xlsx-js-style=SheetJS LLC(SheetJS CE)+fork作者gitbrent(Brent Ely)を明記。
+     ※manifold-3dはv3.0.0でGLM(linalgに置換)・外部QuickHull(自前実装に置換)・Thrustを廃止し、TBBはオプション(既定OFF。emscripten PAR=ONは非推奨)。本アプリのv3.5.1には該当しないため、これらは記載していない(書くと事実と食い違うため)。
+     実際に配布されるwasmの中身そのものは未検査。manifold-3dを更新する時は、READMEのDependenciesとリリースノートを見直すこと。 -->
+<!-- v0136(40回目): ①Voldファイル読込時の表示を、起動ダイアログと同じ軽いダイアログ(作成時と同じ#su-overlayをVoldモードで再利用)に変更。長い免責の全文表示をやめ、「ご利用前にお読みください」リンク+同意文+キャンセル/了解。「元図の線を読込む」チェック(既定ON)は元図の線が保存されているVoldのみ表示
+     ②起動画面の北マーク(ノースアロー)を非表示(測点が1つ以上で表示) ③Credits(ライセンス表記)に各ライセンスの全文を追加(MIT/ISC/Boost/JSBN/Apache2.0。THIRD_PARTY_LICENSES.txtにも収録) ④起動ダイアログのボタン順を「キャンセル→了解してはじめる」に変更。 -->
+<!-- v0135(40回目): ①3D結果画面の「3D配置モード」「スクショ」「データ出力」を縦3段に変更 ②起動ダイアログの方眼紙モード専用「戻る」を削除し「キャンセル」に統一(PDF/方眼紙とも同じ位置・同じ動作) ③通常計算で法面角度行がグレーアウトされない不具合をvoldia_main.js r045で修正。計算ロジックは無改造。 -->
+<!-- v0134(40回目): 「3D生成方法」ダイアログ(#gm-overlay)を新設。3Dイメージの通常計算/土量計算ボタンと設定欄(現状地盤GL・捨コン+砕石・余掘り・法面角度)をここへ集約。
+     3D結果画面の右UIを整理(メッシュ/影/色の3トグル、下段にスクショ・3D配置モード・データ出力)。起動ダイアログに「キャンセル」を追加。余掘りの既定値を200→300mmに変更。計算ロジックは無改造。 -->
+<div id="license-modal" class="modal">
+  <div class="modal-c">
+    <h3 style="text-align:center;">使用ライブラリ ライセンス表記 (Credits)</h3>
+    <p style="color:#aaa;font-size:.78em;line-height:1.7;margin-bottom:14px;">
+      本アプリは以下のオープンソースライブラリを利用しています。各ライブラリの著作権は
+      それぞれの著作権者に帰属します。
+    </p>
+    <div style="font-size:.78em;line-height:1.75;color:#ccc;">
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">earcut</strong>（同梱・lib/earcut.js）<br>
+        Copyright (c) 2016, Mapbox — ISC License<br>
+        <span style="color:#889;">https://github.com/mapbox/earcut</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">Javascript Clipper</strong>（同梱・lib/clipper.js, v6.4.2.2）<br>
+        Copyright Angus Johnson 2010-2017 / Timo Kähkönen 2012-2017 — Boost Software License 1.0<br>
+        JSBN (BigInteger) を含む — Copyright (c) 2003-2005 Tom Wu(MIT系の許諾。再配布時は著作権表示と免責文を完全な形で残す条件つき)<br>
+        <span style="color:#889;">http://www.angusj.com / http://www.boost.org/LICENSE_1_0.txt / http://www-cs-students.stanford.edu/~tjw/jsbn/</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">three.js</strong>（CDN読込、r128）+ <strong style="color:#88aaff;">GLTFLoader</strong> + <strong style="color:#88aaff;">OrbitControls</strong>（配置モード）<br>
+        Copyright 2010-2021 Three.js Authors — MIT License<br>
+        <span style="color:#889;">https://github.com/mrdoob/three.js</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">PDF.js</strong>（CDN読込、v2.12.313）<br>
+        Copyright 2021 Mozilla Foundation — Apache License 2.0<br>
+        <span style="color:#889;">https://github.com/mozilla/pdf.js</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">manifold-3d</strong>（CDN読込、v3.5.1）<br>
+        Copyright The Manifold Authors — Apache License 2.0<br>
+        内部に Clipper2 (Angus Johnson) を含む — Boost Software License 1.0<br>
+        凸包(quickhull)はAntti Kuukka氏のパブリックドメイン作品に由来、ベクトル演算(linalg)はSterling Orsten氏のlinalg.h(パブリックドメイン)に基づく<br>
+        WASMバイナリはEmscriptenでビルドされ、ランタイムとして musl libc (MIT License)、LLVM libc++/libc++abi (Apache 2.0 with LLVM Exceptions)、Emscripten ランタイム (MIT License) を含みます。<br>
+        <span style="color:#889;">https://github.com/elalish/manifold / https://github.com/AngusJohnson/Clipper2</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">xlsx-js-style</strong>（CDN読込、v1.2.0。SheetJS Community Editionに基本的なセル書式を追加したもの）<br>
+        Apache License 2.0 — SheetJS CE: Copyright (C) 2012-present SheetJS LLC<br>
+        fork作者: gitbrent (Brent Ely)。sheetjs-style (ShanaMaid)・sheetjs-style-v2 (Raul Gonzalez) のコードも取り込み<br>
+        <span style="color:#889;">https://github.com/gitbrent/xlsx-js-style</span>
+      </div>
+      <div style="margin-bottom:14px;">
+        <strong style="color:#88aaff;">jsPDF</strong>（CDN読込、v2.5.1）<br>
+        Copyright (c) 2010-2021 James Hall, (c) 2015-2021 yWorks GmbH ほか(全員の著作権者は下の全文欄) — MIT License<br>
+        内部に fflate (Copyright (c) 2020 Arjun Barrett — MIT License) を含みます。<br>
+        <span style="color:#889;">https://github.com/parallax/jsPDF</span>
+      </div>
+      <div style="margin-bottom:4px;">
+        <strong style="color:#88aaff;">JSZip</strong>（CDN読込、v3.10.1）<br>
+        Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso<br>
+        MIT License（デュアルライセンスのうちMIT側を適用）<br>
+        内部に pako (Copyright (C) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn — MIT AND Zlib)、lie (MIT)、immediate・setimmediate (Barnesandnoble.com, llc, Donavon West, Domenic Denicola ほか — MIT)、readable-stream (Node.js contributors — MIT) を含みます。<br>
+        <span style="color:#889;">https://github.com/Stuk/jszip</span>
+      </div>
+    </div>
+    <h4 style="margin:18px 0 6px;font-size:.85em;color:#88aaff;">ライセンス全文 (Full license texts)</h4>
+    <p style="color:#aaa;font-size:.74em;line-height:1.7;margin:0 0 8px;">
+      上の各ライブラリが従う許諾条件の全文です(MIT・BSL・Apache等は、著作権表示と許諾文の掲示が条件のため掲載しています)。項目をクリックすると開きます。同じ内容を <b>THIRD_PARTY_LICENSES.txt</b> にも収録しています。
+    </p>
+    <div style="font-size:.74em;">
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">MIT License <span style="color:#889;font-weight:400;">— three.js / GLTFLoader / OrbitControls / jsPDF(+fflate) / JSZip(+pako, lie, immediate, setimmediate, readable-stream) / Emscripten / musl</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">three.js / GLTFLoader / OrbitControls (r128):
+  Copyright 2010-2021 Three.js Authors
+jsPDF (v2.5.1):
+  Copyright (c) 2010-2021 James Hall; 2015-2021 yWorks GmbH; 2015-2021 Lukas Holländer; 2016-2018 Aras Abbasi;
+  2010 Aaron Spike; 2012 Willow Systems Corporation; 2012 Pablo Hess; 2012 Florian Jenett; 2013 Warren Weckesser;
+  2013 Youssef Beddad; 2013 Lee Driscoll; 2013 Stefan Slonevskiy; 2013 Jeremy Morel; 2013 Christoph Hartmann;
+  2014 Juan Pablo Gaviria; 2014 James Makes; 2014 Diego Casorran; 2014 Steven Spungin; 2014 Kenneth Glassey
+  内包: fflate — Copyright (c) 2020 Arjun Barrett
+JSZip (v3.10.1。MIT or GPLv3 のうち MIT を選択):
+  Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso
+  内包: pako — Copyright (C) 2014-2017 Vitaly Puzrin and Andrei Tuputcyn (MIT AND Zlib。Zlib部分は下の Zlib License の項)
+        lie — MIT (配布物に著作権者の表記なし。リポジトリ: calvinmetcalf/lie)
+        immediate — Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, Domenic Denicola, Brian Cavalier
+        setimmediate — Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola
+        readable-stream — Copyright Node.js contributors
+manifold-3d の wasm に Emscripten 経由で含まれるもの:
+  Emscripten — Copyright (c) 2010-2014 Emscripten authors, see AUTHORS file (MIT と UIUC/NCSA のデュアル。MIT を選択)
+  musl libc — Copyright © 2005-2020 Rich Felker, et al.
+    (muslの一部のファイルには別の許諾(パブリックドメイン・MIT風等)がある。詳細は musl の COPYRIGHT ファイル参照)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">ISC License <span style="color:#889;font-weight:400;">— earcut</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">earcut (lib/earcut.js):
+  Copyright (c) 2016, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot; AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Boost Software License 1.0 <span style="color:#889;font-weight:400;">— Javascript Clipper / Clipper2(manifold-3d内)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">Javascript Clipper (lib/clipper.js, v6.4.2.2):
+  Copyright Angus Johnson 2010-2017 (Clipper)
+  Copyright Timo Kähkönen 2012-2017 (JavaScript port)
+Clipper2 (manifold-3d に内蔵):
+  Angus Johnson
+
+Boost Software License - Version 1.0 - August 17th, 2003
+
+Permission is hereby granted, free of charge, to any person or organization obtaining a copy of the software and accompanying documentation covered by this license (the &quot;Software&quot;) to use, reproduce, display, distribute, execute, and transmit the Software, and to prepare derivative works of the Software, and to permit third-parties to whom the Software is furnished to do so, all subject to the following:
+
+The copyright notices in the Software and this entire statement, including the above license grant, this restriction and the following disclaimer, must be included in all copies of the Software, in whole or in part, and all derivative works of the Software, unless such copies or derivative works are solely in the form of machine-executable object code generated by a source language processor.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">JSBN License (Tom Wu) <span style="color:#889;font-weight:400;">— JSBN(Javascript Clipperに内蔵)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">JSBN (BigInteger。Javascript Clipperに内蔵):
+  Copyright (c) 2003-2005 Tom Wu
+
+Copyright (c) 2003-2005 Tom Wu
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS-IS&quot; AND WITHOUT WARRANTY OF ANY KIND, EXPRESS, IMPLIED OR OTHERWISE, INCLUDING WITHOUT LIMITATION, ANY WARRANTY OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+
+IN NO EVENT SHALL TOM WU BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT OR CONSEQUENTIAL DAMAGES OF ANY KIND, OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER OR NOT ADVISED OF THE POSSIBILITY OF DAMAGE, AND ON ANY THEORY OF LIABILITY, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+In addition, the following condition applies:
+
+All redistributions must retain an intact copy of this copyright notice and disclaimer.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Zlib License <span style="color:#889;font-weight:400;">— pako(JSZipに内包)のzlib由来部分</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">pako (JSZip に内包。v1.0.11 のソースヘッダの表記):
+  (C) 1995-2013 Jean-loup Gailly and Mark Adler
+  (C) 2014-2017 Vitaly Puzrin and Andrey Tupitsin
+
+This software is provided &#x27;as-is&#x27;, without any express or implied warranty. In no event will the authors be held liable for any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim that you wrote the original software. If you use this software in a product, an acknowledgment in the product documentation would be appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Apache License 2.0 <span style="color:#889;font-weight:400;">— PDF.js / manifold-3d / xlsx-js-style(SheetJS CE)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">PDF.js (v2.12.313):
+  Copyright 2021 Mozilla Foundation (配布ファイル pdf.min.js / pdf.worker.min.js のヘッダの表記)
+manifold-3d (v3.5.1):
+  Copyright The Manifold Authors (各ソースのヘッダに「Copyright &lt;年&gt; The Manifold Authors」と記載。ライブラリの開始者は Emmett Lalish)
+  内蔵: Clipper2 — Copyright Angus Johnson (Boost Software License 1.0。上のBoostの項を参照)
+  派生元の明記: 凸包(quickhull)の実装は Antti Kuukka (akuukka/quickhull) のパブリックドメイン作品に由来、
+  ベクトル演算(linalg)は Sterling Orsten の linalg.h (パブリックドメイン) に基づく。
+  いずれもmanifoldのソースではThe Manifold AuthorsのApache 2.0のファイルとして配布されている
+  wasm は Emscripten でビルドされ、libc++/libc++abi (LLVM Project) と musl libc、Emscripten ランタイムを含む(MITの項、LLVM Exceptions付きApacheの項を参照)
+xlsx-js-style (v1.2.0):
+  SheetJS Community Edition — Copyright (C) 2012-present SheetJS LLC
+  (SheetJS CE 本体に含まれる SSF・CFB・CRC-32・ADLER-32 などもSheetJS作でApache 2.0。著作権者は同じ)
+  xlsx-js-style は gitbrent (Brent Ely) によるSheetJS CEのfork。sheetjs-style (ShanaMaid) と
+  sheetjs-style-v2 (Raul Gonzalez) のコードも取り込んでいる(いずれもApache 2.0。同プロジェクトのREADMEに記載)
+  ※ fflate は package.json の依存に挙がるが、配布される xlsx.bundle.js には含まれていない(fflate固有の文字列がない)
+
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+&quot;License&quot; shall mean the terms and conditions for use, reproduction, and distribution as defined by Sections 1 through 9 of this document.
+
+&quot;Licensor&quot; shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
+
+&quot;Legal Entity&quot; shall mean the union of the acting entity and all other entities that control, are controlled by, or are under common control with that entity. For the purposes of this definition, &quot;control&quot; means (i) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (ii) ownership of fifty percent (50%) or more of the outstanding shares, or (iii) beneficial ownership of such entity.
+
+&quot;You&quot; (or &quot;Your&quot;) shall mean an individual or Legal Entity exercising permissions granted by this License.
+
+&quot;Source&quot; form shall mean the preferred form for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+&quot;Object&quot; form shall mean any form resulting from mechanical transformation or translation of a Source form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+&quot;Work&quot; shall mean the work of authorship, whether in Source or Object form, made available under the License, as indicated by a copyright notice that is included in or attached to the work (an example is provided in the Appendix below).
+
+&quot;Derivative Works&quot; shall mean any work, whether in Source or Object form, that is based on (or derived from) the Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship. For the purposes of this License, Derivative Works shall not include works that remain separable from, or merely link (or bind by name) to the interfaces of, the Work and Derivative Works thereof.
+
+&quot;Contribution&quot; shall mean any work of authorship, including the original version of the Work and any modifications or additions to that Work or Derivative Works thereof, that is intentionally submitted to Licensor for inclusion in the Work by the copyright owner or by an individual or Legal Entity authorized to submit on behalf of the copyright owner. For the purposes of this definition, &quot;submitted&quot; means any form of electronic, verbal, or written communication sent to the Licensor or its representatives, including but not limited to communication on electronic mailing lists, source code control systems, and issue tracking systems that are managed by, or on behalf of, the Licensor for the purpose of discussing and improving the Work, but excluding communication that is conspicuously marked or otherwise designated in writing by the copyright owner as &quot;Not a Contribution.&quot;
+
+&quot;Contributor&quot; shall mean Licensor and any individual or Legal Entity on behalf of whom a Contribution has been received by Licensor and subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of this License, each Contributor hereby grants to You a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable (except as stated in this section) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by such Contributor that are necessarily infringed by their Contribution(s) alone or by combination of their Contribution(s) with the Work to which such Contribution(s) was submitted. If You institute patent litigation against any entity (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to You under this License for that Work shall terminate as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the Work or Derivative Works thereof in any medium, with or without modifications, and in Source or Object form, provided that You meet the following conditions:
+
+(a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
+
+(b) You must cause any modified files to carry prominent notices stating that You changed the files; and
+
+(c) You must retain, in the Source form of any Derivative Works that You distribute, all copyright, patent, trademark, and attribution notices from the Source form of the Work, excluding those notices that do not pertain to any part of the Derivative Works; and
+
+(d) If the Work includes a &quot;NOTICE&quot; text file as part of its distribution, then any Derivative Works that You distribute must include a readable copy of the attribution notices contained within such NOTICE file, excluding those notices that do not pertain to any part of the Derivative Works, in at least one of the following places: within a NOTICE text file distributed as part of the Derivative Works; within the Source form or documentation, if provided along with the Derivative Works; or, within a display generated by the Derivative Works, if and wherever such third-party notices normally appear. The contents of the NOTICE file are for informational purposes only and do not modify the License. You may add Your own attribution notices within Derivative Works that You distribute, alongside or as an addendum to the NOTICE text from the Work, provided that such additional attribution notices cannot be construed as modifying the License.
+
+You may add Your own copyright statement to Your modifications and may provide additional or different license terms and conditions for use, reproduction, or distribution of Your modifications, or for any such Derivative Works as a whole, provided Your use, reproduction, and distribution of the Work otherwise complies with the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise, any Contribution intentionally submitted for inclusion in the Work by You to the Licensor shall be under the terms and conditions of this License, without any additional terms or conditions. Notwithstanding the above, nothing herein shall supersede or modify the terms of any separate license agreement you may have executed with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade names, trademarks, service marks, or product names of the Licensor, except as required for reasonable and customary use in describing the origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or agreed to in writing, Licensor provides the Work (and each Contributor provides its Contributions) on an &quot;AS IS&quot; BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for determining the appropriateness of using or redistributing the Work and assume any risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory, whether in tort (including negligence), contract, or otherwise, unless required by applicable law (such as deliberate and grossly negligent acts) or agreed to in writing, shall any Contributor be liable to You for damages, including any direct, indirect, special, incidental, or consequential damages of any character arising as a result of this License or out of the use or inability to use the Work (including but not limited to damages for loss of goodwill, work stoppage, computer failure or malfunction, or any and all other commercial damages or losses), even if such Contributor has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing the Work or Derivative Works thereof, You may choose to offer, and charge a fee for, acceptance of support, warranty, indemnity, or other liability obligations and/or rights consistent with this License. However, in accepting such obligations, You may act only on Your own behalf and on Your sole responsibility, not on behalf of any other Contributor, and only if You agree to indemnify, defend, and hold each Contributor harmless for any liability incurred by, or claims asserted against, such Contributor by reason of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS</pre>
+      </details>
+      <details style="margin:0 0 8px;border:1px solid #3a3a3a;border-radius:6px;padding:6px 10px;background:#1c1c1c;">
+        <summary style="cursor:pointer;color:#88aaff;font-weight:700;">Apache License 2.0 with LLVM Exceptions (追加の例外条項) <span style="color:#889;font-weight:400;">— libc++ / libc++abi(manifold.wasmに内包)</span></summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:.92em;line-height:1.6;color:#bbb;margin:8px 0 4px;">libc++ / libc++abi — The LLVM Project (各ファイルのヘッダ参照)
+  Emscripten が manifold.wasm に静的リンクしている(wasm内に libcxxabi のパス文字列を確認)。
+  The LLVM Project is under the Apache License v2.0 with LLVM Exceptions。Apache 2.0 の全文は上の項のとおり。
+  追加される例外条項は以下。
+
+---- LLVM Exceptions to the Apache 2.0 License ----
+
+As an exception, if, as a result of your compiling your source code, portions of this Software are embedded into an Object form of such source code, you may redistribute such embedded portions in such Object form without complying with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+
+In addition, if you combine or link compiled forms of this Software with software that is licensed under the GPLv2 (&quot;Combined Software&quot;) and if a court of competent jurisdiction determines that the patent provision (Section 3), the indemnity provision (Section 9) or other Section of the License conflicts with the conditions of the GPLv2, you may retroactively and prospectively choose to deem waived or otherwise exclude such Section(s) of the License, but only in their entirety and only with respect to the Combined Software.</pre>
+      </details>
+    </div>
+    <button id="license-modal-close" style="display:block;width:100%;margin-top:18px;padding:10px;border-radius:6px;background:#2196f3;border:none;color:#fff;font-size:.9em;cursor:pointer;font-weight:700;">閉じる</button>
+  </div>
+</div>
+
+<!-- r041: 回転確認モーダル(#rot-modal)を削除。角度調整は起動ダイアログのチェックで決まる -->
+
+<!-- クロスヘアオーバーレイ -->
+<div id="rot-overlay" style="position:fixed;inset:0;z-index:9500;display:none;pointer-events:none;">
+  <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(255,60,60,.7);transform:translateY(-50%);"></div>
+  <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,60,60,.7);transform:translateX(-50%);"></div>
+</div>
+
+<!-- 回転コントロール -->
+<!-- 回転コントロール：左の表示を消し、入力欄を強化 -->
+<div id="rot-ctrl" style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9600;display:none;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;background:rgba(20,20,20,.92);border:1px solid #2196f3;border-radius:10px;padding:14px 20px;box-shadow:0 4px 20px rgba(0,0,0,.7);backdrop-filter:blur(4px);">
+  <button class="rot-step-btn" data-step="-1">−1°</button>
+  <button class="rot-step-btn" data-step="-0.1">−0.1°</button>
+  <input type="number" id="rot-ang-input" step="0.1" value="0" style="width:100px;background:#111;color:#60c0ff;border:2px solid #2196f3;border-radius:6px;padding:4px 10px;font-size:1.6em;font-weight:700;text-align:center;text-shadow:0 0 8px rgba(96,192,255,.5);outline:none;">
+  <button class="rot-step-btn" data-step="0.1">+0.1°</button>
+  <button class="rot-step-btn" data-step="1">+1°</button>
+  <button id="rot-reset" style="padding:5px 10px;background:#333;border:1px solid #666;border-radius:4px;color:#aaa;font-size:.78em;cursor:pointer;">リセット</button>
+  <button id="rot-ok" style="padding:6px 20px;background:#2196f3;border:none;border-radius:5px;color:#fff;font-size:.85em;cursor:pointer;font-weight:600;">✓ OK</button>
+</div>
+
+<div id="toast"></div>
+<div id="toast-top"></div>
+
+<!-- r126(44回目・起動時の読み込み画面): 下のCDNライブラリ6本は以前 <head> にあり、読み込みが終わるまで画面が真っ白だった。
+     <body> の末尾(ここ)へ移し、先に #boot-loading(読み込み中……)が描画されるようにした。順序(pdf.js→three→GLTFLoader→xlsx→jspdf→jszip)は従来どおり。
+     body内のインラインscriptはこれらを使わない(OSAKI_LOGO_B64のみ・data/voldia_assets.jsはheadのまま)ことを確認済み。 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.12.313/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="lib/earcut.js"></script>
+<script src="js/voldia_main.js"></script>
+
+<script src="js/voldia3d.js"></script>
+<script src="js/voldia_export.js"></script>
+<!-- r125(37回目): Land Logic(Shift+L)の読み込みタグが無く、リスナーが一度も登録されていなかったため追加。voldia3d.js/voldia_export.jsより後に読み込む -->
+<script src="js/voldia_landlogic.js"></script>
+
+<!-- ClipperLib は冒頭の inline scriptに含まれています -->
+
+<!-- r060: ノースアロー方位角・原点測点 設定ダイアログ -->
+<div id="north-dialog" class="modal">
+  <div class="modal-c" style="width:300px;">
+    <h4 style="color:var(--accent2);margin:0 0 4px;font-size:.95em;">🧭 ノースアロー設定</h4>
+    <div style="font-size:.68em;color:#888;margin-bottom:10px;">画面上=0°・時計回りが正（測量の方位角方式）／LandXML出力用（作図には影響しません）</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <div style="flex:1;">
+        <label style="font-size:.7em;color:#aaa;">度(°)</label>
+        <input type="text" inputmode="numeric" id="na-deg" class="na-dms" placeholder="0" style="width:100%;box-sizing:border-box;text-align:center;">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:.7em;color:#aaa;">分(')</label>
+        <input type="text" inputmode="numeric" id="na-min" class="na-dms" placeholder="0" style="width:100%;box-sizing:border-box;text-align:center;">
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:.7em;color:#aaa;">秒(")</label>
+        <input type="text" inputmode="decimal" id="na-sec" class="na-dms" placeholder="0" style="width:100%;box-sizing:border-box;text-align:center;">
+      </div>
+    </div>
+    <div id="na-numpad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">7</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">8</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">9</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">4</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">5</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">6</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">1</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">2</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">3</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">0</button>
+      <button class="na-num-btn" style="padding:9px;border:1px solid #e8a02040;background:#3a2a0a;color:var(--accent);border-radius:4px;">.</button>
+      <button id="na-num-clear" style="padding:9px;border:1px solid #e7735040;background:#3a1a0a;color:#ff9070;border-radius:4px;">C</button>
+    </div>
+    <div style="border-top:1px solid #1e2a3a;padding-top:8px;margin-bottom:10px;">
+      <label style="font-size:.7em;color:#aaa;display:block;margin-bottom:4px;">原点測点（LandXML出力時の0,0,0点）</label>
+      <select id="na-origin-select" style="width:100%;box-sizing:border-box;background:#333;color:var(--text);border:1px solid var(--bdr);border-radius:4px;padding:5px;">
+        <option value="">未設定</option>
+      </select>
+      <div id="na-origin-hint" style="display:none;font-size:.68em;color:#e8a020;margin-top:4px;">⚠ 測点が設置されていません。先に📍測点設置で点を置いてください</div>
+    </div>
+    <div class="row" style="justify-content:center;gap:8px;">
+      <button id="na-cancel" style="flex:1;background:#333;">キャンセル</button>
+      <button id="na-ok" style="flex:1;background:rgba(232,160,32,.35);border-color:var(--accent);color:var(--accent);">設定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// r126: 起動時の読み込み画面を、全スクリプト・画像の読み込み完了(load)で消す。万一loadが来なくても60秒で消す。
+(function(){
+  function hide(){var e=document.getElementById('boot-loading');if(!e)return;e.classList.add('hide');setTimeout(function(){if(e.parentNode)e.parentNode.removeChild(e);},500);}
+  if(document.readyState==='complete')hide();else window.addEventListener('load',hide);
+  setTimeout(hide,60000);
+})();
+</script>
+
+<!-- v0147(45回目): 「簡単な説明（F1）」ヘルプガイド(Arecal側Claude姉さん作の HelpGuide v02 を取り込み)。F1・起動画面の左下のボタンで開く。
+     画像は モード別フォルダ Explan_A/(Voldia)・Explan_B/(3Dイメージ)・Explan_C/(配置モード)に Explan_1.png, Explan_2.png … (連番・欠番なし)。※Arecalと衝突する時は PREFIX を変える。
+     配置モード(iframe)の「簡単な説明（F1）」ボタン・F1も、postMessage('voldia-helpguide-toggle')でここのガイドを開閉する。 -->
+<script>
+window.HELPGUIDE_CFG = {
+  PAGES: { 'Explan_A/': 0, 'Explan_B/': 0, 'Explan_C/': 0 },   // v0149: 各フォルダの総ページ数。0=不明(探査・1枚目が見つかり次第表示)。画像が完成したら枚数を入れると探査が無くなり速い
+  // EXT: '.webp',                           // 画像をWebPにする時は、この行の頭の // を外す(ファイル名 Explan_1.webp …)
+  DIR: 'Explan_A/', PREFIX: 'Explan_',   // v0148: モード別フォルダ Explan_A=Voldia(作図) / Explan_B=3Dイメージ / Explan_C=配置モード(下の監視で自動切替)
+ 
+  ACCENT: '#e8a020',                       // Voldiaのアクセント色(--accent)
+  START_BTN_PARENT: '#cv-wrap',            // 起動画面(中央ビューの左下)に出すボタン。cv-wrapは position:relative
+  START_VISIBLE: function () { var e = document.getElementById('drop-hint'); return !!e && getComputedStyle(e).display !== 'none'; },
+  TOAST_PC: '“簡単な説明”は、F1キーでいつでも呼び出せます。'
+};
+</script>
+<script src="js/voldia_helpguide.js"></script>
+<script>
+// 起動画面(#drop-hint)の表示/非表示に合わせて、起動画面のボタンを出し入れする(voldia_main.jsは触らず、スタイル変化を見張る)
+(function () {
+  var dh = document.getElementById('drop-hint');
+  if (dh && window.HelpGuide && window.MutationObserver) new MutationObserver(function () { window.HelpGuide.syncStart(); }).observe(dh, { attributes: true, attributeFilter: ['style', 'class'] });
+  // v0167(50回目・マスター指示書): Arecal A095/A096 の雲型SVG吹き出し「初めての人は／押してね？」に差し替え。起動画面の「簡単な説明（F1）」ボタン(#hg-start-btn)の上に表示。
+  //   (v0150〜v0152の橙色の四角い吹き出し「初めての人は押してね！」は廃止。前版=backup/Voldia_v0166.html)
+  //   クリーム塗り(#fdf2eb)・サーモン枠(#e3a282)、ボタン実幅に合わせて真上中央に自動配置(左端は最小6pxでクランプ)。
+  //   軽い上下浮遊＋白飛びしない明滅(3.2秒周期)。prefers-reduced-motion時は浮遊なしの明滅のみ。クリックは素通し(pointer-events:none)。
+  //   ボタンを押したら、その起動中は吹き出しを消す(Arecal準拠=パターンA)。常時表示(Voldia v0152仕様)に戻すなら、下の btn.addEventListener('click',…) の1行を消す。
+  //   ボタンの位置・HelpGuide本体(js/voldia_helpguide.js)は触らない
+  (function () {
+    var wrap = document.getElementById('cv-wrap'), btn = document.getElementById('hg-start-btn');
+    if (!wrap || !btn) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '#hg-start-bubble{display:none;position:absolute;left:14px;bottom:42px;z-index:11;width:174px;height:108px;box-sizing:border-box;padding:0 18px 8px;align-items:center;justify-content:center;text-align:center;pointer-events:none;animation:hgBubblePulse 3.2s ease-in-out infinite;will-change:transform,filter;}' +
+      '#hg-start-bubble .xp-bub-svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;}' +
+      '#hg-start-bubble .xp-bub-txt{position:relative;z-index:1;font-size:.9em;font-weight:900;line-height:1.32;color:#1a1a1a;white-space:nowrap;}' +
+      '@keyframes hgBubblePulse{0%,100%{transform:translateY(0);filter:brightness(.88) drop-shadow(0 2px 6px rgba(0,0,0,.45));}50%{transform:translateY(-5px);filter:brightness(1.06) drop-shadow(0 4px 10px rgba(255,220,190,.42));}}' +
+      '@keyframes hgBubblePulseStatic{0%,100%{filter:brightness(.88) drop-shadow(0 2px 6px rgba(0,0,0,.45));}50%{filter:brightness(1.06) drop-shadow(0 2px 8px rgba(255,220,190,.35));}}' +
+      '@media (prefers-reduced-motion:reduce){#hg-start-bubble{animation-name:hgBubblePulseStatic;}}';
+    document.head.appendChild(st);
+
+    var bub = document.createElement('div');
+    bub.id = 'hg-start-bubble';
+    bub.innerHTML =
+      '<svg class="xp-bub-svg" viewBox="0 0 184 114" aria-hidden="true">' +
+      '<path d="M 25 65 A 15 15 0 0 1 25 38 A 16 16 0 0 1 48 21 A 17.5 17.5 0 0 1 79 16 A 18.5 18.5 0 0 1 112 17 A 17 17 0 0 1 141 25 A 15.5 15.5 0 0 1 160 44 A 15 15 0 0 1 156 70 A 20.5 20.5 0 0 1 122 82 Q 116 99 105 105 Q 109 93 102 83 A 17 17 0 0 1 72 83 A 16 16 0 0 1 44 78 A 13.5 13.5 0 0 1 25 65 Z" fill="#fdf2eb" stroke="#e3a282" stroke-width="4.2" stroke-linejoin="round"/>' +
+      '</svg><span class="xp-bub-txt">初めての人は<br>押してね？</span>';
+    wrap.appendChild(bub);
+
+    var bubDone = false;
+    btn.addEventListener('click', function () { bubDone = true; bub.style.display = 'none'; }); // ←常時表示にするならこの1行を消す
+
+    function alignBub() {
+      if (bub.style.display === 'none') return;
+      var bw = btn.offsetWidth, pw = bub.offsetWidth || 174;
+      if (bw > 0) bub.style.left = Math.max(6, Math.round(btn.offsetLeft + (bw - pw) / 2)) + 'px';
+    }
+    function sync() {
+      var vis = btn.style.display !== 'none' && !bubDone;
+      bub.style.display = vis ? 'flex' : 'none';
+      if (vis) { alignBub(); requestAnimationFrame(alignBub); }
+    }
+    if (window.MutationObserver) new MutationObserver(sync).observe(btn, { attributes: true, attributeFilter: ['style'] });
+    window.addEventListener('resize', alignBub);
+    sync();
+  })();
+  // v0148(45回目): モードごとにヘルプ画像のフォルダを切り替え、切り替わった時は1ページ目に戻す。
+  //   Voldia(作図)=Explan_A/・3Dイメージ(「3D生成方法」ダイアログ #gm-overlay 表示中、または3D画面 #calc-modal.show)=Explan_B/・配置モード(#placement-overlay表示中)=Explan_C/。配置が最優先。
+  //   voldia_main.js/export.jsは触らず、200msごとに今のモードを見る(軽い判定だけ)。ガイドが開いていれば、その場で読み込み直す。
+  (function () {
+    var cur = 'A';
+    function mode() {
+      var pl = document.getElementById('placement-overlay');
+      if (pl && pl.style.display !== 'none') return 'C';
+      var gm = document.getElementById('gm-overlay');   // v0149: 「3Dイメージ」ボタンで出る「3D生成方法」ダイアログが出た時点で、3Dイメージのガイド(B)に切り替える
+      if (gm && gm.style.display === 'flex') return 'B';
+      var cm = document.getElementById('calc-modal');
+      if (cm && cm.classList.contains('show')) return 'B';
+      return 'A';
+    }
+    window.__hgMode = mode;
+    setInterval(function () {
+      var m = mode();
+      if (m === cur) return;
+      cur = m;
+      if (window.HelpGuide) window.HelpGuide.setDir('Explan_' + m + '/');
+    }, 200);
+  })();
+  // 配置モード(iframe)の「簡単な説明（F1）」ボタン・F1キーから開閉する
+  window.addEventListener('message', function (ev) {
+    var ifr = document.getElementById('placement-iframe');
+    if (!ifr || ev.source !== ifr.contentWindow) return;
+    if (ev.data && ev.data.type === 'voldia-helpguide-toggle' && window.HelpGuide) window.HelpGuide.toggle();
+  });
+})();
+</script>
+<script src="data/voldia_intro_img.js"></script> <!-- 47回目: 断面イラスト(WebP/base64) -->
+<script src="js/voldia_gm_intro.js"></script> <!-- 47回目: 3D生成方法ダイアログのイラスト連動 -->
+</body>
+</html>

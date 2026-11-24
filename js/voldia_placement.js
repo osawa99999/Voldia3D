@@ -1,3 +1,4 @@
+// r158(51回目): ①Enterの繰り返し配置が効かない(H鋼杭・足場・カラーコーン)の修正=「開いているか」の判定をcomputed styleに ②「Enterで繰り返し配置」とトーストを画面下の解説の上へ ③H鋼杭の天端高さダイアログにテンキー(初回押しで入力値クリア)・前回値の保持。
 // r157(50回目・マスター要望): H鋼杭の天端高さを入力式に。①「H鋼杭」ボタン(h_pile_input)→天端高さダイアログ(#hpile-input-ui。既定±0・最高+5m・最低=地形の最深点(0.01m単位で切り上げ)。範囲外は最高/最低に直して「使用できない値です」)→「配置」→従来どおりクリック配置(h_pile) ②配置済みのH鋼杭を右クリック(動かさずに離す)→同じダイアログで高さ修正(_hpileSetTop=杭を作り直して置き換え) ③H鋼杭にマウスオーバーで「右クリックで高さ修正」。天端はuserData.topYで持ち、.vold保存(topY)・復元(なし=従来のGL+0.4)・ドラッグ移動後の高さ(_hpileTopOf)に反映。HTML=voldia_placement_v0097.html。前版=orig/voldia_placement_r156.js
 // r156(50回目・修正提案書v002 2B): 矢印を平らな板に作り直したことに合わせ、①縦ビルボード=_updateArrowBillboards()(毎フレーム・描画直前。矢印の向き(方位)はそのまま、板だけカメラのほうへ倒す) ②倍率(ダブルクリック1→2→3→1)=_applyArrowScale に一本化(重複していた処理を統合。ポールも伸ばす)。当たり判定・HTML書き出しは変更なし。前版=orig/voldia_placement_r155.js
 // r155(50回目・修正提案書v002 2A): カラーコーン(conebar)の個数(2〜10)を選べるように。パレットのボタン(conebar_input)→個数ダイアログ(#cone-input-ui。足場の入力と同じ流れ)→配置待ち(conebar)→クリックでspawnObject。個数はuserData.coneCountで持ち、.vold保存(coneCount)・復元・Enterの繰り返し(前回の個数を初期値)に対応。旋回(●=最後のコーン・芯=最初のコーン)は従来のロジックのまま。モデルは data/voldia_models.js の createConeBar(n)。前版=orig/voldia_placement_r154.js
@@ -1896,6 +1897,8 @@ window.addEventListener('message', function(ev) {
   // --- r157(50回目): H鋼杭の天端高さダイアログ。「新規配置」と「配置済みの高さ修正(右クリック)」の両方で使う。
   const HPILE_TOP_MAX = 5.0;       // 最高 +5m
   let _hpileMode = 'new';          // 'new' | 'edit'
+  let _hpileLast = 0;              // r158(51回目): 前回「配置」した天端高さ(m)。次にダイアログを開いた時の初期値
+  let _hpileFresh = true;          // r158: テンキーの最初の1回=今の入力値をクリア
   let _hpileEditObj = null;
   function _hpileUi() { return document.getElementById('hpile-input-ui'); }
   function _hpileIsOpen() { const u = _hpileUi(); return !!u && u.style.display === 'block'; }
@@ -1914,7 +1917,8 @@ window.addEventListener('message', function(ev) {
   function _hpileOpenDialog(mode, obj) {
     _hpileMode = mode; _hpileEditObj = obj || null;
     const inp = document.getElementById('hpile-top');
-    inp.value = _hpileFmt(mode === 'edit' && obj ? _hpileTopOf(obj) : 0); // 既定は±0。修正の時は今の天端高さ
+    inp.value = _hpileFmt(mode === 'edit' && obj ? _hpileTopOf(obj) : _hpileLast); // 新規は前回入力した値(最初は±0)。修正の時は今の天端高さ
+    _hpileFresh = true; // r158: テンキーの最初の1回は今の入力値を消してから入れる
     document.getElementById('hpile-input-title').textContent = mode === 'edit' ? 'H鋼杭 高さ修正' : 'H鋼杭 天端高さ';
     document.getElementById('hpile-btn-ok').textContent = mode === 'edit' ? '変 更' : '配 置';
     document.getElementById('hpile-input-range').textContent = _hpileRangeText();
@@ -1943,7 +1947,7 @@ window.addEventListener('message', function(ev) {
       if (obj && placedObjects.includes(obj)) { _hpileSetTop(obj, top); showToast('H鋼杭の天端高さを ' + _hpileFmt(top) + 'm に変更しました'); }
       return;
     }
-    hpileTopParam = top;
+    hpileTopParam = top; _hpileLast = top; // r158: 前回値として覚える
     _hpileCloseDialog();
     currentType = 'h_pile'; // ここから先は従来のH鋼杭の配置と同じ(3Dビューをクリックして配置)
     document.getElementById('placement-mode-msg').style.display = 'block';
@@ -1955,6 +1959,21 @@ window.addEventListener('message', function(ev) {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     setTimeout(() => { controls.enabled = true; }, 10);
   });
+  // r158(51回目・マスター要望): テンキー。最初の1回は今の入力値をクリアしてから入れる。+/-は先頭の符号を付け替える。⌫=1文字消す・C=全部消す
+  document.querySelectorAll('.hpile-numpad-btn').forEach(btn => btn.addEventListener('click', () => {
+    const inp = document.getElementById('hpile-top'), k = btn.textContent.trim();
+    if (_hpileFresh) { inp.value = ''; _hpileFresh = false; }
+    let v = inp.value;
+    if (k === 'C') v = '';
+    else if (k === '⌫') v = v.slice(0, -1);
+    else if (k === '+' || k === '-') v = k + v.replace(/^[+\-−±]/, '');
+    else if (k === '.') { if (!v.includes('.')) v = (v === '' || /^[+\-]$/.test(v) ? v + '0' : v) + '.'; }
+    else if (/^[+\-]?0$/.test(v)) v = v.replace('0', '') + k; // 先頭の0は置き換える(0→3 で 03 にしない)
+    else v += k;
+    inp.value = v; inp.focus();
+  }));
+  // 入力欄を直接触った時も「最初の1回クリア」は終わり(キーボード入力は従来どおり全選択→上書き)
+  document.getElementById('hpile-top').addEventListener('input', () => { _hpileFresh = false; });
   // ダイアログ中のキー: Enter=決定。Esc以外はほかのキー操作(配置モードのショートカット等)に渡さない(入力欄への文字入力そのものは通る)
   window.addEventListener('keydown', (e) => {
     if (!_hpileIsOpen()) return;
@@ -3028,10 +3047,13 @@ window.addEventListener('message', function(ev) {
     if (!_lastPalBtnForRepeat) return;
     const tag = document.activeElement && document.activeElement.tagName;
     const isFormFocus = tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable);
-    const textUiOpen = document.getElementById('text-input-ui') && document.getElementById('text-input-ui').style.display !== 'none';
-    const boxUiOpen = document.getElementById('box-input-ui') && document.getElementById('box-input-ui').style.display !== 'none';
-    const confirmOverlayOpen = document.getElementById('custom-confirm-overlay') && document.getElementById('custom-confirm-overlay').style.display !== 'none';
-    const kotaiConfirmOpen = document.getElementById('kotai-confirm-overlay') && document.getElementById('kotai-confirm-overlay').style.display !== 'none';
+    // r158(51回目): 「開いているか」を inline style の値(!== 'none')で見ていたため、CSSの規則で隠しているだけの画面(custom-confirm-overlay等。inline style は空文字)を
+    //   いつも「開いている」と誤判定し、Enterのリピートが効かなかった(H鋼杭・足場・カラーコーン)。実際の表示状態(computed style)で見る。
+    const _shown = (id) => { const el = document.getElementById(id); return !!el && getComputedStyle(el).display !== 'none'; };
+    const textUiOpen = _shown('text-input-ui');
+    const boxUiOpen = _shown('box-input-ui');
+    const confirmOverlayOpen = _shown('custom-confirm-overlay');
+    const kotaiConfirmOpen = _shown('kotai-confirm-overlay');
     if (isFormFocus || textUiOpen || boxUiOpen || _scfIsOpen() || _coneIsOpen() || _hpileIsOpen() || confirmOverlayOpen || kotaiConfirmOpen) return;
     e.preventDefault();
     _lastPalBtnForRepeat.click();
@@ -3051,7 +3073,15 @@ window.addEventListener('message', function(ev) {
     if (show) { const t = '↩ Enterで繰り返し配置（' + _lastPalBtnForRepeat.textContent.trim() + '）'; if (_repeatHint.textContent !== t) _repeatHint.textContent = t; }
     _repeatHint.style.display = show ? 'block' : 'none';
   }
-  setInterval(_repeatHintUpdate, 250);
+  // r158(51回目): 「Enterで繰り返し配置」と各種トーストが、画面下の操作説明(#controls)に重なっていた。説明の上に置く(説明の高さは画面幅で変わるので実測する)。
+  function _lift() {
+    const c = document.getElementById('controls'), t = document.getElementById('toast');
+    const base = 15 + (c ? c.offsetHeight : 0) + 8;
+    _repeatHint.style.bottom = base + 'px';
+    if (t) t.style.bottom = (base + 40) + 'px'; // トーストはヒントのさらに上(同時に出ても重ならない)
+  }
+  _lift(); window.addEventListener('resize', _lift);
+  setInterval(() => { _repeatHintUpdate(); _lift(); }, 250);
 
   // r072(21回目引継ぎ・マスター要望「作業エリアが広いとホイールだけのズームでは
   // 拡大操作に限界がある」対策): カーソルキーでカメラの前後左右移動を追加。

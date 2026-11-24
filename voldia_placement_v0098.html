@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- v0093(47回目): ①左パネルのボタンの解説(マウスオーバー) ②配置マウス位置の丸を白に統一 ③ボックス・足場の設定画面で右クリック=キャンセル ④robots noindex・ひな形r3。 -->
+<!-- v0092(47回目): HTML書き出しに「線(仮囲い・計画線)」と「クレーンの作業半径リング」を追加(JS側 voldia_placement.js r145)。 -->
+<title>Voldia 配置モード（開発中） v0021</title>
+<style>
+  body { margin: 0; overflow: hidden; background-color: #3a4045; color: #fff; font-family: 'Segoe UI', sans-serif; }
+
+  /* Voldia版: 左側UIパネル（PLAN, 戻るボタン, 使い方） */
+  #left-panel {
+    position: absolute; top: 15px; left: 15px; z-index: 10;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+
+  /* 戻るボタン: Voldia本体側の#btn-calc-back(◀ 戻る)と配色・体裁を統一。
+     本体では赤(#c0392b系)は「キャンセル/削除」用の色として使われているため、
+     単なる画面遷移である「戻る」に赤を使うと本体の配色規約と衝突する。
+     本体に合わせてグレー基調(#444/#666/#ccc)に変更。 */
+  #voldia-back-btn {
+    background: #444; color: #ccc; border: 1px solid #666; border-radius: 4px;
+    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
+    width: 100%; box-sizing: border-box; text-align: center;
+  }
+  #voldia-back-btn:hover { background: #555; }
+  #voldia-save-btn {
+    background: #2e7d32; color: #fff; border: 1px solid #4caf50; border-radius: 4px;
+    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
+    box-sizing: border-box; white-space: nowrap;
+  }
+  #voldia-save-btn:hover { background: #388e3c; }
+  /* v0094(48回目): 戻るボタンと保存ボタンの間隔を、他のボタン(範囲スクショ・印刷・HTML書き出し=margin-top:6px)とそろえる。ボタン名の括弧の中は小さい字 */
+  #voldia-save-btn { margin-top: 6px; }
+  .btn-sub { font-size: 0.75em; }
+  #voldia-save-btn:disabled { opacity: 0.6; cursor: default; }
+  #voldia-print-btn, #voldia-shot-btn, #voldia-html-btn {
+    background: #37474f; color: #cfd8dc; border: 1px solid #607d8b; border-radius: 4px;
+    padding: 8px 12px; font-size: 0.9em; font-weight: normal; cursor: pointer;
+    margin-top: 6px;
+  }
+  #voldia-print-btn:hover, #voldia-shot-btn:hover, #voldia-html-btn:hover { background: #455a64; }
+  #voldia-print-btn:disabled, #voldia-shot-btn:disabled, #voldia-html-btn:disabled { opacity: 0.6; cursor: default; }
+  /* v0089(47回目): HTML書き出しの確認ダイアログ(はい=緑) */
+  #vhtml-confirm-yes { background: #2e7d32; color: #fff; }
+  #vhtml-confirm-yes:hover { background: #388e3c; }
+  #vhtml-confirm-no { background: #555; color: #fff; }
+  #vhtml-confirm-no:hover { background: #333; }
+  #voldia-shot-btn.active { background: #0277bd; border-color: #4fc3f7; color: #fff; }
+  /* v0080(41回目): 範囲スクショの選択面(全画面)と選択枠。トースト(1000)より下、左パネル(10)・ヘルプ(250)より上 */
+  #shot-select-overlay { display: none; position: fixed; inset: 0; z-index: 900; cursor: crosshair; background: rgba(0,0,0,0.12); touch-action: none; }
+  #shot-select-box { display: none; position: fixed; border: 2px dashed #4fc3f7; background: rgba(79,195,247,0.15); pointer-events: none; box-sizing: border-box; }
+
+  /* 「使い方」ボタン周り */
+  /* r062: マウスオーバー表示→クリックで開閉するボタン式に変更。
+     表示中は#help-block-overlayが画面全体(地形3Dビュー含む)を覆い、
+     作図・カメラ操作を停止する。ツールチップ自体はオーバーレイより
+     高いz-indexに置き、中の「地形(GLB)を手動読込」ボタンは操作可能なままにする。
+     画面の他の場所(オーバーレイ部分)をクリックすると閉じる。 */
+  #help-btn-wrap { position: relative; }
+  #help-btn {
+    background: rgba(20, 30, 40, 0.9); color: #a5d6a7; border: 1px solid #4caf50; border-radius: 6px;
+    padding: 7px 14px; font-size: 0.85em; font-weight: bold; cursor: pointer;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  }
+  /* v0093(47回目): 左パネルのボタンの解説(マウスオーバー) */
+  #btn-help-tip { display: none; position: fixed; z-index: 30001; pointer-events: none; white-space: nowrap;
+    background: rgba(20,30,40,0.96); color: #ddd; border-left: 4px solid #4caf50; border-radius: 6px; padding: 8px 12px;
+    font-size: 0.82em; line-height: 1.6; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+  #help-tooltip {
+    display: none; margin-top: 6px; width: 330px; position: relative; z-index: 251;
+    background: rgba(20, 30, 40, 0.95); padding: 15px; border-left: 5px solid #4caf50; border-radius: 6px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-size: 0.85em; color: #ccc; line-height: 1.6;
+  }
+  #help-tooltip.show { display: block; }
+  #help-block-overlay {
+    display: none; position: fixed; inset: 0; z-index: 250;
+    background: rgba(0,0,0,.45); cursor: not-allowed;
+  }
+  #help-block-overlay.show { display: block; }
+
+  /* Voldia版: 保存不可の常設バナー */
+  .load-btn {
+    display: inline-block; margin-top: 10px; background: #2e7d32; color: #fff; pointer-events: auto;
+    border: 1px solid #4caf50; border-radius: 4px; padding: 6px 12px;
+    font-size: 0.85em; cursor: pointer; font-weight: bold; transition: background 0.2s;
+  }
+  .load-btn:hover { background: #388e3c; }
+
+  #ui-container {
+    position: absolute; top: 15px; right: 15px; z-index: 10;
+    width: 260px; display: flex; flex-direction: column; gap: 10px;
+    max-height: 95vh; overflow-y: auto; overflow-x: hidden; box-sizing: border-box;
+  }
+  
+  #radar-wrapper {
+    background: rgba(10, 20, 30, 0.9); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  }
+  #radar-title { font-size: 0.8em; color: #81c784; margin-bottom: 5px; text-align: center; font-weight: bold; letter-spacing: 1px;}
+  #radar-canvas {
+    width: 216px; height: 216px; background: #0b1116; border: 1px solid #333; cursor: crosshair;
+    background-image: linear-gradient(#1a2a1a 1px, transparent 1px), linear-gradient(90deg, #1a2a1a 1px, transparent 1px);
+    background-size: 21.6px 21.6px;
+    margin: 0 auto; display: block;
+  }
+
+  #palette {
+    background: rgba(20, 30, 40, 0.9); border: 1px solid #444; border-radius: 8px;
+    padding: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+  }
+  .pal-title { font-size: 0.75em; color: #aaa; margin-bottom: 6px; margin-top: 6px; border-bottom: 1px solid #444; padding-bottom: 3px; }
+  .pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .pal-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #cde; border-radius: 4px;
+    padding: 6px; font-size: 0.75em; cursor: pointer; transition: all 0.2s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pal-btn:hover { background: #3a5a7a; }
+  .pal-btn.active { background: #4caf50; border-color: #81c784; color: #fff; font-weight: bold; }
+
+  /* スクロールバー装飾 */
+  #ui-container::-webkit-scrollbar { width: 6px; }
+  #ui-container::-webkit-scrollbar-thumb { background: #4caf50; border-radius: 3px; }
+
+  #controls {
+    position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7); padding: 8px 18px; border-radius: 16px; font-size: 0.8em; color: #ccc;
+    pointer-events: none; border: 1px solid #555; text-align: center; line-height: 1.7; white-space: nowrap; /* v0086: 2行表示 */
+  }
+  #controls span { color: #4caf50; font-weight: bold; }
+
+  #loading {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.8); z-index: 9999;
+    display: none; align-items: center; justify-content: center; font-size: 1.5em; color: #4caf50; font-weight: bold;
+  }
+
+  #toast {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    background: rgba(231, 76, 60, 0.9); border: 2px solid #c0392b; border-radius: 8px;
+    padding: 10px 20px; color: #fff; font-weight: bold; font-size: 1em;
+    pointer-events: none; z-index: 30000; opacity: 0; transition: opacity 0.3s; /* v0091(47回目): 足場の編集窓(z-index 1100)の下に隠れていたため、最前面へ */
+  }
+
+  /* 配置モード案内メッセージ */
+  #placement-mode-msg {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(46, 125, 50, 0.9); border: 2px solid #4caf50; border-radius: 30px;
+    padding: 12px 30px; color: #fff; font-weight: bold; font-size: 1.1em;
+    pointer-events: auto; z-index: 1000; display: none; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    text-align: center; line-height: 1.4;
+  }
+  #placement-mode-msg span {
+    font-size: 0.8em; color: #c8e6c9; font-weight: normal; pointer-events: none;
+  }
+
+  /* カラーピッカー (線用) */
+  #line-color-picker {
+    display: none; justify-content: center; gap: 10px; margin-top: 10px;
+  }
+  .color-btn {
+    width: 24px; height: 24px; border-radius: 50%; border: 2px solid #fff; cursor: pointer; transition: transform 0.2s;
+  }
+  .color-btn:hover { transform: scale(1.2); }
+  .color-btn.active { outline: 3px solid #4caf50; outline-offset: 2px; }
+  
+  /* 線引き終了ボタン */
+  #finish-line-btn {
+    display: none; margin-top: 15px; background: #c0392b; border: 2px solid #e74c3c;
+    color: white; padding: 6px 20px; border-radius: 20px; cursor: pointer;
+    font-weight: bold; font-size: 0.9em; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    transition: all 0.2s;
+  }
+  #finish-line-btn:hover { background: #e74c3c; transform: scale(1.05); }
+
+  /* テンキーUI */
+  #numpad-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 220px;
+  }
+  #numpad-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 5px; text-align: center; font-weight: bold; }
+  #numpad-warning { font-size: 0.7em; color: #ffab91; margin-bottom: 10px; text-align: center; line-height: 1.3; }
+  #numpad-display {
+    background: #0b1116; color: #4caf50; font-size: 1.8em; text-align: right; padding: 10px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #333;
+  }
+  .numpad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .numpad-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.2em; padding: 12px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
+  }
+  .numpad-btn:hover { background: #3a5a7a; }
+  .numpad-ok { background: #2e7d32; border-color: #4caf50; font-weight: bold; }
+  .numpad-ok:hover { background: #388e3c; }
+  #numpad-cancel {
+    width: 100%; background: #c0392b; border: 1px solid #e74c3c; color: #fff; margin-top: 10px; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold;
+  }
+  #numpad-cancel:hover { background: #e74c3c; }
+
+  /* カスタムボックス入力UI */
+  #box-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 260px;
+  }
+  #box-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  .box-inputs { display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px; }
+  .box-input-group {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.9em; transition: 0.2s;
+  }
+  .box-input-group.active { border-color: #4caf50; color: #4caf50; font-weight: bold; }
+  .box-val { font-size: 1.2em; color: #fff; width: 60px; text-align: right; }
+  
+  .box-colors { display: flex; justify-content: space-between; margin-bottom: 15px; }
+  .b-color-btn {
+    width: 24px; height: 24px; border-radius: 4px; border: 2px solid #333; cursor: pointer; transition: transform 0.2s;
+  }
+  .b-color-btn:hover { transform: scale(1.1); }
+  .b-color-btn.active { border-color: #fff; outline: 2px solid #4caf50; outline-offset: 1px; }
+  
+  .box-numpad-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.1em; padding: 8px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
+  }
+  .box-numpad-btn:hover { background: #3a5a7a; }
+
+  /* v0081(45回目): 足場(テスト機能)入力UI。ボックス入力UIと同じ見た目(クラスは別名=ボックス側の処理と混線させない) */
+  #scaffold-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 280px;
+  }
+  /* v0095(50回目・2A): カラーコーンの個数入力UI。足場入力UIと同じ見た目(クラス・idは別名=足場側の処理と混線させない) */
+  #cone-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 260px;
+  }
+  #cone-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  #cone-input-row { display: flex; justify-content: space-between; align-items: center; background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
+  #cone-count { background: #1b2630; color: #fff; border: 1px solid #3a5a7a; border-radius: 4px; padding: 4px 8px; font-size: 1.1em; }
+  /* v0097(50回目): H鋼杭の天端高さ入力UI(配置前・右クリック修正の両方で使う)。見た目はカラーコーン個数UIと同じ */
+  #hpile-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #8d6e63; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 290px;
+  }
+  #hpile-input-title { font-size: 0.9em; color: #d7ccc8; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  #hpile-input-row { display: flex; justify-content: space-between; align-items: center; background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; font-size: 0.9em; }
+  #hpile-top { width: 110px; background: #1b2630; color: #fff; border: 1px solid #3a5a7a; border-radius: 4px; padding: 4px 8px; font-size: 1.1em; text-align: right; }
+  #hpile-input-range { font-size: 0.8em; color: #8a9bb0; text-align: center; margin: 8px 0 8px; }
+  #scaffold-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 15px; text-align: center; font-weight: bold; }
+  .scf-input-group {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #0b1116; border: 1px solid #333; color: #ccc; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 0.9em; transition: 0.2s;
+  }
+  .scf-input-group.active { border-color: #4caf50; color: #4caf50; font-weight: bold; }
+  .scf-width-row {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #0b1116; border: 1px solid #333; color: #ccc; padding: 6px 12px; border-radius: 4px; font-size: 0.9em;
+  }
+  #scf-width { background: #1b2630; color: #fff; border: 1px solid #3a5a7a; border-radius: 4px; padding: 4px 8px; font-size: 1em; }
+  #scf-info { font-size: 0.72em; color: #9ab; margin-bottom: 12px; text-align: center; min-height: 2.4em; }
+  .scf-numpad-btn, .hpile-numpad-btn {
+    background: #2a3a4a; border: 1px solid #3a5a7a; color: #fff; font-size: 1.1em; padding: 8px 0; border-radius: 4px; cursor: pointer; transition: background 0.1s;
+  }
+  .scf-numpad-btn:hover, .hpile-numpad-btn:hover { background: #3a5a7a; }
+
+  /* v0088(46回目): 画面下の説明を「ホイールクリック:指定位置に移動」に変更・「ホイールドラッグ:回転」の表記を削除(機能は残す)し、2行の分け方を調整。前版=backup/voldia_placement_v0087.html */
+  /* v0087(46回目): ホイールドラッグ=回転(3Dイメージと同じ。マウス操作は3Dイメージが正)に合わせて、画面下の説明を「ホイールドラッグ:回転」に。前版=backup/voldia_placement_v0086.html */
+  /* v0086(46回目): ①画面下の操作説明を2行に(右ドラッグ=パン・ホイールドラッグ=パン・ホイールクリック=地面へ移動・F1=操作説明を追加。3Dイメージと同じ操作に) ②右UIの整頓(ボタンの表示名の変更・「保安用品」と「仮設構造物」を「仮設（テスト機能）」に統合し2列2行に) ③左UIの「簡単な説明（F1）」ボタンはPCでは非表示(F1で開く。タッチ端末だけ残す)。前版=backup/voldia_placement_v0085.html */
+  /* v0085(46回目): 変更なし(JS側で、ホイールクリックで地面の点へ移動する機能を追加) */
+  /* v0084(45回目): 足場の開口の編集窓(足場ダイアログの上に重ねて出す) */
+  #scaffold-edit-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.97); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.85);
+    display: none; z-index: 1100; max-width: 92vw;
+  }
+  #scf-edit-title { font-size: 0.95em; color: #a5d6a7; margin-bottom: 8px; text-align: center; font-weight: bold; }
+  #scf-edit-help { font-size: 0.75em; color: #b9c6d2; margin-bottom: 8px; line-height: 1.5; }
+  #scf-edit-pairlabel { display: block; font-size: 0.8em; color: #dfe9f2; margin-bottom: 8px; cursor: pointer; }
+  #scf-edit-scroll { max-width: 86vw; max-height: 56vh; overflow: auto; background: #e9eef3; border-radius: 4px; }
+  #scf-edit-cv { display: block; cursor: pointer; }
+
+  /* テキスト入力UI */
+  #text-input-ui {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(20, 30, 40, 0.95); border: 2px solid #4caf50; border-radius: 8px;
+    padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    display: none; z-index: 1000; width: 300px;
+  }
+  #text-input-title { font-size: 0.9em; color: #a5d6a7; margin-bottom: 10px; text-align: center; font-weight: bold; }
+  #text-input-area {
+    width: 100%; height: 100px; background: #0b1116; color: #fff; border: 1px solid #333; border-radius: 4px;
+    padding: 8px; font-size: 1em; resize: none; outline: none; font-family: 'Segoe UI', sans-serif; box-sizing: border-box;
+  }
+  .text-ui-btns { display: flex; gap: 10px; margin-top: 15px; }
+  /* v0098(51回目): H鋼杭の天端高さダイアログにテンキー(初回押しで入力値をクリア)・前回入力値を保持・「Enterで繰り返し配置」とトーストを画面下の解説の上へ(JS r158)。
+     全ボタンのホバー共通化。.text-ui-btn(ボックス/H鋼杭/コーン/足場の入力画面)・構台の表示切替・影のLow/High・構台の確認(はい/いいえ)は、ホバーの規則が無く変わらなかった。
+     filter は背景の指定と競合しない。除外=disabled・色の丸(.color-btn/.b-color-btn=色が変わって見えるため。専用の拡大がある) */
+  button:not(:disabled):not(.color-btn):not(.b-color-btn):hover { filter: brightness(1.25); }
+  .text-ui-btn { flex: 1; padding: 10px; border-radius: 4px; cursor: pointer; font-weight: bold; border: none; color: #fff; }
+  #text-btn-ok { background: #2e7d32; } #text-btn-ok:hover { background: #388e3c; }
+  #text-btn-cancel { background: #c0392b; } #text-btn-cancel:hover { background: #e74c3c; }
+
+  /* カスタム確認ダイアログ */
+  /* r062: 元は#custom-confirm-box(IDセレクタ)だったが、構台削除確認ダイアログ側は
+     class="custom-confirm-box"で参照していたためCSSが一切当たっておらず、
+     見た目が「線を削除しますか？」ダイアログと異なって見えていた(根本原因)。
+     クラスセレクタに統一し、両方の確認ダイアログが同じ見た目になるようにした。 */
+  #custom-confirm-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.6); z-index: 2000; display: none;
+    align-items: center; justify-content: center;
+  }
+  .custom-confirm-box {
+    background: #2a3a4a; border: 2px solid #e74c3c; border-radius: 8px;
+    padding: 20px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+    text-align: center; min-width: 250px;
+  }
+  #custom-confirm-msg {
+    font-size: 1.1em; color: #fff; margin-bottom: 20px; font-weight: bold;
+  }
+  .custom-confirm-btns {
+    display: flex; justify-content: center; gap: 15px;
+  }
+  .custom-confirm-btn {
+    padding: 8px 20px; font-size: 1em; border-radius: 4px; cursor: pointer; font-weight: bold; border: none;
+  }
+  #custom-confirm-yes { background: #e74c3c; color: #fff; }
+  #custom-confirm-yes:hover { background: #c0392b; }
+  #custom-confirm-no { background: #555; color: #fff; }
+  #custom-confirm-no:hover { background: #333; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/GLTFExporter.js"></script> <!-- v0089(47回目): HTML書き出しでGLBを作る -->
+</head>
+<body>
+
+<!-- 新6(2026-08-24 引継ぎ19回目マスター指示): 配置モードにもノースアロー(2D)を
+     設置。本体側と同じ「測点が1つ以上ある時だけ表示」条件で、カメラの水平回転
+     (方位)に合わせてアイコンを回転させる。実際の回転更新はanimate()内、
+     表示/非表示切替はupdateCompassVisibility()参照。 -->
+<div id="placement-compass-wrap" style="position:fixed;left:16px;bottom:16px;z-index:500;display:none;
+     width:56px;height:56px;border-radius:50%;background:rgba(20,20,20,.72);
+     border:2px solid #64b5f6;box-shadow:0 2px 8px rgba(0,0,0,.5);pointer-events:none;">
+  <div id="placement-compass-rotor" style="width:100%;height:100%;transform-origin:50% 50%;transform:rotate(0deg);">
+    <svg viewBox="0 0 56 56" width="56" height="56">
+      <polygon points="28,8 22,30 28,25 34,30" fill="#e8391f"/>
+      <polygon points="28,48 22,30 28,33 34,30" fill="#cfd8dc"/>
+      <text x="28" y="19" text-anchor="middle" font-size="9" fill="#fff" font-weight="bold">N</text>
+    </svg>
+  </div>
+</div>
+
+<div id="left-panel">
+  <button id="voldia-back-btn" style="width:100%;box-sizing:border-box;">◀ Voldiaに戻る</button>
+  <button id="voldia-save-btn" style="width:100%;box-sizing:border-box;">📤 保存<span class="btn-sub">(Vold出力)</span></button>
+  <button id="voldia-shot-btn" style="width:100%;box-sizing:border-box;">📷 範囲スクショ</button>
+  <button id="voldia-print-btn" style="width:100%;box-sizing:border-box;">🖨 印刷<span class="btn-sub">(A3 PDF)</span></button>
+  <button id="voldia-html-btn" style="width:100%;box-sizing:border-box;">🌐 HTML書き出し</button> <!-- v0089(47回目) -->
+  <button id="kotai-toggle-btn" style="width:100%;box-sizing:border-box;display:none;">🏗️ 構台 表示中</button>
+
+  <!-- r071(20回目引継ぎ・マスター要望): 影の精度(shadow.mapSize)を選べるUI。
+       v0083(45回目・マスター要望): 軽量/標準/高画質の3段階 → Low/Highの2段階に変更。
+       Low=旧「軽量」(1024)と旧「標準」(2048)の中間=1536(既定)、High=旧「高画質」=4096。 -->
+  <div id="shadow-quality-group" style="margin-top:6px;padding:6px;background:#1a1a1a;border-radius:4px;">
+    <div style="font-size:.68em;color:#888;margin-bottom:4px;">影の精度</div>
+    <div style="display:flex;gap:3px;">
+      <button class="shadow-q-btn active" data-size="1536" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#d0d0d0;color:#000;border:1px solid #d0d0d0;font-weight:bold;cursor:pointer;">Low</button>
+      <button class="shadow-q-btn" data-size="4096" style="flex:1;padding:4px 0;font-size:.68em;border-radius:3px;background:#2a2a2a;color:#aaa;border:1px solid #3a3a3a;cursor:pointer;">High</button>
+    </div>
+  </div>
+
+  <!-- r064: PLANビュー(レーダー)は表示から除外。内部の描画/クリック処理には
+       他の箇所からまだ参照があるため、要素自体は残しdisplay:noneのみで隠す
+       (丸ごと削除すると radarCtx 参照エラーで壊れる箇所が多数あるため安全策)。 -->
+  <div id="radar-wrapper" style="display:none;">
+    <div id="radar-title">PLAN</div>
+    <canvas id="radar-canvas" width="216" height="216"></canvas>
+  </div>
+
+  <!-- v0083(45回目・マスター要望): 「❔ 使い方」(文章の吹き出し)を、ヘルプガイド「簡単な説明（F1）」(画像ガイド。本体Voldia側のガイドを開く)に変更。
+       旧文章は backup/voldia_placement_v0082.html に残してある。地形(GLB)の手動読込ボタンは吹き出しの中にあったので、ここに独立させた。 -->
+  <div id="help-btn-wrap">
+    <div id="help-btn">簡単な説明（F1）</div>
+    <button id="load-glb-btn" class="load-btn" onclick="document.getElementById('glb-input').click()" style="margin-top:6px;">📂 地形(GLB)を手動読込</button>
+    <input type="file" id="glb-input" accept=".glb,.gltf" style="display:none">
+  </div>
+</div>
+</div>
+
+<div id="placement-mode-msg">
+  <span id="placement-msg-text" style="font-size:1em; color:#fff; font-weight:bold;">✨ 選択したオブジェクトを配置してください</span><br>
+  <span id="placement-msg-sub">（右クリックでキャンセル）</span>
+  
+  <div id="line-color-picker">
+    <div class="color-btn" style="background: #e74c3c;" data-color="0xe74c3c"></div>
+    <div class="color-btn active" style="background: #f1c40f;" data-color="0xf1c40f"></div>
+    <div class="color-btn" style="background: #3498db;" data-color="0x3498db"></div>
+    <div class="color-btn" style="background: #111111;" data-color="0x111111"></div>
+  </div>
+  
+  <br><button id="finish-line-btn">線引き終了</button>
+</div>
+
+<!-- r025(マスター指示・追1): 測点フラグのホバーツールチップ -->
+<div id="flag-hover-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.78);color:#fff;padding:3px 9px;border-radius:4px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;"></div>
+<div id="line-close-tip" style="display:none;position:fixed;z-index:9000;background:rgba(231,76,60,.92);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">🔒 閉じる（終了）</div>
+<!-- r073(21回目引継ぎ・マスター要望「構台にマウスオーバーで削除方法を表示」): 既存のline-close-tipと同じ「カーソル追従」パターンを流用 -->
+<div id="kotai-delete-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.8);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">🗑️ ダブルクリックで削除</div>
+
+<div id="ui-container">
+  <div id="palette">
+    <div class="pal-title">📏 計画ツール</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="line">線を引く (Line)</button>
+      <button class="pal-btn" data-type="text_balloon">💬 コメント</button>
+      <button class="pal-btn" data-type="custom_box_input">📦 ボックス</button>
+      <button class="pal-btn" data-type="arrow">➡ 矢印</button>
+    </div>
+
+    <div class="pal-title">🚜 重機</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="bh_mini">ミニBH</button>
+      <button class="pal-btn" data-type="bh_025">0.25m³ BH</button>
+      <button class="pal-btn" data-type="bh_045">0.45m³ BH</button>
+      <button class="pal-btn" data-type="bh_07">0.7m³ BH</button>
+      <button class="pal-btn" data-type="bh_12">1.2m³ BH</button>
+      <button class="pal-btn" data-type="bd_08t">8t級 ブル</button>
+      <button class="pal-btn" data-type="bd_13t">13t級 ブル</button>
+      <button class="pal-btn" data-type="bd_20t">20t級 ブル</button>
+    </div>
+    
+    <div class="pal-title">🏗️ クレーン類</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="rt_16t">16t ラフター</button>
+      <button class="pal-btn" data-type="rt_25t">25t ラフター</button>
+      <button class="pal-btn" data-type="rt_60t">60t ラフター</button>
+      <button class="pal-btn" data-type="cr_80t">80t クローラー</button>
+    </div>
+
+    <div class="pal-title">🚚 車両</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="dump_4t">4tダンプ</button>
+      <button class="pal-btn" data-type="dump_10t">10tダンプ</button>
+      <button class="pal-btn" data-type="mx_10t">生コン車</button>
+      <button class="pal-btn" data-type="cp_10t">ポンプ車</button>
+    </div>
+    <div class="pal-title">👷 作業員</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="worker">作業員</button>
+      <button class="pal-btn" data-type="guard">誘導員</button>
+    </div>
+    <div class="pal-title">🚧 仮設（テスト機能）</div>
+    <div class="pal-grid">
+      <button class="pal-btn" data-type="kotai">🏗️ 構台</button>
+      <button class="pal-btn" data-type="h_pile_input">🔩 H鋼杭</button>
+      <button class="pal-btn" data-type="scaffold_input">🪜 足場</button>
+      <button class="pal-btn" data-type="conebar_input">カラーコーン</button>
+    </div>
+  </div>
+</div>
+
+<div id="controls">
+  🖱 <span>左ドラッグ</span>:回転 ｜ 🖱 <span>右ドラッグ</span>:パン ｜ ⌨️ <span>矢印キー</span>:カメラ移動<br>
+  ⚙️ <span>ホイール</span>:ズーム ｜ 🖱 <span>ホイールクリック</span>:指定位置に移動 ｜ ⌨️ <span>F1</span>:操作説明
+</div>
+
+<div id="loading">GLB 解析・再構築中...</div>
+<div id="toast">⚠️ オブジェクトが奈落へ落ちました</div>
+
+<!-- テンキーUI -->
+<div id="numpad-ui">
+  <div id="numpad-title">作業半径を入力 (m)</div>
+  <div id="numpad-warning">※この作業半径は“おおまかな円”です。<br>正確ではありませんので注意してください。</div>
+  <div id="numpad-display">0</div>
+  <div class="numpad-grid">
+    <button class="numpad-btn">7</button><button class="numpad-btn">8</button><button class="numpad-btn">9</button>
+    <button class="numpad-btn">4</button><button class="numpad-btn">5</button><button class="numpad-btn">6</button>
+    <button class="numpad-btn">1</button><button class="numpad-btn">2</button><button class="numpad-btn">3</button>
+    <button class="numpad-btn">0</button><button class="numpad-btn">.</button><button class="numpad-btn">C</button>
+    <button class="numpad-btn numpad-ok" style="grid-column: 1 / -1;">決 定 (OK)</button>
+  </div>
+  <button id="numpad-cancel">キャンセル</button>
+</div>
+
+<!-- カスタムボックス入力UI -->
+<div id="box-input-ui">
+  <div id="box-input-title">📦 ボックス設定 (m)</div>
+  <div class="box-inputs">
+    <div class="box-input-group" data-target="boxW">
+      <span>幅 (X)</span> <span id="box-val-boxW" class="box-val">1.0</span>
+    </div>
+    <div class="box-input-group" data-target="boxD">
+      <span>奥行 (Z)</span> <span id="box-val-boxD" class="box-val">1.0</span>
+    </div>
+    <div class="box-input-group" data-target="boxH">
+      <span>高さ (Y)</span> <span id="box-val-boxH" class="box-val">1.0</span>
+    </div>
+  </div>
+  
+  <div class="box-colors">
+    <div class="b-color-btn active" style="background:#e74c3c" data-color="0xe74c3c"></div>
+    <div class="b-color-btn" style="background:#3498db" data-color="0x3498db"></div>
+    <div class="b-color-btn" style="background:#f1c40f" data-color="0xf1c40f"></div>
+    <div class="b-color-btn" style="background:#2ecc71" data-color="0x2ecc71"></div>
+    <div class="b-color-btn" style="background:#9b59b6" data-color="0x9b59b6"></div>
+    <div class="b-color-btn" style="background:#95a5a6" data-color="0x95a5a6"></div>
+  </div>
+  
+  <div class="numpad-grid">
+    <button class="box-numpad-btn">7</button><button class="box-numpad-btn">8</button><button class="box-numpad-btn">9</button>
+    <button class="box-numpad-btn">4</button><button class="box-numpad-btn">5</button><button class="box-numpad-btn">6</button>
+    <button class="box-numpad-btn">1</button><button class="box-numpad-btn">2</button><button class="box-numpad-btn">3</button>
+    <button class="box-numpad-btn">0</button><button class="box-numpad-btn">.</button><button class="box-numpad-btn">C</button>
+  </div>
+  <div class="text-ui-btns">
+    <button id="box-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="box-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+
+<!-- H鋼杭 天端高さ入力UI v0097(50回目): 「H鋼杭」ボタン→ここで天端高さを入力→「配置」で従来どおりクリック配置。配置済みのH鋼杭を右クリックした時は「変更」で高さだけ直す。Enter=決定・Esc/右クリック=キャンセル -->
+<div id="hpile-input-ui">
+  <div id="hpile-input-title">H鋼杭 天端高さ</div>
+  <div id="hpile-input-row"><span>天端高さ</span><span><input id="hpile-top" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="±0"> m</span></div>
+  <div id="hpile-input-range">最高 +5.00m ／ 最低 -0.00m</div>
+  <div class="numpad-grid" id="hpile-numpad">
+    <button class="hpile-numpad-btn">7</button><button class="hpile-numpad-btn">8</button><button class="hpile-numpad-btn">9</button>
+    <button class="hpile-numpad-btn">4</button><button class="hpile-numpad-btn">5</button><button class="hpile-numpad-btn">6</button>
+    <button class="hpile-numpad-btn">1</button><button class="hpile-numpad-btn">2</button><button class="hpile-numpad-btn">3</button>
+    <button class="hpile-numpad-btn">-</button><button class="hpile-numpad-btn">0</button><button class="hpile-numpad-btn">.</button>
+    <button class="hpile-numpad-btn">+</button><button class="hpile-numpad-btn">C</button><button class="hpile-numpad-btn">⌫</button>
+  </div>
+  <div class="text-ui-btns">
+    <button id="hpile-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="hpile-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+<div id="hpile-edit-tip" style="display:none;position:fixed;z-index:9000;background:rgba(0,0,0,.8);color:#fff;padding:4px 10px;border-radius:5px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;">📏 右クリックで高さ修正</div>
+
+<!-- カラーコーン個数入力UI v0095(50回目・2A): 「何個設置しますか？」2〜10。Enter=配置・Esc/右クリック=キャンセル -->
+<div id="cone-input-ui">
+  <div id="cone-input-title">カラーコーン 設置数</div>
+  <div id="cone-input-row"><span>何個設置しますか？</span>
+    <select id="cone-count"><option value="2" selected>2 個</option><option value="3">3 個</option><option value="4">4 個</option><option value="5">5 個</option><option value="6">6 個</option><option value="7">7 個</option><option value="8">8 個</option><option value="9">9 個</option><option value="10">10 個</option></select>
+  </div>
+  <div class="text-ui-btns">
+    <button id="cone-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="cone-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+
+<!-- 足場(テスト機能)入力UI v0081(45回目) -->
+<div id="scaffold-input-ui">
+  <div id="scaffold-input-title">🪜 足場 設定(テスト機能)</div>
+  <div class="box-inputs">
+    <div class="scf-input-group" data-target="steps"><span>段数 (X段) 1〜30</span> <span id="scf-val-steps" class="box-val">2</span></div>
+    <div class="scf-input-group" data-target="spans"><span>列数 (Y列) 1〜50</span> <span id="scf-val-spans" class="box-val">3</span></div>
+    <div class="scf-width-row"><span>幅</span>
+      <select id="scf-width">
+        <option value="0.6">600 mm</option>
+        <option value="0.9" selected>900 mm</option>
+        <option value="1.2">1200 mm</option>
+      </select>
+    </div>
+  </div>
+  <div id="scf-info"></div>
+  <div class="numpad-grid">
+    <button class="scf-numpad-btn">7</button><button class="scf-numpad-btn">8</button><button class="scf-numpad-btn">9</button>
+    <button class="scf-numpad-btn">4</button><button class="scf-numpad-btn">5</button><button class="scf-numpad-btn">6</button>
+    <button class="scf-numpad-btn">1</button><button class="scf-numpad-btn">2</button><button class="scf-numpad-btn">3</button>
+    <button class="scf-numpad-btn">C</button><button class="scf-numpad-btn">0</button><button class="scf-numpad-btn">⌫</button>
+  </div>
+  <div class="text-ui-btns">
+    <button id="scf-btn-cancel" class="text-ui-btn" style="background:#c0392b">キャンセル</button>
+    <button id="scf-btn-edit" class="text-ui-btn" style="background:#37474f">編 集</button>
+    <button id="scf-btn-ok" class="text-ui-btn" style="background:#2e7d32">配 置</button>
+  </div>
+</div>
+
+<!-- 足場の開口の編集窓 v0084(45回目): 立面を表示し、ダブルクリックでその部分の絵を消す(車両通行用)。消せるのは最下段とその上の段だけ -->
+<div id="scaffold-edit-ui">
+  <div id="scf-edit-title">🪜 足場の立面（開口の編集）</div>
+  <div id="scf-edit-help">開けたい所を<b>ダブルクリック</b>（もう一度で元に戻る）。編集できるのは<b>最下段とその上の段</b>だけです（暗い段は編集できません）。</div>
+  <label id="scf-edit-pairlabel"><input type="checkbox" id="scf-edit-pair" checked> 2段まとめて開ける（車両通行用）</label>
+  <div id="scf-edit-scroll"><canvas id="scf-edit-cv" width="10" height="10"></canvas></div>
+  <div class="text-ui-btns">
+    <button id="scf-edit-clear" class="text-ui-btn" style="background:#6d4c41">すべて元に戻す</button>
+    <button id="scf-edit-close" class="text-ui-btn" style="background:#2e7d32">閉じる</button>
+  </div>
+</div>
+
+<!-- テキスト入力UI -->
+<div id="text-input-ui">
+  <div id="text-input-title">コメントを入力</div>
+  <textarea id="text-input-area" placeholder="Enterで改行できます"></textarea>
+  <div class="text-ui-btns">
+    <button id="text-btn-cancel" class="text-ui-btn">キャンセル</button>
+    <button id="text-btn-ok" class="text-ui-btn">決 定</button>
+  </div>
+</div>
+
+<!-- カスタム確認ダイアログ -->
+<div id="custom-confirm-overlay">
+  <div id="custom-confirm-box" class="custom-confirm-box">
+    <div id="custom-confirm-msg">線を削除しますか？</div>
+    <div class="custom-confirm-btns">
+      <button id="custom-confirm-yes" class="custom-confirm-btn">はい</button>
+      <button id="custom-confirm-no" class="custom-confirm-btn">いいえ</button>
+    </div>
+  </div>
+</div>
+
+<!-- v0089(47回目): HTML書き出しの確認ダイアログ。メールで送れない苦情を避けるため、ZIPで出す旨を必ず見せる(Y/Enter=はい・N/Esc=いいえ) -->
+<div id="btn-help-tip"></div> <!-- v0093: ボタンの解説 -->
+<div id="vhtml-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;">
+  <div class="custom-confirm-box" style="width:max-content;max-width:min(640px,92vw);">
+    <div id="vhtml-confirm-msg" style="line-height:1.7;text-align:left;margin-bottom:1.7em;">
+      Viewer一体型HTMLを出力します。<br>
+      <span style="white-space:nowrap;">ＺＩＰファイルで出力しますので、<b>解凍して使用してください。</b></span><br>
+      また解凍されたＨＴＭＬファイルは<b style="color:#ff8a80;">メールで送れません。</b><br>
+      メールで送る際は<b style="color:#ff8a80;">ＺＩＰファイルのまま</b>送信してください。<br>
+      <span style="color:#ffcc80;">※ iPhone・iPadなどのiOS端末では使用できません。</span>
+    </div>
+    <div class="custom-confirm-btns">
+      <button id="vhtml-confirm-yes" class="custom-confirm-btn">はい(Y)</button>
+      <button id="vhtml-confirm-no" class="custom-confirm-btn">いいえ(N)</button>
+    </div>
+  </div>
+</div>
+
+<!-- r063: 構台作図終了確認ダイアログ -->
+<div id="kotai-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:20000;align-items:center;justify-content:center;">
+  <div class="custom-confirm-box">
+    <div id="kotai-confirm-msg">構台作図を終了しますか？</div>
+    <div class="custom-confirm-btns">
+      <button id="kotai-confirm-yes" class="custom-confirm-btn">はい</button>
+      <button id="kotai-confirm-no" class="custom-confirm-btn">いいえ</button>
+    </div>
+  </div>
+</div>
+
+<script src="data/voldia_models.js"></script>
+<script src="data/voldia_scaffold_tex.js"></script>
+<script src="data/voldia_viewer_template.js?v=r3"></script> <!-- v0089(47回目): HTML書き出しのViewer一体型HTMLのひな形 --> <!-- v0082(45回目): 足場のテクスチャ画像 -->
+<!-- v0094(48回目): ①左パネルの「Voldiaに戻る」と「保存」の間隔を他のボタンとそろえた(#voldia-save-btnにmargin-top:6px) ②「Vold出力」→「保存(Vold出力)」・「印刷(A3 PDF)」の括弧の中を小さい字に(.btn-sub)。ロジックは js/voldia_placement.js r149(右クリック/Escでダイアログをキャンセル・白丸・構台の右クリックで1つ戻る・Enter繰り返しの表示・●の吸着・線のマウスオーバー表示)。 -->
+<!-- v0080(41回目): 左パネルの「印刷」の上に「📷 範囲スクショ」を追加(#voldia-shot-btn)。押すと画面全体が範囲選択モードになり(#shot-select-overlay)、ドラッグした範囲をそのままPNG保存する。背景色の変更は無し。ロジックは voldia_placement.js の「範囲スクショ」ブロック。 -->
+<div id="shot-select-overlay"><div id="shot-select-box"></div></div>
+<!-- v0079(40回目): 【削除】data/LOW_1TOKO_geo.js と data/voldia_worker_toko.js を読み込んでいたscriptタグ2行。
+     何だったか: r079(37回目)で作業員の新モデル(LOW_1TOKO)を別ファイルで読み込んでいた。
+     なぜ消したか: 作業員のモデルデータ(LOW_1TOKO_GEO)と生成関数(createWorkerFromModel)はr073でdata/voldia_models.js内に統合済み(別ファイル不要)。
+     voldia_placement.jsも両ファイルを参照しない。ファイルは存在せず、読み込みのたびに404(コンソールにエラー)になっていた。
+     voldia_models.jsはvoldia_placement.jsより前に読み込むこと(順序は従来どおり)。 -->
+<script>
+// v0083(45回目): ヘルプガイドの読み込み。本体(Voldia)内のiframeでは本体のガイドを開くので読み込まない。単独で開いた時だけ自前のガイドを使う。
+window.HELPGUIDE_CFG = { DIR: 'Explan_C/', PREFIX: 'Explan_', ACCENT: '#4caf50', PANEL_TOP: 120, TOAST_PC: '“簡単な説明”は、F1キーでいつでも呼び出せます。' };
+if (window.parent === window) { document.write('<script src="js/voldia_helpguide.js"><\/script>'); }
+</script>
+<script src="js/voldia_placement.js"></script>
+
+</body>
+</html>

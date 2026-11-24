@@ -79,6 +79,7 @@
     '#hg-panel .hg-navgrp{display:flex;align-items:center;gap:8px;margin-left:auto;white-space:nowrap;}' +
     '#hg-panel .hg-nav{white-space:nowrap;padding:5px 12px;font-size:.82em;color:#f0f4f8;background:#334;border:1px solid #556;border-radius:4px;cursor:pointer;}' +
     '#hg-panel .hg-nav:disabled{opacity:.35;cursor:not-allowed;}' +
+    '#hg-panel .hg-nav:not(:disabled):hover{background:#445;border-color:#89a;color:#fff;}' +   /* 51回目: [前へ][次へ]にホバー(従来は変わらなかった) */
     '#hg-panel .hg-ind{font-size:.85em;color:#bcd;}' +
     '.hg-btn{padding:8px 14px;font-size:.9em;font-weight:700;color:#fff;background:' + CFG.ACCENT + ';border:1px solid rgba(255,255,255,.35);border-radius:8px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45);}' +
     '.hg-btn:active{filter:brightness(1.25);}' +
