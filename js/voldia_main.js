@@ -1090,7 +1090,10 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       else redraw();
       return;
     }
-    if((e.key==='Delete'||e.key==='Backspace')&&!drawing&&selectedSet.size>0){
+    if(e.key==='Backspace'&&drawing&&tool==='yamadome'&&cur&&cur.pts.length>0){ // 51回目: 山留の作図中は最後の点を1つ戻せる(交差で確定できない時の手戻り用)
+    e.preventDefault();cur.pts.pop();redraw();toast('↩ 点を削除');return;
+  }
+  if((e.key==='Delete'||e.key==='Backspace')&&!drawing&&selectedSet.size>0){
       const tag=document.activeElement&&document.activeElement.tagName;
       if(tag==='INPUT'||tag==='TEXTAREA')return;
       e.preventDefault();
@@ -2561,7 +2564,7 @@ function onMouseDown(e){
   setTimeout(()=>showSnap(null),500);
   const rawPt=snap?{x:snap.x,y:snap.y}:{x:lx2,y:ly2};
   const pt=snap?rawPt:roundPt(rawPt);
-  if(tool==='yamadome'&&_yamaWouldCross(cur.pts,pt)){ toast('⚠️ 山留が交差しています(または線に近すぎます)'); return; } // 51回目: 自己交差・ほぼ接触する線は引けない(クリック無効)
+  if(tool==='yamadome'&&_yamaWouldCross(cur.pts,pt)){ toast('⚠️ 山留が交差しています(または他の線に近すぎます。すき間50cm未満は不可)'); return; } // 51回目: 自己交差・ほぼ接触する線は引けない(クリック無効)
   cur.pts.push(pt);
   if(tool==='rect'&&cur.pts.length===2)finishShape();
 }
@@ -2711,6 +2714,14 @@ function _yamaSame(a,b){ return Math.abs(a.x-b.x)<1e-9&&Math.abs(a.y-b.y)<1e-9; 
 //   ほぼ接触の線は3D側で極細の隙間・スリバー面になり、自己交差と同じく処理が壊れるため。
 //   近さの許容は画面上の約8px(=8/zoom)。拡大すれば、その分だけ近い線も引ける(細かい作図の邪魔をしない)。
 const _YAMA_NEAR_PX=8;
+// 51回目(マスター方針・実データ Voldia_261125_1133.vold で確認): 実際の工事では50cm未満の隙間の山留は施工できない(バックホーのバケットもスコップも入らない)。
+//   画面の8pxだけでは、縮尺1/100の図面で約47cmのすき間(=画面上54px)を止められなかった。実寸(mm)の最小すき間を「施工できる最小幅」500mmにして、画面基準との大きい方を許容にする。
+const _YAMA_MIN_GAP_MM=500;
+function _yamaTol(){ // 許容距離(画面座標px)。pxToMm(px)=px/RS/72*25.4*scaleDenom の逆変換
+  const scr=_YAMA_NEAR_PX/zoom;
+  const mmPx=(scaleDenom>0)?_YAMA_MIN_GAP_MM*RS*72/(25.4*scaleDenom):0;
+  return Math.max(scr,isFinite(mmPx)?mmPx:0);
+}
 function _yamaPtSegDist(p,a,b){ // 点pと線分abの距離
   const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
   let t=l2?((p.x-a.x)*dx+(p.y-a.y)*dy)/l2:0; t=Math.max(0,Math.min(1,t));
@@ -2723,7 +2734,7 @@ function _yamaSegDist(a,b,c,d){ // 線分abと線分cdの距離(交差・接触�
 function _yamaWouldCross(pts,P){ // 今の点列ptsの最後から P へ線を引くと、すでに描いた線と交差する(または近すぎる)か
   const n=pts.length; if(n<2) return false;
   const L=pts[n-1]; if(_yamaSame(L,P)) return false;
-  const tol=_YAMA_NEAR_PX/zoom;
+  const tol=_yamaTol();
   // 直前の線(Q→L)の上を折り返す/ほぼ重なる(Lから離れているのにQ→Lの線に近い)のも不可
   const Q=pts[n-2];
   if(_yamaPtSegDist(P,Q,L)<tol&&Math.hypot(P.x-L.x,P.y-L.y)>=tol) return true;
@@ -2736,7 +2747,7 @@ function _yamaWouldCross(pts,P){ // 今の点列ptsの最後から P へ線を�
 }
 function _yamaClosingCross(pts){ // 確定時: 最後の点→始点(閉じる線)が、途中の線と交差する(または近すぎる)か
   const n=pts.length; if(n<4) return false;
-  const L=pts[n-1],F=pts[0],tol=_YAMA_NEAR_PX/zoom;
+  const L=pts[n-1],F=pts[0],tol=_yamaTol();
   for(let i=1;i<=n-3;i++){ if(_yamaSegDist(L,F,pts[i],pts[i+1])<tol) return true; }
   return false;
 }
@@ -2748,7 +2759,7 @@ function finishShape(){
   // 山留ツールの完了
   if(tool==='yamadome'){
     if(pts.length<3){cancelDraw();return;}
-    if(_yamaClosingCross(pts)){ toast('⚠️ 山留が交差しています(最後の点から始点への線が、他の線に交差または近すぎます)'); return; } // 51回目: 閉じる線が交差するなら確定しない
+    if(_yamaClosingCross(pts)){ toast('⚠️ 山留が交差しています(最後の点から始点へ閉じる線が、他の線に交差または近すぎます。Backspaceで1点戻れます)'); return; } // 51回目: 閉じる線が交差するなら確定しない
     pushUndo();
     drawCv.style.cursor=''; // 51回目: ×印ポインタを戻す
     yamadome={pts:[...pts]};
