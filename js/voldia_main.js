@@ -1,3 +1,4 @@
+// 51回目(続き4): 設置済みの山留の頂点ドラッグにも同じ判定(_yamaDragInvalid)。
 // 51回目(続き3): 山留の頂点が30°以下の鋭角になる点は置けない(_yamaTooSharp/_yamaClosingSharp)。
 // 51回目(続き2): 山留の作図中は自己交差する線を引けない(_yamaWouldCross/_yamaClosingCross。×印ポインタ+トースト)。
 // 51回目(続き): ①Escで3D生成方法ダイアログを閉じられない件(Esc処理の登録が_lxInit内だった)を修正 ②通常計算の時は捨てコン＋砕石・余掘り・法面角度を非表示にして説明文を出す。
@@ -1074,7 +1075,7 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       }
     }
     if(e.key==='Escape'){
-      if(yamadomeEditMode){yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;showSnap(null);setToolBar('');redraw();toast('ESC — 山留編集キャンセル');return;}
+      if(yamadomeEditMode){yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;drawCv.style.cursor='';showSnap(null);setToolBar('');redraw();toast('ESC — 山留編集キャンセル');return;}
       if(surveyMode){setSurveyMode(false);toast('ESC — 測点設置キャンセル');return;}
       if(distMode){setDistMode(false);toast('ESC — 距離測定キャンセル');return;}
       if(selUnionMode){setSelUnionMode(false);toast('ESC — 選択合成キャンセル');return;}
@@ -1199,6 +1200,7 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       yamadomeEditVtx=-1;
       yamadomeEditMode=false;
       yamadomeEditVtxStart=null;
+      drawCv.style.cursor=''; // 51回目: ×印ポインタを戻す
       showSnap(null); // 新7/8(2026-08-28 引継ぎ18回目マスター指摘): ドラッグ終了時にスナップ表示が残るのを解消
       setToolBar('');redraw();
     }
@@ -2456,6 +2458,7 @@ function onMouseDown(e){
     const vi=yamadome.pts.findIndex(p=>Math.hypot(p.x-lx,p.y-ly)<HIT);
     if(vi>=0){
       yamadomeEditMode=true;yamadomeEditVtx=vi;
+      _yamaDragFree=!!_yamaPolyInvalid(yamadome.pts); // 51回目: 開始時にすでに交差・鋭角・近すぎがある図面は制限せず、直せるようにする
       // 新7-再修正(マスター指摘): 直交移動の基準点は隣接頂点ではなく、
       // 「ドラッグ移動する頂点の初期位置」固定とする。ドラッグ開始時に記憶。
       yamadomeEditVtxStart={x:yamadome.pts[vi].x,y:yamadome.pts[vi].y};
@@ -2624,6 +2627,16 @@ function onMouseMove(e){
     }
     showSnap(gsnap,e.clientX,e.clientY);
     if(gsnap){vx=gsnap.x;vy=gsnap.y;}
+    { // 51回目: 作図中と同じ判定。問題がある位置へは動かさず(頂点は最後の問題ない位置のまま)、×印ポインタ+トースト
+      const why=_yamaDragFree?null:_yamaDragInvalid(yamadome.pts,yamadomeEditVtx,{x:vx,y:vy});
+      if(why){
+        drawCv.style.cursor=_YAMA_X_CURSOR;
+        const now=Date.now();
+        if(now-_yamaDragToastAt>1200){ _yamaDragToastAt=now; toast(why==='sharp'?'⚠️ 山留の角が鋭すぎます(30°以下は不可)':'⚠️ 山留が交差しています(または他の線に近すぎます。すき間50cm未満は不可)'); }
+        return;
+      }
+      drawCv.style.cursor='';
+    }
     yamadome.pts[yamadomeEditVtx]={x:vx,y:vy};
     if(animId)cancelAnimationFrame(animId);
     animId=requestAnimationFrame(()=>redraw());
@@ -2748,6 +2761,31 @@ function _yamaClosingSharp(pts){ // 確定時: 閉じた時にできる最後の
   const n=pts.length; if(n<3) return false;
   return _yamaAngleDeg(pts[n-1],pts[n-2],pts[0])<=_YAMA_MIN_ANGLE_DEG || _yamaAngleDeg(pts[0],pts[n-1],pts[1])<=_YAMA_MIN_ANGLE_DEG;
 }
+// 51回目(マスター要望): 設置済みの山留の頂点をドラッグで動かす時にも、作図中と同じ判定(交差・500mm未満のすき間・30°以下の鋭角)をする。
+//   動かす頂点に関わる所だけ調べる: ①その頂点と両隣の頂点の角度 ②その頂点につながる2本の線が、端点を共有しない他の線と交差・近すぎにならないか。
+//   vs=調べる頂点番号(空=すべて)。戻り値: 'sharp'(鋭角) / 'cross'(交差・近すぎ) / null(問題なし)
+function _yamaPolyInvalid(q,vs){
+  const n=q.length; if(n<3) return null;
+  const idx=vs&&vs.length?vs:q.map((_,i)=>i), tol=_yamaTol();
+  for(const v of idx){
+    if(_yamaAngleDeg(q[v],q[(v+n-1)%n],q[(v+1)%n])<=_YAMA_MIN_ANGLE_DEG) return 'sharp';
+  }
+  if(n<4) return null;
+  for(const v of idx){
+    for(const [a,b] of [[(v+n-1)%n,v],[v,(v+1)%n]]){
+      for(let j=0;j<n;j++){
+        const k=(j+1)%n; if(j===a||j===b||k===a||k===b) continue;
+        if(_yamaSegDist(q[a],q[b],q[j],q[k])<tol) return 'cross';
+      }
+    }
+  }
+  return null;
+}
+function _yamaDragInvalid(pts,i,P){ // 頂点iを P へ動かしたら問題があるか
+  const n=pts.length, q=pts.map((p,k)=>k===i?P:p);
+  return _yamaPolyInvalid(q,[(i+n-1)%n,i,(i+1)%n]);
+}
+let _yamaDragFree=false,_yamaDragToastAt=0; // ドラッグ開始時にすでに問題がある古い図面は、直せるように判定しない
 function _yamaWouldCross(pts,P){ // 今の点列ptsの最後から P へ線を引くと、すでに描いた線と交差する(または近すぎる)か
   const n=pts.length; if(n<2) return false;
   const L=pts[n-1]; if(_yamaSame(L,P)) return false;
