@@ -22,8 +22,8 @@
   transition:transform .7s var(--gm-ease), filter .7s ease;
 }
 #gm-dlg .gm-intro-fig{
-  position:relative; width:100%; aspect-ratio:618/567; overflow:hidden;
-  border-radius:15.2% / 16.6%;          /* 原画の角丸(実測で半径約94px / 618x567)に合わせる */
+  position:relative; width:100%; aspect-ratio:390/368; overflow:hidden;
+  border-radius:5.6% / 6%;          /* 51回目: 新しい絵の角丸(実測で半径約22px / 390x368)に合わせる(旧絵は半径約94px / 618x567 = 15.2% / 16.6%) */
 }
 #gm-dlg .gm-intro-fig img{ display:block; width:100%; height:100%; user-select:none; -webkit-user-drag:none; pointer-events:none; }
 

@@ -1,3 +1,4 @@
+// 51回目(続き2): 山留の作図中は自己交差する線を引けない(_yamaWouldCross/_yamaClosingCross。×印ポインタ+トースト)。
 // 51回目(続き): ①Escで3D生成方法ダイアログを閉じられない件(Esc処理の登録が_lxInit内だった)を修正 ②通常計算の時は捨てコン＋砕石・余掘り・法面角度を非表示にして説明文を出す。
 // 51回目: ①ノースアローの数字(角度)を、矢印が下半分を向く間は上側へ(Nマークと重なる件) ②測点が0個になったらノースアローの向き・原点測点を初期化(redraw内) ③出力ダイアログ: 測点が無い時は「北の向きは2D画面右上の🧭で変更できます」を出さない。
 // 50回目(v0168): 出力ダイアログの仮原点の欄を「仮原点」だけに短縮(説明は確認文に集約)。ダイアログ自体のはみ出し対策はHTML側(#lx-dlg)。
@@ -2560,6 +2561,7 @@ function onMouseDown(e){
   setTimeout(()=>showSnap(null),500);
   const rawPt=snap?{x:snap.x,y:snap.y}:{x:lx2,y:ly2};
   const pt=snap?rawPt:roundPt(rawPt);
+  if(tool==='yamadome'&&_yamaWouldCross(cur.pts,pt)){ toast('⚠️ 山留が交差しています(または線に近すぎます)'); return; } // 51回目: 自己交差・ほぼ接触する線は引けない(クリック無効)
   cur.pts.push(pt);
   if(tool==='rect'&&cur.pts.length===2)finishShape();
 }
@@ -2655,6 +2657,7 @@ function onMouseMove(e){
   else{// Fix1: スナップがない場合はgridスナップ
     const rp=roundPt({x:mx,y:my});mx=rp.x;my=rp.y;
   }
+  if(tool==='yamadome') drawCv.style.cursor=_yamaWouldCross(cur.pts,{x:mx,y:my})?_YAMA_X_CURSOR:''; // 51回目: 交差する位置ではポインタを×印に
   if(animId)cancelAnimationFrame(animId);
   animId=requestAnimationFrame(()=>redraw(mx,my));
 }
@@ -2689,13 +2692,65 @@ function s90(x0,y0,mx,my){
   return{x:x0+Math.cos(sn)*d,y:y0+Math.sin(sn)*d};
 }
 
+// ===== 51回目(マスター要望): 山留の作図中は「自己交差する線」を引けないようにする =====
+// 山留(仮想山留)が自己交差(リボン型・∞型)すると3Dの処理がおかしくなるため、作図の時点で止める。
+//  ・頂点をクリックした時、直前の点→新しい点の線が、すでに描いた線と交差(接触含む)するならクリックを無効にして「山留が交差しています」を出す。
+//  ・マウスを動かしている間、そこをクリックすると交差する位置ではポインタを×印にする。
+//  ・確定(Enter・ダブルクリック・始点クリック)の時は、最後の点→始点の線(山留は閉じた形)も同じく調べる。
+function _yamaSegX(a,b,c,d){ // 線分ab と 線分cd が交差または接触するか
+  const o=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+  const o1=o(a,b,c),o2=o(a,b,d),o3=o(c,d,a),o4=o(c,d,b);
+  if(((o1>0&&o2<0)||(o1<0&&o2>0))&&((o3>0&&o4<0)||(o3<0&&o4>0))) return true;
+  const on=(p,q,r)=>Math.min(p.x,q.x)<=r.x&&r.x<=Math.max(p.x,q.x)&&Math.min(p.y,q.y)<=r.y&&r.y<=Math.max(p.y,q.y);
+  if(o1===0&&on(a,b,c)) return true; if(o2===0&&on(a,b,d)) return true;
+  if(o3===0&&on(c,d,a)) return true; if(o4===0&&on(c,d,b)) return true;
+  return false;
+}
+function _yamaSame(a,b){ return Math.abs(a.x-b.x)<1e-9&&Math.abs(a.y-b.y)<1e-9; }
+// 51回目(マスター指摘「交差は出来ないが、ほぼ接触は出来てしまう」): 厳密な交差だけでなく「近すぎる」も不可にする。
+//   ほぼ接触の線は3D側で極細の隙間・スリバー面になり、自己交差と同じく処理が壊れるため。
+//   近さの許容は画面上の約8px(=8/zoom)。拡大すれば、その分だけ近い線も引ける(細かい作図の邪魔をしない)。
+const _YAMA_NEAR_PX=8;
+function _yamaPtSegDist(p,a,b){ // 点pと線分abの距離
+  const dx=b.x-a.x,dy=b.y-a.y,l2=dx*dx+dy*dy;
+  let t=l2?((p.x-a.x)*dx+(p.y-a.y)*dy)/l2:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
+}
+function _yamaSegDist(a,b,c,d){ // 線分abと線分cdの距離(交差・接触は0)
+  if(_yamaSegX(a,b,c,d)) return 0;
+  return Math.min(_yamaPtSegDist(a,c,d),_yamaPtSegDist(b,c,d),_yamaPtSegDist(c,a,b),_yamaPtSegDist(d,a,b));
+}
+function _yamaWouldCross(pts,P){ // 今の点列ptsの最後から P へ線を引くと、すでに描いた線と交差する(または近すぎる)か
+  const n=pts.length; if(n<2) return false;
+  const L=pts[n-1]; if(_yamaSame(L,P)) return false;
+  const tol=_YAMA_NEAR_PX/zoom;
+  // 直前の線(Q→L)の上を折り返す/ほぼ重なる(Lから離れているのにQ→Lの線に近い)のも不可
+  const Q=pts[n-2];
+  if(_yamaPtSegDist(P,Q,L)<tol&&Math.hypot(P.x-L.x,P.y-L.y)>=tol) return true;
+  const nearFirst=Math.hypot(P.x-pts[0].x,P.y-pts[0].y)<tol; // 始点へ戻ろうとしている(閉じる操作)
+  for(let i=0;i<=n-3;i++){ // 最後の線(n-2→n-1)は端点を共有するので上で別に調べた
+    if(i===0&&nearFirst) continue; // 始点へ戻る線は、始点を共有する最初の線とは交差扱いにしない
+    if(_yamaSegDist(L,P,pts[i],pts[i+1])<tol) return true;
+  }
+  return false;
+}
+function _yamaClosingCross(pts){ // 確定時: 最後の点→始点(閉じる線)が、途中の線と交差する(または近すぎる)か
+  const n=pts.length; if(n<4) return false;
+  const L=pts[n-1],F=pts[0],tol=_YAMA_NEAR_PX/zoom;
+  for(let i=1;i<=n-3;i++){ if(_yamaSegDist(L,F,pts[i],pts[i+1])<tol) return true; }
+  return false;
+}
+const _YAMA_X_CURSOR='url("data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><path d="M5 5L23 23M23 5L5 23" stroke="#000" stroke-width="7" stroke-linecap="round"/><path d="M5 5L23 23M23 5L5 23" stroke="#ff3030" stroke-width="4" stroke-linecap="round"/></svg>')+'") 14 14, not-allowed';
+
 function finishShape(){
   if(!cur)return;
   const pts=cur.pts;
   // 山留ツールの完了
   if(tool==='yamadome'){
     if(pts.length<3){cancelDraw();return;}
+    if(_yamaClosingCross(pts)){ toast('⚠️ 山留が交差しています(最後の点から始点への線が、他の線に交差または近すぎます)'); return; } // 51回目: 閉じる線が交差するなら確定しない
     pushUndo();
+    drawCv.style.cursor=''; // 51回目: ×印ポインタを戻す
     yamadome={pts:[...pts]};
     cur=null; drawing=false; tool=null;
     _startToolEndCooldown();
