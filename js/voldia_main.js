@@ -1,3 +1,4 @@
+// 51回目(続き3): 山留の頂点が30°以下の鋭角になる点は置けない(_yamaTooSharp/_yamaClosingSharp)。
 // 51回目(続き2): 山留の作図中は自己交差する線を引けない(_yamaWouldCross/_yamaClosingCross。×印ポインタ+トースト)。
 // 51回目(続き): ①Escで3D生成方法ダイアログを閉じられない件(Esc処理の登録が_lxInit内だった)を修正 ②通常計算の時は捨てコン＋砕石・余掘り・法面角度を非表示にして説明文を出す。
 // 51回目: ①ノースアローの数字(角度)を、矢印が下半分を向く間は上側へ(Nマークと重なる件) ②測点が0個になったらノースアローの向き・原点測点を初期化(redraw内) ③出力ダイアログ: 測点が無い時は「北の向きは2D画面右上の🧭で変更できます」を出さない。
@@ -2564,6 +2565,7 @@ function onMouseDown(e){
   setTimeout(()=>showSnap(null),500);
   const rawPt=snap?{x:snap.x,y:snap.y}:{x:lx2,y:ly2};
   const pt=snap?rawPt:roundPt(rawPt);
+  if(tool==='yamadome'&&_yamaTooSharp(cur.pts,pt)){ toast('⚠️ 山留の角が鋭すぎます(30°以下は不可)'); return; } // 51回目
   if(tool==='yamadome'&&_yamaWouldCross(cur.pts,pt)){ toast('⚠️ 山留が交差しています(または他の線に近すぎます。すき間50cm未満は不可)'); return; } // 51回目: 自己交差・ほぼ接触する線は引けない(クリック無効)
   cur.pts.push(pt);
   if(tool==='rect'&&cur.pts.length===2)finishShape();
@@ -2660,7 +2662,7 @@ function onMouseMove(e){
   else{// Fix1: スナップがない場合はgridスナップ
     const rp=roundPt({x:mx,y:my});mx=rp.x;my=rp.y;
   }
-  if(tool==='yamadome') drawCv.style.cursor=_yamaWouldCross(cur.pts,{x:mx,y:my})?_YAMA_X_CURSOR:''; // 51回目: 交差する位置ではポインタを×印に
+  if(tool==='yamadome') drawCv.style.cursor=(_yamaWouldCross(cur.pts,{x:mx,y:my})||_yamaTooSharp(cur.pts,{x:mx,y:my}))?_YAMA_X_CURSOR:''; // 51回目: 交差する位置ではポインタを×印に
   if(animId)cancelAnimationFrame(animId);
   animId=requestAnimationFrame(()=>redraw(mx,my));
 }
@@ -2731,6 +2733,21 @@ function _yamaSegDist(a,b,c,d){ // 線分abと線分cdの距離(交差・接触�
   if(_yamaSegX(a,b,c,d)) return 0;
   return Math.min(_yamaPtSegDist(a,c,d),_yamaPtSegDist(b,c,d),_yamaPtSegDist(c,a,b),_yamaPtSegDist(d,a,b));
 }
+// 51回目(マスター提案): 山留の頂点の角度が30°以下の鋭角になる点は置けない(3Dで針のような破綻形状になるため)。
+const _YAMA_MIN_ANGLE_DEG=30;
+function _yamaAngleDeg(V,A,B){ // 頂点Vでの、V→A と V→B のなす角(0〜180°)
+  const ax=A.x-V.x,ay=A.y-V.y,bx=B.x-V.x,by=B.y-V.y,la=Math.hypot(ax,ay),lb=Math.hypot(bx,by);
+  if(la<1e-9||lb<1e-9) return 180; // 長さ0の線は角度なし(別の処理で扱う)
+  return Math.acos(Math.max(-1,Math.min(1,(ax*bx+ay*by)/(la*lb))))*180/Math.PI;
+}
+function _yamaTooSharp(pts,P){ // 今の最後の点Lに P をつなぐと、Lの角(Q-L-P)が30°以下になるか
+  const n=pts.length; if(n<2) return false;
+  return _yamaAngleDeg(pts[n-1],pts[n-2],P)<=_YAMA_MIN_ANGLE_DEG;
+}
+function _yamaClosingSharp(pts){ // 確定時: 閉じた時にできる最後の点・始点の角が30°以下か
+  const n=pts.length; if(n<3) return false;
+  return _yamaAngleDeg(pts[n-1],pts[n-2],pts[0])<=_YAMA_MIN_ANGLE_DEG || _yamaAngleDeg(pts[0],pts[n-1],pts[1])<=_YAMA_MIN_ANGLE_DEG;
+}
 function _yamaWouldCross(pts,P){ // 今の点列ptsの最後から P へ線を引くと、すでに描いた線と交差する(または近すぎる)か
   const n=pts.length; if(n<2) return false;
   const L=pts[n-1]; if(_yamaSame(L,P)) return false;
@@ -2759,6 +2776,7 @@ function finishShape(){
   // 山留ツールの完了
   if(tool==='yamadome'){
     if(pts.length<3){cancelDraw();return;}
+    if(_yamaClosingSharp(pts)){ toast('⚠️ 山留の角が鋭すぎます(閉じた時の最後の点か始点の角が30°以下)。Backspaceで1点戻れます'); return; } // 51回目
     if(_yamaClosingCross(pts)){ toast('⚠️ 山留が交差しています(最後の点から始点へ閉じる線が、他の線に交差または近すぎます。Backspaceで1点戻れます)'); return; } // 51回目: 閉じる線が交差するなら確定しない
     pushUndo();
     drawCv.style.cursor=''; // 51回目: ×印ポインタを戻す
