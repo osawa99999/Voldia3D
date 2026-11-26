@@ -1,3 +1,5 @@
+// 51回目(続き6): 山留の頂点ドラッグは「✏ 修正」モードの時だけ。修正モード中は山留頂点にハンドル(●)と「山留頂点」のフロートテキスト。
+// 51回目(続き5): 山留が設置済みの時はボタンが「🗑 山留削除」になる(_syncYamadomeBtn)。押すと確認→削除だけ→ツール未選択。
 // 51回目(続き4): 設置済みの山留の頂点ドラッグにも同じ判定(_yamaDragInvalid)。
 // 51回目(続き3): 山留の頂点が30°以下の鋭角になる点は置けない(_yamaTooSharp/_yamaClosingSharp)。
 // 51回目(続き2): 山留の作図中は自己交差する線を引けない(_yamaWouldCross/_yamaClosingCross。×印ポインタ+トースト)。
@@ -392,12 +394,21 @@ function undo(){
   if(state && typeof state==='object' && state.shapes){
     shapes=state.shapes; yamadome=state.yamadome||null; surveyPts=state.surveyPts||[];
   } else { shapes=state; yamadome=null; surveyPts=[]; } // 旧形式互換
-  const yb=document.getElementById('yamadome-btn');
-  if(yb){yb.style.opacity=yamadome?'0.4':'';}
+  _syncYamadomeBtn();
   if(!undoStack.length)document.getElementById('undo-btn').disabled=true;
   selectedSet.clear(); selUnionSet.clear(); subBase=-1; subTargets.clear();
   updSidebar();redraw();toast('↩ 元に戻しました');
 }
+// 51回目(マスター要望): 山留ボタンの表示を yamadome の有無に合わせる唯一の場所。
+//   山留が無い=「🏗 山留」(押すと作図開始) / 山留がある=「🗑 山留削除」(押すと確認して削除だけ行う)。
+//   以前は設置後にボタンを暗転(opacity)させていて、その処理が元に戻す・やり直し・全消去・読み込み・ダブルクリック削除など複数箇所に散らばっていたので、ここに集約した。
+function _syncYamadomeBtn(){
+  const yb=document.getElementById('yamadome-btn'); if(!yb) return;
+  yb.disabled=false; yb.style.opacity='';
+  if(yamadome){ yb.textContent='🗑 山留削除'; yb.title='設置済みの山留を削除します(山留は1つしか配置できません)'; yb.classList.add('yama-del'); }
+  else { yb.textContent='🏗 山留'; yb.title='仮想山留を1つ配置（土量計算でクリップ）'; yb.classList.remove('yama-del'); }
+}
+window._syncYamadomeBtn=_syncYamadomeBtn;
 function redo(){
   if(!redoStack.length)return;
   _invalidateRepeat();
@@ -409,8 +420,7 @@ function redo(){
   if(state && typeof state==='object' && state.shapes){
     shapes=state.shapes; yamadome=state.yamadome||null; surveyPts=state.surveyPts||[];
   } else { shapes=state; yamadome=null; surveyPts=[]; }
-  const yb=document.getElementById('yamadome-btn');
-  if(yb){yb.style.opacity=yamadome?'0.4':'';}
+  _syncYamadomeBtn();
   if(!redoStack.length)document.getElementById('redo-btn').disabled=true;
   selectedSet.clear(); selUnionSet.clear(); subBase=-1; subTargets.clear();
   updSidebar();redraw();toast('↪ 戻すを取消しました');
@@ -816,13 +826,16 @@ document.getElementById('survey-dialog').addEventListener('contextmenu',e=>{e.pr
 
   document.getElementById('yamadome-btn').addEventListener('click',async()=>{
     if(yamadome){
-      const ok=await customConfirm('前に書いた山留は削除されます。よろしいですか。\n※３D処理の問題の為、現状、山留は１つしか配置出来ません。', true);
+      // 51回目(マスター要望): 設置済みの時は「山留削除」ボタン。削除だけ行い、ツール未選択状態に戻す(続けて描く時は、もう一度「山留」を押す)。
+      const ok=await customConfirm('山留を削除します。よろしいですか？\n※３D処理の問題の為、山留ラインは\n現状１つしか配置できません', true);
       if(!ok)return;
+      if(typeof window.cancelAllTools==='function') window.cancelAllTools(); // 使いかけのツールがあれば終了(ツール未選択へ)
       pushUndo();
       yamadome=null;
-      const yb=document.getElementById('yamadome-btn');
-      if(yb){yb.disabled=false;yb.style.opacity='';}
-      updSidebar();redraw();
+      yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;drawCv.style.cursor='';
+      _syncYamadomeBtn();
+      setToolBar('');showSnap(null);updSidebar();redraw();toast('🏗 山留を削除しました');
+      return;
     }
     startTool('yamadome');
     setToolBar('🏗 山留作図中（Enter or 始点クリックで確定。Shiftで直交）');
@@ -842,8 +855,7 @@ document.getElementById('survey-dialog').addEventListener('contextmenu',e=>{e.pr
       yamadome=null;
       surveyPts=[]; // r024(AreCal移植): 測点も全消去対象に含める
       northAngleDeg=0; originSurveyIdx=null; updateNorthArrowUI(); // r060: ノースアローも初期化
-      const yb=document.getElementById('yamadome-btn');
-      if(yb){yb.disabled=false;yb.style.opacity='';}
+      _syncYamadomeBtn();
       updSidebar();redraw();toast('🗑 オブジェクトを全消去');
     }
   });
@@ -1075,7 +1087,11 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       }
     }
     if(e.key==='Escape'){
-      if(yamadomeEditMode){yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;drawCv.style.cursor='';showSnap(null);setToolBar('');redraw();toast('ESC — 山留編集キャンセル');return;}
+      if(yamadomeEditMode){
+        // 51回目: 修正モード中のESCは、ドラッグ中の頂点を元の位置に戻すだけ(修正モード自体は続ける。_editEscapeと二重に終了しない)
+        if(yamadome&&yamadomeEditVtx>=0&&yamadomeEditVtxStart) yamadome.pts[yamadomeEditVtx]={x:yamadomeEditVtxStart.x,y:yamadomeEditVtxStart.y};
+        yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;drawCv.style.cursor='';showSnap(null);setToolBar(editMode?'✏ 修正モード':'');redraw();toast('ESC — 山留の移動をキャンセルしました');window._yamaEscAt=performance.now();return;
+      }
       if(surveyMode){setSurveyMode(false);toast('ESC — 測点設置キャンセル');return;}
       if(distMode){setDistMode(false);toast('ESC — 距離測定キャンセル');return;}
       if(selUnionMode){setSelUnionMode(false);toast('ESC — 選択合成キャンセル');return;}
@@ -1145,8 +1161,7 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       if(!ok)return;
       pushUndo();
       yamadome=null;
-      const yb=document.getElementById('yamadome-btn');
-      if(yb){yb.disabled=false;yb.style.opacity='';}
+      _syncYamadomeBtn();
       yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;showSnap(null);
       setToolBar('');redraw();toast('🏗 山留を削除しました');
     });
@@ -1202,13 +1217,13 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       yamadomeEditVtxStart=null;
       drawCv.style.cursor=''; // 51回目: ×印ポインタを戻す
       showSnap(null); // 新7/8(2026-08-28 引継ぎ18回目マスター指摘): ドラッグ終了時にスナップ表示が残るのを解消
-      setToolBar('');redraw();
+      setToolBar(editMode?'✏ 修正モード':'');redraw();
     }
   });
 
   drawCv.addEventListener('mousedown',onMouseDown,false);
   drawCv.addEventListener('mousemove',onMouseMove,false);
-  drawCv.addEventListener('mouseleave',()=>_setHover(-1),false); // 47回目: 図形の外へ出たらホバー解除(rAFループも止める)
+  drawCv.addEventListener('mouseleave',()=>{_setHover(-1); if(editMode){showVerticalHoverTip(false);_yamaHoverVtx=-1;}},false); // 47回目: 図形の外へ出たらホバー解除(rAFループも止める)
 });
 
 // ================================================================
@@ -2321,7 +2336,8 @@ function showSnap(snap,cx,cy){
 const _HOVER_TIPS={
   purple:{t:'🟪 強制垂直オブジェクト',bg:'rgba(150,60,220,.95)'},
   gray:{t:'既存物扱い',bg:'rgba(105,112,124,.95)'},
-  survey:{t:'左クリックで移動\n右クリックで削除',bg:'rgba(0,120,160,.95)'}
+  survey:{t:'左クリックで移動\n右クリックで削除',bg:'rgba(0,120,160,.95)'},
+  yamavtx:{t:'山留頂点',bg:'rgba(200,70,60,.95)'} // 51回目: 修正モード中、山留の頂点にマウスを乗せた時
 };
 function showVerticalHoverTip(show,cx,cy,kind){
   const el=document.getElementById('vertical-hover-tip');
@@ -2444,28 +2460,15 @@ function onMouseDown(e){
   const{x:lx,y:ly}=getLogi(e);
 
   // r037: ✏修正モード中は頂点ドラッグだけを受け付ける(他の作図・選択・山留ドラッグには入らない)
-  if(editMode){ if(e.button===0) editMouseDown(lx,ly); return; }
-
-  // 山留 頂点ドラッグ（描画中でない時）
-  // 追加1(2026-08-24 引継ぎ18回目マスター報告): distMode(距離測定)・surveyMode
-  // (測点設置)の判定が抜けていたため、これらのツール使用中に山留頂点をクリック
-  // すると距離測定/測点設置ではなく山留ドラッグが発動してしまっていた。
-  // 「山留頂点ドラッグはツール未選択時のみ」という方針に合わせ、他ツール使用中
-  // 判定(distMode/surveyMode/selUnionMode/subMode)を追加。
-  if(!drawing && !distMode && !surveyMode && !selUnionMode && !subMode && yamadome && yamadome.pts && yamadome.pts.length>=3 && e.button===0){
-    // 頂点近くをクリック → ドラッグ移動開始
-    const HIT=10/zoom;
-    const vi=yamadome.pts.findIndex(p=>Math.hypot(p.x-lx,p.y-ly)<HIT);
-    if(vi>=0){
-      yamadomeEditMode=true;yamadomeEditVtx=vi;
-      _yamaDragFree=!!_yamaPolyInvalid(yamadome.pts); // 51回目: 開始時にすでに交差・鋭角・近すぎがある図面は制限せず、直せるようにする
-      // 新7-再修正(マスター指摘): 直交移動の基準点は隣接頂点ではなく、
-      // 「ドラッグ移動する頂点の初期位置」固定とする。ドラッグ開始時に記憶。
-      yamadomeEditVtxStart={x:yamadome.pts[vi].x,y:yamadome.pts[vi].y};
-      setToolBar('🏗 山留の頂点を移動します。頂点を増やすことは出来ません');
-      return;
+  if(editMode){
+    if(e.button===0){
+      if(!_editHit(lx,ly)){ const vi=_yamaVtxAt(lx,ly); if(vi>=0){ _yamaStartDrag(vi); return; } } // 51回目: 山留の頂点(図形の頂点が無い所だけ)
+      editMouseDown(lx,ly);
     }
+    return;
   }
+
+  // 51回目(マスター要望): 山留の頂点ドラッグは「✏ 修正」モードの時だけ(上の editMode 分岐で処理)。ツール未選択でうっかりドラッグしてしまわないよう、ここにあった常時有効の処理は無くした。
 
   // 測点設置モード（r025: AreCal移植 — スナップ点のみ・設置はオフセットダイアログ経由）
   if(surveyMode&&e.button===0){
@@ -2578,7 +2581,7 @@ function onMouseMove(e){
   const{x:lx,y:ly}=getLogi(e);
   window.lastMx=lx; window.lastMy=ly; // ArrowKey時プレビュー更新用
   _updateHover(lx,ly); // 47回目: ホバー(ツール使用中は解除)
-  if(editMode){ editMouseMove(e,lx,ly); return; } // r037: ✏修正モード
+  if(editMode && !(yamadomeEditMode&&yamadomeEditVtx>=0)){ editMouseMove(e,lx,ly); _yamaHoverUpdate(e,lx,ly); return; } // r037: ✏修正モード(51回目: 山留頂点のドラッグ中は下の山留処理へ)
   // 新1(2026-08-28 引継ぎ18回目): 他モードに切り替わった際にグレーホバー表示が
   // 残らないよう、まず非表示にしてからアイドル時のみ再表示する
   showVerticalHoverTip(false);
@@ -2822,7 +2825,7 @@ function finishShape(){
     cur=null; drawing=false; tool=null;
     _startToolEndCooldown();
     document.getElementById('yamadome-btn').classList.remove('on');
-    document.getElementById('yamadome-btn').style.opacity='0.4';
+    _syncYamadomeBtn(); // 51回目: 暗転ではなく「山留削除」ボタンにする
     // (24回目)(24回目・追加チェック項目5): 完成後もステータスバーに「山留作図中」が
     // 残り続けるバグを修正(他のfinishShape完了パスと同様setToolBar('')が漏れていた)。
     setToolBar('');
@@ -3887,6 +3890,31 @@ function _editHit(lx,ly){
   }
   return best;
 }
+// ===== 51回目(マスター要望): 山留の頂点ドラッグは「✏ 修正」モードの時だけ =====
+// 以前は、何のツールも使っていない時に山留の頂点をクリックすると、そのままドラッグできてしまい、うっかり動かす原因になっていた。
+// 修正モード中だけ、図形の頂点と同じようにドラッグできるようにした(図形の頂点が同じ位置にある時は図形を優先)。
+// 修正モード中は山留の頂点にもハンドル(●)を出し、マウスを乗せると「山留頂点」と表示する。
+let _yamaHoverVtx=-1;
+function _yamaVtxAt(lx,ly){
+  if(!yamadome||!yamadome.pts||yamadome.pts.length<3) return -1;
+  const HIT=10/zoom; return yamadome.pts.findIndex(p=>Math.hypot(p.x-lx,p.y-ly)<HIT);
+}
+function _yamaStartDrag(vi){
+  yamadomeEditMode=true;yamadomeEditVtx=vi;
+  _yamaDragFree=!!_yamaPolyInvalid(yamadome.pts); // 開始時にすでに交差・鋭角・近すぎがある図面は制限せず、直せるようにする
+  // 直交移動の基準点は隣接頂点ではなく「ドラッグ移動する頂点の初期位置」固定。ドラッグ開始時に記憶。
+  yamadomeEditVtxStart={x:yamadome.pts[vi].x,y:yamadome.pts[vi].y};
+  _yamaHoverVtx=-1; showVerticalHoverTip(false);
+  setToolBar('🏗 山留の頂点を移動します。頂点を増やすことは出来ません');
+  redraw();
+}
+function _yamaHoverUpdate(e,lx,ly){ // 修正モード中の山留頂点ホバー(カーソル・フロートテキスト・ハンドルの白抜き)
+  let vi=-1;
+  if(editMode && !editDrag && !(yamadomeEditMode&&yamadomeEditVtx>=0) && !_editHit(lx,ly)) vi=_yamaVtxAt(lx,ly);
+  if(vi>=0){ drawCv.style.cursor='move'; showVerticalHoverTip(true,e.clientX,e.clientY,'yamavtx'); }
+  else showVerticalHoverTip(false);
+  if(vi!==_yamaHoverVtx){ _yamaHoverVtx=vi; redraw(); }
+}
 function editMouseDown(lx,ly){
   const h=_editHit(lx,ly);
   if(!h){ return; }
@@ -3992,6 +4020,7 @@ function setEditMode(on){
     toast('✏ 修正モード: 頂点をドラッグ（四角形は直角のまま拡大縮小・辺の◆は平行移動、多角形は自由。不正な形は元に戻ります）',3600);
   } else {
     setStatus(''); setToolBar(''); showSnap(null); drawCv.style.cursor='';
+    showVerticalHoverTip(false); _yamaHoverVtx=-1; // 51回目: 山留頂点のフロートテキストを消す
   }
   redraw();
 }
@@ -4000,6 +4029,8 @@ document.addEventListener('mouseup',e=>{ if(editMode && editDrag && e.button===0
 // r050: ESCと右クリックの共通動作。ドラッグ中ならそのドラッグだけを元に戻す/ドラッグしていなければ修正モードを終了する
 function _editEscape(){
   if(!editMode) return;
+  if(yamadomeEditMode&&yamadomeEditVtx>=0) return;                       // 51回目: 山留頂点のドラッグ中のESCは山留側が処理する
+  if(window._yamaEscAt&&performance.now()-window._yamaEscAt<80) return;  // 同じESCで山留側が先に処理した時は修正モードを終了しない
   if(editDrag){ _editRestore(editDrag); editDrag=null; showSnap(null); setToolBar('✏ 修正モード'); redraw(); toast('✏ 移動をキャンセルしました',1200); }
   else setEditMode(false);
 }
@@ -4279,6 +4310,16 @@ function redraw(mx,my){
         }
       }
     });
+    // 51回目: 山留の頂点ハンドル(●)。ドラッグ中=黄・ホバー中=白・通常=山留色(オレンジ寄りの赤)
+    if(yamadome&&yamadome.pts&&yamadome.pts.length>=3){
+      yamadome.pts.forEach((p,vi)=>{
+        const act=yamadomeEditMode&&yamadomeEditVtx===vi, hov=!editDrag&&_yamaHoverVtx===vi;
+        const r=((act||hov)?6.5:4.5)/zoom;
+        drawCtx.beginPath(); drawCtx.arc(p.x,p.y,r,0,Math.PI*2);
+        drawCtx.fillStyle=act?'#ffff00':(hov?'#ffffff':'#ff7043');
+        drawCtx.fill(); drawCtx.strokeStyle='#000'; drawCtx.lineWidth=1/zoom; drawCtx.stroke();
+      });
+    }
     drawCtx.restore();
   }
   // 測点の描画（r024: AreCal移植）
