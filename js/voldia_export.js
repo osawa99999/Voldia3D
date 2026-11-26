@@ -1,3 +1,4 @@
+// r156(51回目・続き): Vold読込後の山留ボタンの表示を _syncYamadomeBtn に統一。
 // r155(51回目・続き): 通常計算の既存躯体別ノードをやめた(色を完全に無視して全部合成)。
 // r153(51回目): 配置モードのiframe参照を voldia_placement_v0098.html に変更(全ボタンのホバー共通化。HTMLの中身はCSSのみ)。
 // r152(50回目): 配置モードのiframe参照を voldia_placement_v0097.html に変更(H鋼杭の天端高さ入力・右クリックで高さ修正)。
@@ -242,10 +243,7 @@ async function applyVoldData(data, opts){
   yamadome = (data.yamadome && data.yamadome.pts && data.yamadome.pts.length>=3)
     ? {pts: data.yamadome.pts.map(p=>({x:mmToPx(p.x), y:mmToPx(p.y)}))}
     : null;
-  {
-    const yb=document.getElementById('yamadome-btn');
-    if(yb){yb.style.opacity=yamadome?'0.4':'';}
-  }
+  if(typeof _syncYamadomeBtn==='function') _syncYamadomeBtn(); // 51回目: 山留がある時は「山留削除」ボタンにする(暗転をやめた)
   // r060: ノースアロー方位角・原点測点インデックスの復元（旧形式ファイルは0/nullにフォールバック）
   northAngleDeg = (typeof data.northAngleDeg==='number' && !isNaN(data.northAngleDeg)) ? data.northAngleDeg : 0;
   originSurveyIdx = (typeof data.originSurveyIdx==='number' && surveyPts[data.originSurveyIdx]) ? data.originSurveyIdx : null;
