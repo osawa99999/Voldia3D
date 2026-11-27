@@ -1,3 +1,4 @@
+// r160(52回目・続き2): 「Enterで繰り返し配置」と案内バナー(配置してください/右クリックでキャンセル)を完全な排他表示にした(タイミング頼みの250msポーリングをやめ、バナー変化の瞬間に同期して切り替え)。
 // r160(52回目・続き): キャンセル表示の統一=ツールが終了するキャンセル(右クリック・Esc・各ダイアログのキャンセルボタン・範囲スクショ中止)は全て「キャンセルしました」(_cancelExit)。「Enterで繰り返し配置」の表示を画面上部の案内表示(#placement-mode-msg)と同じ見た目・位置に変更。
 // r160(52回目・マスター報告 Voldia_261127_0838.vold): 山留ハッチが壁面より手前に浮く不具合の根本修正。山留パネルの『外向き』を図形の重心方向でなく符号付き面積から決めた本当の外向き法線にした(凹んだ山留の辺で向きが逆になっていた)。本体 voldia3d.js と同じ式。
 // r158(51回目): ①Enterの繰り返し配置が効かない(H鋼杭・足場・カラーコーン)の修正=「開いているか」の判定をcomputed styleに ②「Enterで繰り返し配置」とトーストを画面下の解説の上へ ③H鋼杭の天端高さダイアログにテンキー(初回押しで入力値クリア)・前回値の保持。
@@ -2868,6 +2869,7 @@ window.addEventListener('message', function(ev) {
     document.getElementById('placement-mode-msg').style.display = 'none';
     document.getElementById('line-color-picker').style.display = 'none';
     document.getElementById('finish-line-btn').style.display = 'none';
+    _syncHint(); // 52回目: ツール終了の瞬間に(出して良ければ)「Enterで繰り返し配置」へ切り替える
   }
 
   function finishLine() {
@@ -2974,6 +2976,7 @@ window.addEventListener('message', function(ev) {
       
       btn.classList.add('active');
       currentType = nextType;
+      _syncHint(); // 52回目: ツールを選んだ瞬間に「Enterで繰り返し配置」を消す
       
       if (currentType === 'custom_box_input') {
         document.getElementById('box-input-ui').style.display = 'block';
@@ -3072,7 +3075,10 @@ window.addEventListener('message', function(ev) {
   function _repeatHintUpdate() {
     const tag = document.activeElement && document.activeElement.tagName;
     const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable);
-    const show = !!_lastPalBtnForRepeat && !_lastToolWasKotai && !currentType && !dragObj && !typing && !_topDialogCancel() && !_kotaiSavedCam;
+    // 52回目(マスター要望): 案内バナー(#placement-mode-msg=「配置してください/(右クリックでキャンセル)」)とは完全な排他表示。バナーが出ている間は絶対に出さない。
+    const _bn = document.getElementById('placement-mode-msg');
+    const bannerOn = !!_bn && getComputedStyle(_bn).display !== 'none';
+    const show = !!_lastPalBtnForRepeat && !_lastToolWasKotai && !currentType && !dragObj && !typing && !_topDialogCancel() && !_kotaiSavedCam && !bannerOn;
     if (show) { const t = '↩ Enterで繰り返し配置（' + _lastPalBtnForRepeat.textContent.trim() + '）'; if (_repeatHint.textContent !== t) _repeatHint.textContent = t; }
     _repeatHint.style.display = show ? 'block' : 'none';
   }
@@ -3084,6 +3090,11 @@ window.addEventListener('message', function(ev) {
   }
   _lift(); window.addEventListener('resize', _lift);
   setInterval(() => { _repeatHintUpdate(); _lift(); }, 250);
+  // 52回目: 以前は250ms間隔の確認だけだったため、ツールを選んだ直後(バナーが出た瞬間)の最大0.25秒、2つのテキストが重なって見えた。
+  //   根本対策=バナーの表示が変わった瞬間(描画の前)に同期して切り替える。さらにツール選択・ツール終了の処理からも即座に呼ぶ(_syncHint)。ポーリングは念のため残す。
+  function _syncHint() { try { _repeatHintUpdate(); } catch (e) { /* 初期化前などは何もしない */ } }
+  { const _bn = document.getElementById('placement-mode-msg');
+    if (_bn) new MutationObserver(_syncHint).observe(_bn, { attributes: true, attributeFilter: ['style', 'class'] }); }
 
   // r072(21回目引継ぎ・マスター要望「作業エリアが広いとホイールだけのズームでは
   // 拡大操作に限界がある」対策): カーソルキーでカメラの前後左右移動を追加。

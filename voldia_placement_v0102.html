@@ -1,4 +1,6 @@
 <!DOCTYPE html>
+<!-- v0102(52回目): 「Enterで繰り返し配置」と案内バナーの完全な排他表示(JS)。HTMLの中身は変更なし(読み込み直し用に版だけ上げた)。 -->
+<!-- v0101(52回目): トーストの折り返しを整えた(CSSのみ。text-wrap:balance+word-break:auto-phrase)。 -->
 <!-- v0100(52回目): キャンセル表示の統一・「Enterで繰り返し配置」を画面上部へ(JS r160)。HTMLの中身は変更なし(読み込み直し用に版だけ上げた)。 -->
 <!-- v0099(52回目): 山留ハッチの向きの修正(JS r160)。HTMLの中身は変更なし(読み込み直し用に版だけ上げた)。 -->
 <html lang="ja">
@@ -143,7 +145,7 @@
     position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(231, 76, 60, 0.9); border: 2px solid #c0392b; border-radius: 8px;
     padding: 10px 20px; color: #fff; font-weight: bold; font-size: 1em;
-    pointer-events: none; z-index: 30000; opacity: 0; transition: opacity 0.3s; /* v0091(47回目): 足場の編集窓(z-index 1100)の下に隠れていたため、最前面へ */
+    pointer-events: none; z-index: 30000; opacity: 0; transition: opacity 0.3s; text-wrap: balance; word-break: auto-phrase; /* v0091(47回目): 足場の編集窓(z-index 1100)の下に隠れていたため、最前面へ */
   }
 
   /* 配置モード案内メッセージ */

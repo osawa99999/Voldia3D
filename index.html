@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- v0176(52回目): トーストの折り返しを整えた(#toast・#toast-topに text-wrap:balance+word-break:auto-phrase。「元に戻りま/す」のような1〜数文字だけの行・単語の途中切れを防ぐ)。HTMLはCSSとバージョン表示のみ。 -->
 <!-- v0175(52回目): キャンセルの挙動とトーストの統一(voldia_main.js)。HTMLの中身はバージョン表示のみ。 -->
 <!-- v0174(52回目): 山留の頂点修正を「元に戻す」に対応(voldia_main.js)。HTMLの中身はバージョン表示のみ。 -->
 <!-- v0173(52回目): 山留ハッチが壁面より手前に浮く不具合の修正(JS: voldia3d.js・voldia_placement.js r160・voldia_export.js r157)。HTMLの中身はバージョン表示のみ。 -->
@@ -259,7 +260,7 @@ select#sc-select{width:100%;background:#333;color:var(--text);border:1px solid v
        padding:7px 18px;border-radius:16px;pointer-events:none;
        border:1.5px solid #4488cc;
        box-shadow:0 3px 14px rgba(0,0,0,.55);
-       z-index:99999;opacity:0;transition:opacity .25s;white-space:normal;text-align:center;max-width:80vw;}
+       z-index:99999;opacity:0;transition:opacity .25s;white-space:normal;text-align:center;max-width:80vw;text-wrap:balance;word-break:auto-phrase;}
 #toast.show{opacity:1;}
 #toast.large{bottom:26px;transform:translateX(-50%);background:#7a0000;color:#fff;
        border:2px solid #ff4040;font-size:1.05em;padding:16px 26px;border-radius:10px;
@@ -278,7 +279,7 @@ select#sc-select{width:100%;background:#333;color:var(--text);border:1px solid v
        padding:7px 18px;border-radius:16px;pointer-events:none;
        border:1.5px solid #4488cc;
        box-shadow:0 3px 14px rgba(0,0,0,.55);
-       z-index:99999;opacity:0;transition:opacity .25s;white-space:normal;text-align:center;max-width:80vw;}
+       z-index:99999;opacity:0;transition:opacity .25s;white-space:normal;text-align:center;max-width:80vw;text-wrap:balance;word-break:auto-phrase;}
 #toast-top.show{opacity:1;}
 
 /* スクロールバーの設定（濃いグレーだと黒背景に埋もれて見えないため、
@@ -565,7 +566,7 @@ button[title="色を変更"]:hover,#draw-color-badge:hover,.cf-btn:hover{transfo
 <script>document.getElementById('logo-sidebar-img').src = OSAKI_LOGO_B64;</script>
         <!-- r063: バージョン表示。ファイル名のバージョンを変更するたびに、
              このid="app-version-label"のテキストも必ず同じ値に更新すること -->
-        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0175</span></div>
+        <div class="app-ver" style="flex:1;white-space:nowrap;"><b>Voldia</b> <span id="app-version-label">v0176</span></div>
         <img src="https://hits.sh/osaki-kensetsu.github.io/voldia.svg?style=flat-square&color=0088cc&labelColor=1a1a2e" alt="visits" style="height:13px;opacity:.6;flex-shrink:0;" onerror="this.style.display='none'">
       </div>
     </div>
