@@ -1,3 +1,5 @@
+// r160(52回目・続き): キャンセル表示の統一=ツールが終了するキャンセル(右クリック・Esc・各ダイアログのキャンセルボタン・範囲スクショ中止)は全て「キャンセルしました」(_cancelExit)。「Enterで繰り返し配置」の表示を画面上部の案内表示(#placement-mode-msg)と同じ見た目・位置に変更。
+// r160(52回目・マスター報告 Voldia_261127_0838.vold): 山留ハッチが壁面より手前に浮く不具合の根本修正。山留パネルの『外向き』を図形の重心方向でなく符号付き面積から決めた本当の外向き法線にした(凹んだ山留の辺で向きが逆になっていた)。本体 voldia3d.js と同じ式。
 // r158(51回目): ①Enterの繰り返し配置が効かない(H鋼杭・足場・カラーコーン)の修正=「開いているか」の判定をcomputed styleに ②「Enterで繰り返し配置」とトーストを画面下の解説の上へ ③H鋼杭の天端高さダイアログにテンキー(初回押しで入力値クリア)・前回値の保持。
 // r157(50回目・マスター要望): H鋼杭の天端高さを入力式に。①「H鋼杭」ボタン(h_pile_input)→天端高さダイアログ(#hpile-input-ui。既定±0・最高+5m・最低=地形の最深点(0.01m単位で切り上げ)。範囲外は最高/最低に直して「使用できない値です」)→「配置」→従来どおりクリック配置(h_pile) ②配置済みのH鋼杭を右クリック(動かさずに離す)→同じダイアログで高さ修正(_hpileSetTop=杭を作り直して置き換え) ③H鋼杭にマウスオーバーで「右クリックで高さ修正」。天端はuserData.topYで持ち、.vold保存(topY)・復元(なし=従来のGL+0.4)・ドラッグ移動後の高さ(_hpileTopOf)に反映。HTML=voldia_placement_v0097.html。前版=orig/voldia_placement_r156.js
 // r156(50回目・修正提案書v002 2B): 矢印を平らな板に作り直したことに合わせ、①縦ビルボード=_updateArrowBillboards()(毎フレーム・描画直前。矢印の向き(方位)はそのまま、板だけカメラのほうへ倒す) ②倍率(ダブルクリック1→2→3→1)=_applyArrowScale に一本化(重複していた処理を統合。ポールも伸ばす)。当たり判定・HTML書き出しは変更なし。前版=orig/voldia_placement_r155.js
@@ -1110,7 +1112,7 @@ window.addEventListener('message', function(ev) {
       showToast('📷 範囲スクショを保存しました');
     }
     btn.addEventListener('click', () => {
-      if (active) { setActive(false); showToast('範囲スクショを中止しました'); return; }
+      if (active) { setActive(false); showToast('キャンセルしました'); return; }
       setActive(true);
       showToast('📷 スクショしたい範囲をドラッグで選択してください（Esc/右クリックで中止）', 6000);
     });
@@ -1132,9 +1134,9 @@ window.addEventListener('message', function(ev) {
       if (r.w < 8 || r.h < 8) { showToast('⚠ 範囲が小さすぎます。もう一度ボタンを押して選び直してください'); return; }
       capture(r);
     });
-    ov.addEventListener('contextmenu', e => { e.preventDefault(); setActive(false); showToast('範囲スクショを中止しました'); });
+    ov.addEventListener('contextmenu', e => { e.preventDefault(); setActive(false); showToast('キャンセルしました'); });
     document.addEventListener('keydown', e => {
-      if (active && e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); setActive(false); showToast('範囲スクショを中止しました'); }
+      if (active && e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); setActive(false); showToast('キャンセルしました'); }
     }, true);
   })();
 
@@ -1383,7 +1385,7 @@ window.addEventListener('message', function(ev) {
     if (e.key !== 'Escape') return;
     const shot = document.getElementById('shot-select-overlay'); if (shot && getComputedStyle(shot).display !== 'none') return; // 範囲スクショは専用の処理
     let act = _topDialogCancel();
-    if (!act && currentType) act = () => exitPlacementMode();
+    if (!act && currentType) act = () => _cancelExit();
     if (!act) return;
     e.preventDefault(); e.stopPropagation(); act();
   }, true);
@@ -1582,9 +1584,10 @@ window.addEventListener('message', function(ev) {
     const group = new THREE.Group();
     group.userData = { isRoot: true, type: 'yamadome_marker' };
     const hatchTex = _getYamadomeHatchTexture();
-    let cenX = 0, cenZ = 0;
-    points.forEach(p => { cenX += p.x; cenZ += p.z; });
-    cenX /= n; cenZ /= n;
+    // 52回目: 「外向き」は重心方向ではなく符号付き面積から決めた本当の外向き法線(凹んだ山留でハッチが壁の手前に浮く不具合の根本修正。本体 voldia3d.js と同じ)
+    let _ydArea2 = 0;
+    for (let i = 0; i < n; i++) { const a = points[i], b = points[(i + 1) % n]; _ydArea2 += a.x * b.z - b.x * a.z; }
+    const _ydSgn = _ydArea2 > 0 ? 1 : -1;
     const BATTER_DEG = (typeof batterDeg === 'number') ? batterDeg : 1; // 本体側と統一
     const h = Math.max(0.01, realYTop - realYBot);
     const battOut = Math.tan(BATTER_DEG * Math.PI / 180) * h;
@@ -1593,10 +1596,7 @@ window.addEventListener('message', function(ev) {
       try {
       const a = points[i], b = points[(i + 1) % n];
       const segLen = Math.hypot(b.x - a.x, b.z - a.z);
-      const midX = (a.x + b.x) / 2, midZ = (a.z + b.z) / 2;
-      const outDx = midX - cenX, outDz = midZ - cenZ;
-      const outLen = Math.hypot(outDx, outDz) || 1;
-      const odx = outDx / outLen, odz = outDz / outLen; // このエッジの外向き単位法線
+      const odx = _ydSgn * (b.z - a.z) / (segLen || 1e-9), odz = -_ydSgn * (b.x - a.x) / (segLen || 1e-9); // このエッジの外向き単位法線(52回目: 符号付き面積から)
       const botOut = -CLEAR, topOut = battOut - CLEAR;
       const aBot = new THREE.Vector3(a.x + odx * botOut, realYBot, a.z + odz * botOut);
       const bBot = new THREE.Vector3(b.x + odx * botOut, realYBot, b.z + odz * botOut);
@@ -1875,7 +1875,7 @@ window.addEventListener('message', function(ev) {
   });
 
   document.getElementById('box-btn-cancel').addEventListener('click', () => {
-    exitPlacementMode();
+    _cancelExit();
   });
 
   document.getElementById('box-btn-ok').addEventListener('click', () => {
@@ -1938,8 +1938,8 @@ window.addEventListener('message', function(ev) {
   }
   function _hpileCloseDialog() { _hpileUi().style.display = 'none'; _hpileEditObj = null; }
   document.getElementById('hpile-btn-cancel').addEventListener('click', () => {
-    if (_hpileMode === 'edit') { _hpileCloseDialog(); controls.enabled = true; return; }
-    _hpileCloseDialog(); exitPlacementMode();
+    if (_hpileMode === 'edit') { _hpileCloseDialog(); controls.enabled = true; showToast('キャンセルしました'); return; }
+    _hpileCloseDialog(); _cancelExit();
   });
   document.getElementById('hpile-btn-ok').addEventListener('click', () => {
     const top = _hpileReadValue(); if (top === null) return;
@@ -2015,7 +2015,7 @@ window.addEventListener('message', function(ev) {
     controls.enabled = false;
     sel.focus(); // 数字キーでも選べる(ドロップダウンの先頭文字ジャンプ)。Enterで配置
   }
-  document.getElementById('cone-btn-cancel').addEventListener('click', () => { exitPlacementMode(); });
+  document.getElementById('cone-btn-cancel').addEventListener('click', () => { _cancelExit(); });
   document.getElementById('cone-btn-ok').addEventListener('click', () => {
     const n = parseInt(document.getElementById('cone-count').value, 10);
     if (!(n >= 2 && n <= 10)) { showToast('⚠ 個数は2〜10で選んでください'); return; }
@@ -2096,7 +2096,7 @@ window.addEventListener('message', function(ev) {
     btn.addEventListener('click', () => _scfInput(btn.textContent.trim()));
   });
   document.getElementById('scf-width').addEventListener('change', e => { scaffoldParams.width = e.target.value; _scfRefreshInfo(); });
-  document.getElementById('scf-btn-cancel').addEventListener('click', () => { exitPlacementMode(); });
+  document.getElementById('scf-btn-cancel').addEventListener('click', () => { _cancelExit(); });
   document.getElementById('scf-btn-ok').addEventListener('click', () => {
     const s = parseInt(scaffoldParams.steps, 10), n = parseInt(scaffoldParams.spans, 10);
     if (!(s >= 1 && s <= SCF.MAX_STEPS)) { showToast(`⚠ 段数は1〜${SCF.MAX_STEPS}で入力してください`); _scfSelectParam('steps'); return; }
@@ -2824,6 +2824,8 @@ window.addEventListener('message', function(ev) {
   // ==========================================
   // ★ モード終了・ツールリセットの一元管理
   // ==========================================
+  // 52回目(マスター要望): ツールが終了するキャンセル(右クリック・Esc・キャンセルボタン共通)は、全て「キャンセルしました」を出す。配置が完了して終わる場合や、画面の切り替えで終わる場合は出さない。
+  function _cancelExit() { exitPlacementMode(); showToast('キャンセルしました'); }
   function exitPlacementMode() {
     if (!currentType) return;
     const t = currentType;
@@ -2916,7 +2918,7 @@ window.addEventListener('message', function(ev) {
 
   document.getElementById('text-btn-cancel').addEventListener('click', () => {
     editingBalloonObj = null;
-    exitPlacementMode();
+    _cancelExit();
   });
 
   document.getElementById('text-btn-ok').addEventListener('click', () => {
@@ -2966,7 +2968,7 @@ window.addEventListener('message', function(ev) {
       const nextType = btn.dataset.type;
       const isSame = (currentType === nextType);
 
-      if (currentType) exitPlacementMode();
+      if (currentType) { exitPlacementMode(); if (isSame) showToast('キャンセルしました'); } // 52回目: 同じボタンをもう一度押して終了する時もキャンセル表示
       
       if (isSame) return; 
       
@@ -3065,7 +3067,7 @@ window.addEventListener('message', function(ev) {
   //   構台は何度も描くものではないので出さない(直前に使ったのが構台の間)。配置待ち・ダイアログ表示中・ドラッグ中・文字入力中は出さない。
   const _repeatHint = document.createElement('div');
   _repeatHint.id = 'repeat-hint';
-  _repeatHint.style.cssText = 'display:none;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:8000;background:rgba(0,0,0,.72);color:#fff;padding:5px 14px;border-radius:14px;font-size:.82em;font-weight:bold;pointer-events:none;white-space:nowrap;border:1px solid rgba(255,255,255,.25);';
+  _repeatHint.style.cssText = 'display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:1000;background:rgba(46,125,50,0.9);border:2px solid #4caf50;border-radius:30px;padding:12px 30px;color:#fff;font-weight:bold;font-size:1.1em;text-align:center;line-height:1.4;box-shadow:0 4px 15px rgba(0,0,0,0.5);pointer-events:none;white-space:nowrap;'; // 52回目: 画面上部の案内表示(#placement-mode-msg)と同じ見た目・位置にした(以前は画面下)
   document.body.appendChild(_repeatHint);
   function _repeatHintUpdate() {
     const tag = document.activeElement && document.activeElement.tagName;
@@ -3078,8 +3080,7 @@ window.addEventListener('message', function(ev) {
   function _lift() {
     const c = document.getElementById('controls'), t = document.getElementById('toast');
     const base = 15 + (c ? c.offsetHeight : 0) + 8;
-    _repeatHint.style.bottom = base + 'px';
-    if (t) t.style.bottom = (base + 40) + 'px'; // トーストはヒントのさらに上(同時に出ても重ならない)
+    if (t) t.style.bottom = base + 'px'; // 52回目: 繰り返し配置のヒントを画面上部へ移したので、トーストは操作説明の上に置くだけでよい
   }
   _lift(); window.addEventListener('resize', _lift);
   setInterval(() => { _repeatHintUpdate(); _lift(); }, 250);
@@ -3469,7 +3470,7 @@ window.addEventListener('message', function(ev) {
 
   // r149(48回目・マスター要望): 構台の作図も、線と同じ「右クリックで1つ戻る」。1点も無い時の右クリックはツールを終了(線と同じ)。
   function _kotaiUndoPoint() {
-    if (kotaiPoints.length === 0) { exitPlacementMode(); return; }
+    if (kotaiPoints.length === 0) { _cancelExit(); return; }
     kotaiPoints.pop();
     const m = kotaiPointMarkers.pop(); if (m) scene.remove(m);
     _kotaiUpdatePreviewLine(null);
@@ -3550,7 +3551,7 @@ window.addEventListener('message', function(ev) {
         _kotaiConfirmCallback = null;
         return;
       }
-      exitPlacementMode();
+      _cancelExit();
     }
   }
 
@@ -3931,12 +3932,12 @@ window.addEventListener('message', function(ev) {
             }
           }
         } else {
-          exitPlacementMode();
+          _cancelExit();
         }
         return;
       } else if (currentType) {
         controls.enabled = false; 
-        exitPlacementMode(); 
+        _cancelExit(); 
         return;
       } else {
         raycaster.setFromCamera(mouse, camera);

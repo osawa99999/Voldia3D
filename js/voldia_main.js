@@ -1,3 +1,5 @@
+// 52回目(マスター要望): キャンセルの挙動とトーストの統一。ツールが終了する右クリック/ESCは全て cancelNotice()=下部のツール解説テキストを消して「キャンセルしました」。四角形/多角形/山留の右クリック・測点設置(クリック待ち)の右クリック・縮尺変更(Esc/右クリックで閉じる)・ノースアロー(右クリック)・保存パネル・LANDXML/GLB/3D_DXF確認の右クリックに対応。
+// 52回目: 山留の頂点ドラッグ(✏修正モード)を「元に戻す/やり直し」に対応。ドラッグを離した時に、動いていれば動かす前の形をUndoに積む(四角形の修正と同じ=1ドラッグ=Undo1回。mouseupリスナー内)。
 // 51回目(続き6): 山留の頂点ドラッグは「✏ 修正」モードの時だけ。修正モード中は山留頂点にハンドル(●)と「山留頂点」のフロートテキスト。
 // 51回目(続き5): 山留が設置済みの時はボタンが「🗑 山留削除」になる(_syncYamadomeBtn)。押すと確認→削除だけ→ツール未選択。
 // 51回目(続き4): 設置済みの山留の頂点ドラッグにも同じ判定(_yamaDragInvalid)。
@@ -450,6 +452,8 @@ function toast(msg,dur=2200,style=false){
 // ２(2026-08-25引継ぎ22回目マスター指示): 画面上部専用トースト。下部の共有toast()と
 // 完全に別要素・別タイマー(tTimerTop)を使うので、他のtoast()呼び出しと衝突して
 // 一瞬で消される事が無い。B5のヒント表示に使用。
+// 52回目(マスター要望): ツールが終了するキャンセル(右クリック・ESC共通)の表示。画面下部のツール解説テキスト(ツールバー・ステータス)を即座に消し、「キャンセルしました」を出す。
+function cancelNotice(){ setToolBar(''); setStatus(''); toast('キャンセルしました'); }
 let tTimerTop=null;
 function toastTop(msg,dur=2500){
   const el=document.getElementById('toast-top');
@@ -605,11 +609,17 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(floatPanel && floatPanel.style.display === 'block'){
       e.preventDefault();
       closeIoPanel();
+      toast('キャンセルしました'); // 52回目: 保存パネルのキャンセル(右クリック)もトースト
     }
   });
   // Escでキャンセル
   document.addEventListener('keydown', e=>{
-    if(e.key === 'Escape') closeIoPanel();
+    if(e.key === 'Escape'){
+      const fp = document.getElementById('io-float-panel');
+      const wasOpen = !!fp && fp.style.display === 'block';
+      closeIoPanel();
+      if(wasOpen) toast('キャンセルしました'); // 52回目: 保存パネルのキャンセル(ESC)もトースト
+    }
   });
   hint.addEventListener('click',(e)=>{
     fin.click();
@@ -705,6 +715,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('sv-cancel').addEventListener('click',()=>{
     document.getElementById('survey-dialog').style.display='none';svBase=null;svDir=null;
     if(surveyMode)setSurveyMode(false);
+    cancelNotice(); // 52回目: キャンセル時のトースト(右クリック・ESC・ボタン共通)
   });
   document.getElementById('sv-ok').addEventListener('click',()=>{
     const dm=parseFloat(document.getElementById('sv-dist').value);
@@ -808,6 +819,7 @@ document.getElementById('survey-dialog').addEventListener('contextmenu',e=>{e.pr
   });
   document.getElementById('na-cancel').addEventListener('click',()=>{
     document.getElementById('north-dialog').style.display='none';
+    toast('キャンセルしました'); // 52回目
   });
   document.getElementById('na-ok').addEventListener('click',()=>{
     const d=parseFloat(document.getElementById('na-deg').value)||0;
@@ -1090,13 +1102,13 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
       if(yamadomeEditMode){
         // 51回目: 修正モード中のESCは、ドラッグ中の頂点を元の位置に戻すだけ(修正モード自体は続ける。_editEscapeと二重に終了しない)
         if(yamadome&&yamadomeEditVtx>=0&&yamadomeEditVtxStart) yamadome.pts[yamadomeEditVtx]={x:yamadomeEditVtxStart.x,y:yamadomeEditVtxStart.y};
-        yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;drawCv.style.cursor='';showSnap(null);setToolBar(editMode?'✏ 修正モード':'');redraw();toast('ESC — 山留の移動をキャンセルしました');window._yamaEscAt=performance.now();return;
+        yamadomeEditMode=false;yamadomeEditVtx=-1;yamadomeEditVtxStart=null;drawCv.style.cursor='';showSnap(null);setToolBar(editMode?'✏ 修正モード':'');redraw();toast('キャンセルしました');window._yamaEscAt=performance.now();return;
       }
-      if(surveyMode){setSurveyMode(false);toast('ESC — 測点設置キャンセル');return;}
-      if(distMode){setDistMode(false);toast('ESC — 距離測定キャンセル');return;}
-      if(selUnionMode){setSelUnionMode(false);toast('ESC — 選択合成キャンセル');return;}
-      if(subMode){setSubMode(false);toast('ESC — 部分削除キャンセル');return;}
-      if(drawing){cancelDraw();setToolBar('');toast('ESC — キャンセル');return;}
+      if(surveyMode){setSurveyMode(false);cancelNotice();return;}
+      if(distMode){setDistMode(false);cancelNotice();return;}
+      if(selUnionMode){setSelUnionMode(false);cancelNotice();return;}
+      if(subMode){setSubMode(false);cancelNotice();return;}
+      if(drawing){cancelDraw();cancelNotice();return;}
       if(selectedSet.size>0){clearSelection();toast('👆 選択解除');}
       setToolBar('');
     }
@@ -1212,6 +1224,15 @@ document.getElementById('calc-btn').addEventListener('click',()=>{
     }
     // 山留頂点ドラッグ終了
     if(yamadomeEditMode && yamadomeEditVtx>=0){
+      // 52回目(マスター要望): 山留の頂点を動かした修正も「元に戻す」で戻る。四角形の修正(editMouseUp)と同じ作り=「1回のドラッグ(押す→離す)=Undo1回」。
+      //   動かしている途中(mousemove)では積まない。離した時に、動いていれば「動かす前」の形でUndoに積む(pushUndoは現在状態を保存するため、一旦元の位置に戻してから積み、新しい位置へ戻す)。
+      //   動かしていない(クリックだけ)・ESCで戻した場合は積まない(ESCは別処理で yamadomeEditVtx=-1 にするのでここへ来ない)。
+      { const _vi=yamadomeEditVtx, _st=yamadomeEditVtxStart, _cp=yamadome&&yamadome.pts?yamadome.pts[_vi]:null;
+        if(_st && _cp && (_cp.x!==_st.x || _cp.y!==_st.y)){
+          const _np={x:_cp.x,y:_cp.y};
+          yamadome.pts[_vi]={x:_st.x,y:_st.y}; pushUndo(); yamadome.pts[_vi]=_np;
+        }
+      }
       yamadomeEditVtx=-1;
       yamadomeEditMode=false;
       yamadomeEditVtxStart=null;
@@ -1702,6 +1723,7 @@ function _escTopDialog(){
   if(vis('disclaimer-modal')) return click('disclaimer-ok');
   if(vis('survey-dialog')) return click('sv-cancel');
   if(vis('north-dialog')) return click('na-cancel');
+  if(vis('sc-modal')) return ()=>_scCancel(); // 52回目: 縮尺の変更画面もEscで閉じる
   if(vis('su-overlay')) return click('su-cancel');
   if(vis('gm-overlay')) return click('gm-back');
   const cm=document.getElementById('calc-modal'); if(cm&&cm.classList.contains('show')) return ()=>closeCalcModal();
@@ -1712,6 +1734,18 @@ document.addEventListener('keydown',e=>{
   const act=_escTopDialog(); if(!act||act==='self') return;
   e.preventDefault(); e.stopPropagation(); act();
 },true);
+// 52回目(マスター要望): 縮尺の変更画面(#sc-modal)は「キャンセル」ボタンが無く、閉じるには縮尺を選ぶしか無かった。Esc・右クリックで閉じる(キャンセルしました)。
+function _scCancel(){ const m=document.getElementById('sc-modal'); if(m) m.style.display='none'; toast('キャンセルしました'); }
+// 52回目: 右クリック=キャンセルを、縮尺の変更・ノースアロー設定・確認ダイアログ・LANDXML/GLB/3D_DXF出力の確認でも効くように。Escと同じ動作。
+//   (3Dイメージ画面そのもの=calc-modalは右ドラッグでパンするので対象外。測点設置の入力画面・3D生成方法・保存パネルは各自の処理がある)
+window.addEventListener('contextmenu',e=>{
+  const vis=id=>{const el=document.getElementById(id);return !!el&&getComputedStyle(el).display!=='none';};
+  const click=id=>{const b=document.getElementById(id);if(b)b.click();};
+  if(vis('lx-overlay')){ e.preventDefault(); _lxClose(); return; }
+  if(vis('confirm-modal')){ e.preventDefault(); click('confirm-modal-no'); return; }
+  if(vis('north-dialog')){ e.preventDefault(); click('na-cancel'); return; }
+  if(vis('sc-modal')){ e.preventDefault(); _scCancel(); return; }
+});
 document.addEventListener('keydown',e=>{ // Escは「いいえ」。3D画面側のEsc処理より先に取る
     if(e.key==='Escape'&&_lxEl('lx-overlay').style.display==='flex'){e.stopPropagation();e.preventDefault();_lxClose();}
   },true);
@@ -2447,13 +2481,16 @@ function onMouseDown(e){
         }
         redraw(); toast('↩ 1点戻りました'); return;
       } else {
-        setDistMode(false); toast('📏 距離測定終了'); return;
+        setDistMode(false); cancelNotice(); return;
       }
     }
     // v0.0020→r065: 山留の削除はダブルクリックに変更(下記window 'dblclick'リスナー参照)
-    if(drawing&&tool==='rect'){rectLoop=false;cancelDraw();return;}
-    if(drawing&&tool==='poly'){polyLoop=false;cancelDraw();return;}
-    if(drawing&&tool==='yamadome'){cancelDraw();return;}
+    // 52回目: 右クリックでツールが終了する時も、ESCと同じ「キャンセルしました」を出す(四角形/多角形/山留は以前は出なかった)
+    if(drawing&&tool==='rect'){rectLoop=false;cancelDraw();cancelNotice();return;}
+    if(drawing&&tool==='poly'){polyLoop=false;cancelDraw();cancelNotice();return;}
+    if(drawing&&tool==='yamadome'){cancelDraw();cancelNotice();return;}
+    // 52回目: 測点設置の「設置位置クリック待ち」でも右クリックでキャンセルできる(測点そのものの上での右クリック=削除は、上で先に処理済み)
+    if(surveyMode){setSurveyMode(false);cancelNotice();return;}
     if(selectedSet.size>0){clearSelection();return;}
     return;
   }
@@ -4031,8 +4068,8 @@ function _editEscape(){
   if(!editMode) return;
   if(yamadomeEditMode&&yamadomeEditVtx>=0) return;                       // 51回目: 山留頂点のドラッグ中のESCは山留側が処理する
   if(window._yamaEscAt&&performance.now()-window._yamaEscAt<80) return;  // 同じESCで山留側が先に処理した時は修正モードを終了しない
-  if(editDrag){ _editRestore(editDrag); editDrag=null; showSnap(null); setToolBar('✏ 修正モード'); redraw(); toast('✏ 移動をキャンセルしました',1200); }
-  else setEditMode(false);
+  if(editDrag){ _editRestore(editDrag); editDrag=null; showSnap(null); setToolBar('✏ 修正モード'); redraw(); toast('キャンセルしました',1200); }
+  else { setEditMode(false); cancelNotice(); }
 }
 document.addEventListener('keydown',e=>{
   if(!editMode) return;

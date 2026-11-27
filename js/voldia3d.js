@@ -1,3 +1,4 @@
+// 52回目(マスター報告 Voldia_261127_0838.vold): 山留ハッチ(縞)が壁面より手前に浮いて見える不具合の根本修正。_buildYamadomeOverlayGeomData が辺の『外向き』を図形の重心方向で決めていたため、凹んだ山留(V字の切れ込み等)の辺で向きが逆になり、ハッチが壁の手前へ約10cmずれていた。符号付き面積から決めた本当の外向き法線に変更(接触区間の判定 _clipYamadomeOverlayToContact と同じ向きの決め方)。微勾配(noSlope)とは無関係。配置モードの同じ式も同時に修正(voldia_placement.js r160)。
 // 51回目(続き): 通常計算はオブジェクトの色を完全に無視して全部合成(グレーも掘削体として扱う)。3Dオブジェクトの色は全部薄めのグレー。
 // 51回目(マスター新規問題・Arecal担当の指摘で確定): _calcExistingStructureOverlapVolume の交差面積を abs() で全pathを正に足していたため、既存躯体がロの字(中庭=穴)の時に穴の面積まで重複体積に足され、差引後の体積が過小(例: 1948.05 → 正しくは1972.93=Excelと一致)だった。符号を保ったまま足す(_calcVolumeFallbackと同じ)ように修正。
 // ============================================================
@@ -5762,9 +5763,11 @@ function _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC)
   const STRIPE_W = 0.4; // 「粗目」の縦格子: 0.4mごとに1縞(配置モードと統一)
   const CLEAR = 0.01;   // 1cm。実体側(壁)へ食い込まないよう空洞側に確保する最小クリアランス
   const pts = ydMm.map(p => ({ x: p.x * SC, z: p.y * SC }));
-  let cenX = 0, cenZ = 0;
-  pts.forEach(p => { cenX += p.x; cenZ += p.z; });
-  cenX /= n; cenZ /= n;
+  // 52回目: 「外向き」は図形の重心方向ではなく、ポリゴンの符号付き面積から決めた辺の本当の外向き法線にする。
+  //   (重心方向だと、凹んだ山留の辺で向きが逆になり、ハッチが壁の手前に浮いていた。_clipYamadomeOverlayToContactと同じ向きの決め方)
+  let _ydArea2 = 0;
+  for(let i=0;i<n;i++){ const a=pts[i], b=pts[(i+1)%n]; _ydArea2 += a.x*b.z - b.x*a.z; }
+  const _ydSgn = _ydArea2 > 0 ? 1 : -1;
   // 6D-2(2026-08-28 引継ぎ18回目マスター指摘): 従来はrealYTopが常に単一値(全周
   // 一律)だったため、法面等で実際の壁が低い区間でも山留ハッチがGL付近の高さまで
   // 一律に伸び、壁が存在しない場所に浮いて見える不具合があった。realYTopに配列
@@ -5779,10 +5782,7 @@ function _buildYamadomeOverlayGeomData(ydMm, realYTop, realYBot, BATTER_DEG, SC)
     const a = pts[i], b = pts[(i+1)%n];
     const aTopY = topAt(i), bTopY = topAt((i+1)%n);
     const segLen = Math.hypot(b.x-a.x, b.z-a.z);
-    const midX = (a.x+b.x)/2, midZ = (a.z+b.z)/2;
-    const outDx = midX-cenX, outDz = midZ-cenZ;
-    const outLen = Math.hypot(outDx,outDz) || 1;
-    const odx = outDx/outLen, odz = outDz/outLen; // このエッジの外向き単位法線
+    const odx = _ydSgn * (b.z-a.z) / (segLen || 1e-9), odz = -_ydSgn * (b.x-a.x) / (segLen || 1e-9); // このエッジの外向き単位法線(52回目: 符号付き面積から)
     // 本体壁と同一式(tan(BATTER_DEG)×高さ)。頂点ごとに実高さが変わる場合は
     // そのエッジの高さで個別に算出する。
     const aH = Math.max(0.01, aTopY - realYBot), bH = Math.max(0.01, bTopY - realYBot);
